@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npx create-next-app@14 . --typescript --tailwind --eslint --app --src-dir --import-alias \"@/*\" --no-git)",
+      "Bash(npx create-next-app@14 app --typescript --tailwind --eslint --app --src-dir --import-alias \"@/*\" --no-git)",
+      "Bash(npm install *)",
+      "Bash(npx shadcn@latest init -d)",
+      "Bash(npx shadcn@latest add card input label textarea select checkbox badge accordion)",
+      "Bash(npx prisma *)",
+      "Bash(DATABASE_URL=\"postgresql://climber:climber512@localhost:5432/climbapp\" npx prisma generate)",
+      "Bash(node -e \"const {PrismaClient} = require\\('@prisma/client'\\); console.log\\(Object.keys\\(new PrismaClient\\({datasources:{}}\\)\\)\\)\")",
+      "Bash(npx tsc *)",
+      "Bash(npm run *)",
+      "Bash(npm ls *)",
+      "Bash(docker compose *)",
+      "Bash(chmod +x *)"
+    ]
+  }
+}

@@ -1,0 +1,45 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: climber
+      POSTGRES_PASSWORD: climber512
+      POSTGRES_DB: climbapp
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U climber -d climbapp"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  migrate:
+    image: postgres:16-alpine
+    command: >
+      sh -c "psql postgresql://climber:climber512@postgres:5432/climbapp
+      -f /migrations/20240101000000_init/migration.sql
+      || true"
+    volumes:
+      - ./app/prisma/migrations:/migrations:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: on-failure
+
+  web:
+    build:
+      context: ./app
+      target: runner
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      DATABASE_URL: postgresql://climber:climber512@postgres:5432/climbapp
+      SESSION_SECRET: super-secret-session-key-change-in-production-32chars!!
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+volumes:
+  postgres_data:
