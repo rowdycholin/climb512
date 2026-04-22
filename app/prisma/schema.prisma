@@ -1,0 +1,96 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model User {
+  id           String   @id @default(cuid())
+  username     String   @unique
+  passwordHash String
+  createdAt    DateTime @default(now())
+}
+
+model TrainingProfile {
+  id            String         @id @default(cuid())
+  userId        String
+  goals         String[]
+  currentGrade  String
+  targetGrade   String
+  age           Int
+  weeksDuration Int
+  daysPerWeek   Int
+  equipment     String[]
+  createdAt     DateTime       @default(now())
+  plans         TrainingPlan[]
+}
+
+model TrainingPlan {
+  id        String          @id @default(cuid())
+  profileId String
+  profile   TrainingProfile @relation(fields: [profileId], references: [id])
+  createdAt DateTime        @default(now())
+  weeks     Week[]
+}
+
+model Week {
+  id      String       @id @default(cuid())
+  planId  String
+  plan    TrainingPlan @relation(fields: [planId], references: [id])
+  weekNum Int
+  theme   String
+  days    Day[]
+}
+
+model Day {
+  id       String       @id @default(cuid())
+  weekId   String
+  week     Week         @relation(fields: [weekId], references: [id])
+  dayNum   Int
+  dayName  String
+  focus    String
+  isRest   Boolean      @default(false)
+  sessions DaySession[]
+}
+
+model DaySession {
+  id          String     @id @default(cuid())
+  dayId       String
+  day         Day        @relation(fields: [dayId], references: [id])
+  name        String
+  description String
+  duration    Int
+  exercises   Exercise[]
+}
+
+model Exercise {
+  id        String        @id @default(cuid())
+  sessionId String
+  session   DaySession    @relation(fields: [sessionId], references: [id])
+  name      String
+  sets      String?
+  reps      String?
+  duration  String?
+  rest      String?
+  notes     String?
+  order     Int
+  logs      ExerciseLog[]
+}
+
+model ExerciseLog {
+  id             String   @id @default(cuid())
+  exerciseId     String
+  exercise       Exercise @relation(fields: [exerciseId], references: [id], onDelete: Cascade)
+  userId         String
+  loggedAt       DateTime @default(now())
+  setsCompleted  Int?
+  repsCompleted  String?
+  weightUsed     String?
+  durationActual String?
+  notes          String?
+  completed      Boolean  @default(false)
+
+  @@unique([exerciseId, userId])
+}
