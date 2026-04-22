@@ -34,6 +34,8 @@ services:
     restart: unless-stopped
     ports:
       - "3000:3000"
+    env_file:
+      - ./app/.env
     environment:
       DATABASE_URL: postgresql://climber:climber512@postgres:5432/climbapp
       SESSION_SECRET: super-secret-session-key-change-in-production-32chars!!

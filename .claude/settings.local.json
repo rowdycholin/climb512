@@ -13,7 +13,11 @@
       "Bash(npm run *)",
       "Bash(npm ls *)",
       "Bash(docker compose *)",
-      "Bash(chmod +x *)"
+      "Bash(chmod +x *)",
+      "Skill(claude-api)",
+      "Bash(node -e ' *)",
+      "Bash(curl *)",
+      "Bash(node *)"
     ]
   }
 }
