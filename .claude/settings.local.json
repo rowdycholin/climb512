@@ -17,7 +17,11 @@
       "Skill(claude-api)",
       "Bash(node -e ' *)",
       "Bash(curl *)",
-      "Bash(node *)"
+      "Bash(node *)",
+      "Bash(npm init *)",
+      "Bash(npx playwright *)",
+      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); t=d.get\\('choices',[{}]\\)[0].get\\('message',{}\\).get\\('content',''\\); print\\('tokens:',d.get\\('usage',{}\\)\\); print\\('length:',len\\(t\\)\\); print\\('valid:',t[:50]\\)\")",
+      "Read(//c/Users/beatt/AppData/Local/Temp/claude/C--Users-beatt-projects-cursor-climb512/a50c4d69-216e-4c45-94f4-f26f79daf792/tasks/**)"
     ]
   }
 }

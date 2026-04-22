@@ -1,0 +1,24 @@
+{
+  "name": "climb512",
+  "version": "1.0.0",
+  "description": "A personalised climbing training plan generator. Fill in your goals, grade, age, equipment and schedule — get a day-by-day plan for 4–16 weeks.",
+  "main": "index.js",
+  "directories": {
+    "doc": "docs"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/rowdycholin/climb512.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/rowdycholin/climb512/issues"
+  },
+  "homepage": "https://github.com/rowdycholin/climb512#readme"
+}

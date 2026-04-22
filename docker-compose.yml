@@ -17,9 +17,9 @@ services:
   migrate:
     image: postgres:16-alpine
     command: >
-      sh -c "psql postgresql://climber:climber512@postgres:5432/climbapp
-      -f /migrations/20240101000000_init/migration.sql
-      || true"
+      sh -c "for f in $$(ls /migrations/*/migration.sql | sort); do
+        psql postgresql://climber:climber512@postgres:5432/climbapp -f $$f || true;
+      done"
     volumes:
       - ./app/prisma/migrations:/migrations:ro
     depends_on:
