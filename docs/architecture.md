@@ -6,7 +6,7 @@
 Browser
   │
   ▼
-Next.js 14 (App Router)          ← Docker container "web" (port 3000)
+Next.js 14 (App Router)          ← Docker container "web" (port 8080)
   ├── Server Components           reads DB, renders HTML
   ├── Server Actions              mutations, AI calls, session writes
   └── Client Components          interactivity, logging forms, week picker

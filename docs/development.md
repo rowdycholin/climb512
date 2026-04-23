@@ -64,7 +64,7 @@ cd app
 npm run dev
 ```
 
-App is available at http://localhost:3000
+App is available at http://localhost:8080
 
 Register a new account on the login page — there are no hardcoded credentials.
 
@@ -150,7 +150,7 @@ Docker Compose interpolates single `$` as a variable. Use `$$f` in the `command:
 
 ## Running the test suite
 
-The Playwright tests live in `testing/` and run against a live app on `localhost:3000`.
+The Playwright tests live in `testing/` and run against a live app on `localhost:8080`.
 
 ```bash
 # Start the app first

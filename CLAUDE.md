@@ -48,7 +48,7 @@ climb512/
       auth.spec.ts            # Login, bad credentials, logout; beforeAll registers test user
       onboarding.spec.ts      # Form rendering, validation, full plan generation
       dashboard.spec.ts       # Dashboard heading, create plan link, plan navigation
-    playwright.config.ts      # Chromium, baseURL=localhost:3000, headless=false
+    playwright.config.ts      # Chromium, baseURL=localhost:8080, headless=false
   scripts/                    # Start/stop helper scripts
     start.sh                  # Linux/macOS start (flags: --build, --fresh, --logs)
     stop.sh                   # Linux/macOS stop (flag: --clean to wipe data)
@@ -70,7 +70,7 @@ scripts\start.bat --build
 ./scripts/start.sh --build
 ```
 
-Then open http://localhost:3000 — register a new account on the login page.
+Then open http://localhost:8080 — register a new account on the login page.
 
 ## Key commands
 
@@ -102,7 +102,7 @@ docker compose logs web -f     # follow app logs
 ```
 
 ```bash
-# Playwright tests (app must be running on localhost:3000)
+# Playwright tests (app must be running on localhost:8080)
 cd testing
 npx playwright test            # run all tests (opens Chromium)
 npx playwright test --grep "generates"  # run one test by name

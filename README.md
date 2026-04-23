@@ -9,7 +9,7 @@ A personalised climbing training plan generator. Fill in your goals, grade, age,
 docker compose up --build
 ```
 
-Then open http://localhost:3000
+Then open http://localhost:8080
 
 **Login:** `climber1` / `climbin512!`
 

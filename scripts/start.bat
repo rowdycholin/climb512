@@ -57,7 +57,7 @@ if errorlevel 1 (
 )
 
 echo.
-echo   Climb512 is running at http://localhost:3000
+echo   Climb512 is running at http://localhost:8080
 echo   Login: climber1 / climbin512!
 echo.
 echo   Useful commands:

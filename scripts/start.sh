@@ -54,7 +54,7 @@ for i in $(seq 1 30); do
 done
 
 echo ""
-echo "  Climb512 is running at http://localhost:3000"
+echo "  Climb512 is running at http://localhost:8080"
 echo "  Login: climber1 / climbin512!"
 echo ""
 echo "  Useful commands:"

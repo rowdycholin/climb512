@@ -105,7 +105,7 @@ Update `DATABASE_URL` in the environment. Add PgBouncer for connection pooling i
 
 ### TLS / HTTPS
 
-In production, terminate TLS at a reverse proxy (nginx, Caddy, ALB, Cloudflare) in front of the `web` container. The app itself runs plain HTTP on port 3000.
+In production, terminate TLS at a reverse proxy (nginx, Caddy, ALB, Cloudflare) in front of the `web` container. The app itself runs plain HTTP on port 8080.
 
 ## Migration strategy
 
