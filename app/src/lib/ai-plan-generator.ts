@@ -1,6 +1,7 @@
 import type { PlanInput, WeekData } from "./plan-generator";
 
 const MODEL = process.env.ANTHROPIC_MODEL ?? "anthropic/claude-haiku-4-5";
+// Per-week token budget — one week (7 days, 3–5 exercises/session) fits in ~2500 tokens.
 const MAX_TOKENS = parseInt(process.env.ANTHROPIC_MAX_TOKENS ?? "4000", 10);
 
 // Base URL: OpenRouter = "https://openrouter.ai/api", direct Anthropic = "https://api.anthropic.com"
@@ -8,7 +9,7 @@ const MAX_TOKENS = parseInt(process.env.ANTHROPIC_MAX_TOKENS ?? "4000", 10);
 const BASE_URL = (process.env.ANTHROPIC_BASE_URL ?? "https://openrouter.ai/api").replace(/\/$/, "");
 const API_KEY = process.env.ANTHROPIC_API_KEY ?? "";
 
-function buildPrompt(input: PlanInput): string {
+function buildWeekPrompt(input: PlanInput, weekNum: number, previousThemes: string[]): string {
   const equipmentList = input.equipment.length > 0
     ? input.equipment.join(", ")
     : "gym walls and holds only (no extra equipment)";
@@ -22,67 +23,57 @@ function buildPrompt(input: PlanInput): string {
   };
   const disciplineNote = disciplineContext[input.discipline] ?? "";
 
-  return `You are an expert climbing coach building a PERSONALISED training plan.
+  const progressionNote = previousThemes.length > 0
+    ? `Previous weeks: ${previousThemes.map((t, i) => `Week ${i + 1}: ${t}`).join(", ")}. This week must logically progress from those.`
+    : "This is week 1 — start with a foundation/assessment focus.";
 
-ATHLETE PROFILE:
+  const phaseNote = (() => {
+    const progress = weekNum / input.weeksDuration;
+    if (weekNum % 4 === 0) return "This is a DELOAD week — reduce intensity and volume by 40%, focus on recovery.";
+    if (progress < 0.3) return "FOUNDATION phase — build base fitness and technique. Moderate intensity.";
+    if (progress < 0.6) return "STRENGTH phase — increase load and difficulty progressively.";
+    if (progress < 0.85) return "POWER phase — high intensity limit climbing and recruitment work.";
+    return "PEAK phase — sharpen performance, reduce volume, maximise freshness.";
+  })();
+
+  return `You are an expert climbing coach. Generate ONE week of a training plan as a JSON object.
+
+ATHLETE:
 - Discipline: ${input.discipline}
-- Current grade: ${input.currentGrade} | Target grade: ${input.targetGrade}
-- Age: ${input.age}
-- Plan length: ${input.weeksDuration} week(s), ${input.daysPerWeek} training day(s) per week
-- Goals: ${input.goals.join(", ")}
-- Available equipment: ${equipmentList}
+- Current grade: ${input.currentGrade} | Target: ${input.targetGrade}
+- Age: ${input.age} | Goals: ${input.goals.join(", ")}
+- Equipment: ${equipmentList}
+- Plan: ${input.weeksDuration} weeks total, ${input.daysPerWeek} training days/week
 
-DISCIPLINE GUIDANCE: ${disciplineNote}
+WEEK ${weekNum} of ${input.weeksDuration}:
+- ${phaseNote}
+- ${progressionNote}
+- DISCIPLINE: ${disciplineNote}
 
-EQUIPMENT RULES — you MUST follow these exactly:
-${input.equipment.includes("hangboard") ? "- Hangboard IS available: include hangboard hangs (max hangs, repeaters, open-hand) on strength days." : "- No hangboard: do NOT include hangboard exercises. Use crimp problems on the wall instead."}
-${input.equipment.includes("campus board") ? "- Campus board IS available: include campus laddering or moves on power/recruitment days." : "- No campus board: do NOT mention campus board."}
-${input.equipment.includes("system wall") || input.equipment.includes("spray wall") ? "- System/spray wall IS available: include coordinate training and targeted movement drills." : ""}
-${input.equipment.includes("weights") || input.equipment.includes("gym") ? "- Weights/gym IS available: include weighted pull-ups, antagonist pressing, and loaded carries." : "- No weights: use bodyweight antagonist work (push-ups, dips, shoulder press with resistance band if any)."}
-${input.equipment.length === 0 ? "- Gym walls only: every exercise must use the climbing wall or bodyweight. No equipment needed." : ""}
+EQUIPMENT RULES:
+${input.equipment.includes("hangboard") ? "- Hangboard available: include hangboard hangs on strength days." : "- No hangboard: use wall crimps instead."}
+${input.equipment.includes("campus board") ? "- Campus board available: include campus moves on power days." : "- No campus board: do not mention it."}
+${input.equipment.includes("weights") || input.equipment.includes("gym") ? "- Weights available: include weighted pull-ups and antagonist work." : "- No weights: use bodyweight only."}
 
-OUTPUT FORMAT — return ONLY valid JSON array, no markdown fences, no explanation:
-[
-  {
-    "weekNum": 1,
-    "theme": "Descriptive theme name",
-    "days": [
-      {
-        "dayNum": 1,
-        "dayName": "Monday",
-        "focus": "Focus area",
-        "isRest": false,
-        "sessions": [
-          {
-            "name": "Session name",
-            "description": "One sentence description",
-            "duration": 45,
-            "exercises": [
-              { "name": "Exercise name", "sets": "3", "reps": "5", "duration": "10s", "rest": "3 min", "notes": "technique cue" }
-            ]
-          }
-        ]
-      }
-    ]
-  }
-]
+OUTPUT: Return ONLY a single JSON object (not an array) in this exact shape:
+{"weekNum":${weekNum},"theme":"<short theme>","days":[{"dayNum":1,"dayName":"Monday","focus":"<focus>","isRest":false,"sessions":[{"name":"<name>","description":"<one sentence>","duration":45,"exercises":[{"name":"<name>","sets":"3","reps":"5","duration":"10s","rest":"3 min","notes":"<coaching cue>"}]}]},{"dayNum":2,"dayName":"Tuesday","focus":"Rest","isRest":true,"sessions":[]},...7 days total]}
 
 RULES:
-- sets/reps/duration/rest/notes are all optional strings; omit whichever don't apply
-- Every week must have exactly 7 days (Monday–Sunday)
-- Non-training days: isRest=true, sessions=[] (empty array, no exercises)
-- Training days: ONE session only (no separate warm-up/cool-down sections)
-- Make the plan genuinely different week-to-week (progressive overload, phase shifts)
-- Include 3–5 exercises per session
-- "notes" field is REQUIRED for every exercise — write a clear 1–2 sentence coaching cue: what to focus on, how to execute correctly, and what to avoid. Be specific to climbing (e.g. "Keep hips close to wall, drive with feet not arms. Stop if fingers feel tweaky.")
-- Include sets, reps, duration, and rest whenever applicable — be specific (e.g. sets:"4", reps:"5", rest:"3 min", duration:"7s on / 3s off")
-- The plan must reflect the athlete's discipline, grade, age, goals, and equipment — do not generate a generic plan
-- Return ONLY compact minified JSON (no spaces, no newlines) starting with [ and ending with ]`;
+- Exactly 7 days (Monday–Sunday), dayNum 1–7
+- Rest days: isRest=true, sessions=[], focus="Rest"
+- Training days: exactly ONE session, 3–4 exercises max
+- notes: REQUIRED, max 10 words (e.g. "Keep hips in, drive with feet")
+- sets/reps/duration/rest: include only what applies, omit the rest
+- All string values must be SHORT — no long descriptions
+- Return ONLY compact minified JSON, no markdown, no explanation`;
 }
 
 function repairTruncatedJson(text: string): string | null {
-  if (!text.startsWith("[")) return null;
-  // Walk characters tracking bracket depth to find last complete top-level object
+  // For a week object (not array), find the last complete closing brace at depth 0
+  const isObject = text.trimStart().startsWith("{");
+  const isArray = text.trimStart().startsWith("[");
+  if (!isObject && !isArray) return null;
+
   let depth = 0;
   let inString = false;
   let escape = false;
@@ -97,15 +88,15 @@ function repairTruncatedJson(text: string): string | null {
     if (ch === "{" || ch === "[") depth++;
     else if (ch === "}" || ch === "]") {
       depth--;
-      if (depth === 1) lastCompleteEnd = i; // closed a top-level week object
+      if (depth === 0) lastCompleteEnd = i;
     }
   }
 
   if (lastCompleteEnd === -1) return null;
-  return text.slice(0, lastCompleteEnd + 1) + "]";
+  return text.slice(0, lastCompleteEnd + 1);
 }
 
-export async function generatePlanWithAI(input: PlanInput): Promise<WeekData[]> {
+async function generateWeek(input: PlanInput, weekNum: number, previousThemes: string[]): Promise<WeekData> {
   const url = `${BASE_URL}/v1/chat/completions`;
 
   const res = await fetch(url, {
@@ -120,11 +111,11 @@ export async function generatePlanWithAI(input: PlanInput): Promise<WeekData[]> 
       messages: [
         {
           role: "system",
-          content: "You are a JSON API. Output ONLY a valid JSON array — no explanation, no markdown, no prose, no whitespace between tokens. Your entire response must be parseable by JSON.parse(). Output compact minified JSON only. Start your response with [ and end with ].",
+          content: "You are a JSON API. Output ONLY a valid JSON object — no explanation, no markdown, no prose. Your entire response must be parseable by JSON.parse(). Start with { and end with }.",
         },
         {
           role: "user",
-          content: buildPrompt(input),
+          content: buildWeekPrompt(input, weekNum, previousThemes),
         },
       ],
     }),
@@ -132,7 +123,7 @@ export async function generatePlanWithAI(input: PlanInput): Promise<WeekData[]> 
 
   if (!res.ok) {
     const body = await res.text();
-    throw new Error(`AI API error ${res.status}: ${body.slice(0, 300)}`);
+    throw new Error(`AI API error ${res.status} on week ${weekNum}: ${body.slice(0, 300)}`);
   }
 
   const data = await res.json() as {
@@ -141,43 +132,56 @@ export async function generatePlanWithAI(input: PlanInput): Promise<WeekData[]> 
   };
 
   if (data.error) {
-    throw new Error(`AI error: ${data.error.message}`);
+    throw new Error(`AI error on week ${weekNum}: ${data.error.message}`);
   }
 
   const text = data.choices?.[0]?.message?.content?.trim() ?? "";
   if (!text) {
-    throw new Error("No text response from AI");
+    throw new Error(`No response from AI for week ${weekNum}`);
   }
 
-  // Strip markdown fences if the model wrapped the JSON anyway
   const cleaned = text.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
 
-  // If finish_reason is "length" the response was truncated — attempt repair
-  const finishReason = data.choices?.[0]?.finish_reason;
-  const mayBeTruncated = finishReason === "length" || finishReason === "max_tokens";
-
-  let plan: WeekData[];
+  let week: WeekData;
   try {
-    plan = JSON.parse(cleaned) as WeekData[];
+    week = JSON.parse(cleaned) as WeekData;
   } catch {
-    if (!mayBeTruncated && cleaned.endsWith("]")) {
-      throw new Error(`AI returned invalid JSON. Raw response: ${cleaned.slice(0, 300)}`);
-    }
-    // Attempt to salvage complete week objects from truncated JSON
     const repaired = repairTruncatedJson(cleaned);
     if (!repaired) {
-      throw new Error(`AI returned invalid JSON. Raw response: ${cleaned.slice(0, 300)}`);
+      throw new Error(`AI returned unparseable JSON for week ${weekNum}. Raw: ${cleaned.slice(0, 200)}`);
     }
     try {
-      plan = JSON.parse(repaired) as WeekData[];
+      week = JSON.parse(repaired) as WeekData;
     } catch {
-      throw new Error(`AI returned invalid JSON. Raw response: ${cleaned.slice(0, 300)}`);
+      throw new Error(`AI returned unparseable JSON for week ${weekNum}. Raw: ${cleaned.slice(0, 200)}`);
     }
   }
 
-  if (!Array.isArray(plan) || plan.length === 0) {
-    throw new Error("AI returned an empty or malformed plan");
+  // Ensure weekNum is correct regardless of what the model returned
+  week.weekNum = weekNum;
+
+  // Ensure every week has exactly 7 days; fill missing rest days
+  const DAY_NAMES = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+  if (!Array.isArray(week.days)) week.days = [];
+  for (let d = 1; d <= 7; d++) {
+    if (!week.days.find((day) => day.dayNum === d)) {
+      week.days.push({ dayNum: d, dayName: DAY_NAMES[d - 1], focus: "Rest", isRest: true, sessions: [] });
+    }
+  }
+  week.days.sort((a, b) => a.dayNum - b.dayNum);
+
+  return week;
+}
+
+export async function generatePlanWithAI(input: PlanInput): Promise<WeekData[]> {
+  const weeks: WeekData[] = [];
+  const themes: string[] = [];
+
+  for (let w = 1; w <= input.weeksDuration; w++) {
+    const week = await generateWeek(input, w, themes);
+    weeks.push(week);
+    themes.push(week.theme);
   }
 
-  return plan;
+  return weeks;
 }
