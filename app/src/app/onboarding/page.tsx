@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import EquipmentPicker from "@/components/EquipmentPicker";
+import GeneratePlanButton from "@/components/GeneratePlanButton";
 
 const GOALS = [
   { value: "send-project", label: "Send my project grade" },
@@ -153,9 +154,7 @@ export default async function OnboardingPage() {
           {/* Equipment */}
           <EquipmentPicker />
 
-          <Button type="submit" size="lg" className="w-full text-base">
-            Generate My Training Plan →
-          </Button>
+          <GeneratePlanButton />
         </form>
       </div>
       </div>

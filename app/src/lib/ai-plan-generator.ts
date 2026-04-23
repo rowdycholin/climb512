@@ -1,15 +1,16 @@
-import type { PlanInput, WeekData } from "./plan-generator";
+import type { PlanInput, WeekData, DayData, SessionData, ExerciseData } from "./plan-generator";
 
 const MODEL = process.env.ANTHROPIC_MODEL ?? "anthropic/claude-haiku-4-5";
-// Per-week token budget — one week (7 days, 3–5 exercises/session) fits in ~2500 tokens.
-const MAX_TOKENS = parseInt(process.env.ANTHROPIC_MAX_TOKENS ?? "4000", 10);
+const MAX_TOKENS = parseInt(process.env.ANTHROPIC_MAX_TOKENS ?? "5000", 10);
 
 // Base URL: OpenRouter = "https://openrouter.ai/api", direct Anthropic = "https://api.anthropic.com"
 // We always hit the OpenAI-compatible /v1/chat/completions endpoint.
 const BASE_URL = (process.env.ANTHROPIC_BASE_URL ?? "https://openrouter.ai/api").replace(/\/$/, "");
 const API_KEY = process.env.ANTHROPIC_API_KEY ?? "";
 
-function buildWeekPrompt(input: PlanInput, weekNum: number, previousThemes: string[]): string {
+const DAY_NAMES = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+
+function buildWeekPrompt(input: PlanInput, weekNum: number): string {
   const equipmentList = input.equipment.length > 0
     ? input.equipment.join(", ")
     : "gym walls and holds only (no extra equipment)";
@@ -22,10 +23,6 @@ function buildWeekPrompt(input: PlanInput, weekNum: number, previousThemes: stri
     alpine: "Prioritise aerobic base, weighted carry capacity, efficiency at altitude, and multi-pitch endurance.",
   };
   const disciplineNote = disciplineContext[input.discipline] ?? "";
-
-  const progressionNote = previousThemes.length > 0
-    ? `Previous weeks: ${previousThemes.map((t, i) => `Week ${i + 1}: ${t}`).join(", ")}. This week must logically progress from those.`
-    : "This is week 1 — start with a foundation/assessment focus.";
 
   const phaseNote = (() => {
     const progress = weekNum / input.weeksDuration;
@@ -47,7 +44,6 @@ ATHLETE:
 
 WEEK ${weekNum} of ${input.weeksDuration}:
 - ${phaseNote}
-- ${progressionNote}
 - DISCIPLINE: ${disciplineNote}
 
 EQUIPMENT RULES:
@@ -68,35 +64,137 @@ RULES:
 - Return ONLY compact minified JSON, no markdown, no explanation`;
 }
 
+/**
+ * Repair a JSON document that was truncated mid-stream. Walks the bracket stack +
+ * string state, drops any incomplete trailing key/value, then closes all open
+ * structures with matching `}` / `]`. Returns null if the document can't be salvaged.
+ */
 function repairTruncatedJson(text: string): string | null {
-  // For a week object (not array), find the last complete closing brace at depth 0
-  const isObject = text.trimStart().startsWith("{");
-  const isArray = text.trimStart().startsWith("[");
-  if (!isObject && !isArray) return null;
+  try { JSON.parse(text); return text; } catch { /* fall through */ }
 
-  let depth = 0;
+  const stack: string[] = []; // each entry is '{' or '['
   let inString = false;
   let escape = false;
-  let lastCompleteEnd = -1;
+  let stringStartIdx = -1;
 
   for (let i = 0; i < text.length; i++) {
     const ch = text[i];
     if (escape) { escape = false; continue; }
-    if (ch === "\\" && inString) { escape = true; continue; }
-    if (ch === '"') { inString = !inString; continue; }
-    if (inString) continue;
-    if (ch === "{" || ch === "[") depth++;
+    if (inString) {
+      if (ch === "\\") { escape = true; continue; }
+      if (ch === '"') { inString = false; stringStartIdx = -1; }
+      continue;
+    }
+    if (ch === '"') { inString = true; stringStartIdx = i; continue; }
+    if (ch === "{" || ch === "[") stack.push(ch);
     else if (ch === "}" || ch === "]") {
-      depth--;
-      if (depth === 0) lastCompleteEnd = i;
+      if (stack.length === 0) return null;
+      stack.pop();
     }
   }
 
-  if (lastCompleteEnd === -1) return null;
-  return text.slice(0, lastCompleteEnd + 1);
+  // Already balanced — JSON.parse failed for some other reason we can't fix here.
+  if (stack.length === 0 && !inString) return null;
+
+  // If we ended inside a string, drop everything from the unclosed quote onward.
+  let result = inString ? text.slice(0, stringStartIdx) : text;
+
+  // Iteratively strip trailing junk (whitespace, commas, dangling colons + their keys,
+  // partial `true`/`false`/`null` literals) until clean.
+  for (;;) {
+    const before = result.length;
+    result = result.replace(/[\s,]+$/, "");
+    if (result.endsWith(":")) {
+      result = result.replace(/\s*"(?:[^"\\]|\\.)*"\s*:\s*$/, "");
+    }
+    result = result.replace(/(?<=[\s,:[{])(tr|tru|fa|fal|fals|nu|nul)$/, "");
+    if (result.length === before) break;
+  }
+
+  while (stack.length > 0) {
+    const open = stack.pop()!;
+    result += open === "{" ? "}" : "]";
+  }
+
+  try { JSON.parse(result); return result; } catch { return null; }
 }
 
-async function generateWeek(input: PlanInput, weekNum: number, previousThemes: string[]): Promise<WeekData> {
+function asString(v: unknown): string | undefined {
+  if (typeof v === "string") return v.trim() ? v : undefined;
+  if (typeof v === "number" || typeof v === "boolean") return String(v);
+  return undefined;
+}
+
+function normalizeWeek(raw: unknown, weekNum: number): WeekData {
+  const week = (raw && typeof raw === "object") ? raw as Record<string, unknown> : {};
+  const theme = asString(week.theme) ?? `Week ${weekNum}`;
+  const rawDays = Array.isArray(week.days) ? (week.days as unknown[]) : [];
+
+  const daysByNum = new Map<number, DayData>();
+
+  for (const d of rawDays) {
+    if (!d || typeof d !== "object") continue;
+    const day = d as Record<string, unknown>;
+    const dayNumRaw = day.dayNum;
+    const dayNum = typeof dayNumRaw === "number" ? dayNumRaw : parseInt(String(dayNumRaw), 10);
+    if (!Number.isInteger(dayNum) || dayNum < 1 || dayNum > 7) continue;
+
+    const isRest = day.isRest === true;
+    const dayName = asString(day.dayName) ?? DAY_NAMES[dayNum - 1];
+    const focus = asString(day.focus) ?? (isRest ? "Rest" : "Training");
+
+    const rawSessions = Array.isArray(day.sessions) ? (day.sessions as unknown[]) : [];
+    const sessions: SessionData[] = [];
+    for (const s of rawSessions) {
+      if (!s || typeof s !== "object") continue;
+      const sess = s as Record<string, unknown>;
+      const name = asString(sess.name);
+      if (!name) continue;
+      const description = asString(sess.description) ?? "";
+      const durRaw = sess.duration;
+      const duration = typeof durRaw === "number" ? durRaw
+        : typeof durRaw === "string" ? (parseInt(durRaw, 10) || 45)
+        : 45;
+
+      const rawExercises = Array.isArray(sess.exercises) ? (sess.exercises as unknown[]) : [];
+      const exercises: ExerciseData[] = [];
+      for (const e of rawExercises) {
+        if (!e || typeof e !== "object") continue;
+        const ex = e as Record<string, unknown>;
+        const exName = asString(ex.name);
+        if (!exName) continue;
+        exercises.push({
+          name: exName,
+          sets: asString(ex.sets),
+          reps: asString(ex.reps),
+          duration: asString(ex.duration),
+          rest: asString(ex.rest),
+          notes: asString(ex.notes),
+        });
+      }
+
+      sessions.push({ name, description, duration, exercises });
+    }
+
+    daysByNum.set(dayNum, { dayNum, dayName, focus, isRest, sessions });
+  }
+
+  for (let d = 1; d <= 7; d++) {
+    if (!daysByNum.has(d)) {
+      daysByNum.set(d, { dayNum: d, dayName: DAY_NAMES[d - 1], focus: "Rest", isRest: true, sessions: [] });
+    }
+  }
+
+  const days = Array.from(daysByNum.values()).sort((a, b) => a.dayNum - b.dayNum);
+  return { weekNum, theme, days };
+}
+
+interface ApiResult {
+  text: string;
+  finishReason: string;
+}
+
+async function callApi(input: PlanInput, weekNum: number): Promise<ApiResult> {
   const url = `${BASE_URL}/v1/chat/completions`;
 
   const res = await fetch(url, {
@@ -108,14 +206,15 @@ async function generateWeek(input: PlanInput, weekNum: number, previousThemes: s
     body: JSON.stringify({
       model: MODEL,
       max_tokens: MAX_TOKENS,
+      response_format: { type: "json_object" },
       messages: [
         {
           role: "system",
-          content: "You are a JSON API. Output ONLY a valid JSON object — no explanation, no markdown, no prose. Your entire response must be parseable by JSON.parse(). Start with { and end with }.",
+          content: "You are a JSON API. Output ONLY a single valid JSON object — no explanation, no markdown, no prose. Your entire response must be parseable by JSON.parse(). Start with { and end with }. Keep all string values short.",
         },
         {
           role: "user",
-          content: buildWeekPrompt(input, weekNum, previousThemes),
+          content: buildWeekPrompt(input, weekNum),
         },
       ],
     }),
@@ -136,52 +235,72 @@ async function generateWeek(input: PlanInput, weekNum: number, previousThemes: s
   }
 
   const text = data.choices?.[0]?.message?.content?.trim() ?? "";
+  const finishReason = data.choices?.[0]?.finish_reason ?? "unknown";
+
   if (!text) {
-    throw new Error(`No response from AI for week ${weekNum}`);
+    throw new Error(`No response from AI for week ${weekNum} (finish_reason=${finishReason})`);
   }
 
-  const cleaned = text.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
+  return { text, finishReason };
+}
 
-  let week: WeekData;
-  try {
-    week = JSON.parse(cleaned) as WeekData;
-  } catch {
-    const repaired = repairTruncatedJson(cleaned);
-    if (!repaired) {
-      throw new Error(`AI returned unparseable JSON for week ${weekNum}. Raw: ${cleaned.slice(0, 200)}`);
-    }
+async function generateWeek(input: PlanInput, weekNum: number): Promise<WeekData> {
+  const errors: string[] = [];
+
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    let apiResult: ApiResult;
     try {
-      week = JSON.parse(repaired) as WeekData;
+      apiResult = await callApi(input, weekNum);
+    } catch (e) {
+      errors.push(`attempt ${attempt}: ${(e as Error).message}`);
+      continue;
+    }
+
+    const cleaned = apiResult.text
+      .replace(/^```(?:json)?\s*/i, "")
+      .replace(/\s*```$/, "")
+      .trim();
+
+    let raw: unknown = null;
+    let parseOk = false;
+
+    try {
+      raw = JSON.parse(cleaned);
+      parseOk = true;
     } catch {
-      throw new Error(`AI returned unparseable JSON for week ${weekNum}. Raw: ${cleaned.slice(0, 200)}`);
+      const repaired = repairTruncatedJson(cleaned);
+      if (repaired) {
+        try {
+          raw = JSON.parse(repaired);
+          parseOk = true;
+          console.warn(`[ai-plan] Week ${weekNum} attempt ${attempt}: repaired truncated JSON (finish_reason=${apiResult.finishReason})`);
+        } catch {
+          /* fall through to retry */
+        }
+      }
     }
+
+    if (parseOk) {
+      return normalizeWeek(raw, weekNum);
+    }
+
+    errors.push(`attempt ${attempt}: unparseable (finish_reason=${apiResult.finishReason}). Raw head: ${cleaned.slice(0, 200)}`);
+    console.warn(`[ai-plan] Week ${weekNum} attempt ${attempt} failed to parse — retrying. finish_reason=${apiResult.finishReason}`);
   }
 
-  // Ensure weekNum is correct regardless of what the model returned
-  week.weekNum = weekNum;
-
-  // Ensure every week has exactly 7 days; fill missing rest days
-  const DAY_NAMES = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
-  if (!Array.isArray(week.days)) week.days = [];
-  for (let d = 1; d <= 7; d++) {
-    if (!week.days.find((day) => day.dayNum === d)) {
-      week.days.push({ dayNum: d, dayName: DAY_NAMES[d - 1], focus: "Rest", isRest: true, sessions: [] });
-    }
-  }
-  week.days.sort((a, b) => a.dayNum - b.dayNum);
-
-  return week;
+  throw new Error(`AI failed to generate week ${weekNum} after 2 attempts. ${errors.join(" | ")}`);
 }
 
 export async function generatePlanWithAI(input: PlanInput): Promise<WeekData[]> {
-  const weeks: WeekData[] = [];
-  const themes: string[] = [];
+  const started = Date.now();
+  console.log(`[ai-plan] generating ${input.weeksDuration} weeks in parallel`);
 
-  for (let w = 1; w <= input.weeksDuration; w++) {
-    const week = await generateWeek(input, w, themes);
-    weeks.push(week);
-    themes.push(week.theme);
-  }
+  const weeks = await Promise.all(
+    Array.from({ length: input.weeksDuration }, (_, i) => generateWeek(input, i + 1)),
+  );
+
+  weeks.sort((a, b) => a.weekNum - b.weekNum);
+  console.log(`[ai-plan] generated ${weeks.length} weeks in ${Math.round((Date.now() - started) / 1000)}s`);
 
   return weeks;
 }
