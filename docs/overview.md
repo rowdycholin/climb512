@@ -1,50 +1,64 @@
-# Climb512 — Application Overview
+# Climb512 - Application Overview
 
 ## What it does
 
-Climb512 is a web application that generates personalised, AI-driven climbing training plans. A user registers an account, then answers a short questionnaire about their goals, current ability, age, available gym equipment, and how many weeks and days per week they can train. Claude AI uses these inputs to produce a structured day-by-day plan for the full duration. Users can then track each workout by logging actual sets, reps, weights, and notes against each planned exercise.
+Climb512 is a web application that generates personalized climbing training plans, stores them as versioned snapshots, and lets users log what they actually did in each workout.
+
+Users:
+
+- register or sign in
+- fill out onboarding
+- generate an AI plan
+- view the plan by week
+- log workout performance
+- revise the plan over time through new plan versions
 
 ## Core user flow
 
-```
-Register / Login → Dashboard (existing plans) or Onboarding (new user) → AI generates plan → Plan viewer → Log workouts
+```text
+Register / Login -> Dashboard or Onboarding -> Generate plan -> View week -> Log workouts -> Revise future weeks
 ```
 
-1. **Login / Register** — users create an account (username + password) or sign in. Login redirects to `/dashboard` if plans exist, `/onboarding` if not.
-2. **Dashboard** — lists all existing plans with checkboxes for multi-select deletion. "Create New Training Plan" button navigates to onboarding.
-3. **Onboarding** — select goals, V-grade range, age, plan length, days/week, gym equipment, discipline
-4. **Plan generation** — Claude AI returns a structured JSON plan; app saves it to PostgreSQL
-5. **Plan viewer** — week selector (scrollable), collapsible day cards, exercise details with coaching notes
-6. **Workout logging** — per-exercise log form: sets done, reps, weight, duration, notes; completion checkbox
+1. Login or register
+2. Dashboard lists the user's existing plans
+3. Onboarding captures goals, grades, age, equipment, schedule, and discipline
+4. AI generates the initial plan
+5. The app stores it as `Plan` + `PlanVersion`
+6. Users view and log workouts on the plan page
+7. Future changes are intended to move toward direct week editing, with AI as optional assistance
+
+## Current product direction
+
+The app now has the right backend foundation for plan revision:
+
+- plans are versioned
+- logs remain tied to the version they came from
+- future edits can create new versions without corrupting history
+
+Because of that, the preferred UX direction is:
+
+- direct editing for reorder / move / delete / duplicate
+- AI used as a coach or helper
+- mobile-first interactions that do not depend entirely on drag-and-drop or text prompts
+
+See [plan-editing.md](/abs/path/c:/Users/beatt/projects/cursor/climb512/docs/plan-editing.md) for the proposed editing UX.
 
 ## Technology stack
 
 | Layer | Technology |
 |---|---|
-| Framework | Next.js 14 (App Router, React 18) |
+| Framework | Next.js 14 App Router + React 18 |
 | Language | TypeScript |
-| Styling | Tailwind CSS v3 + shadcn/ui (base-ui) |
+| Styling | Tailwind CSS v3 + shadcn/ui |
 | Database | PostgreSQL 16 |
-| ORM | Prisma 7 (with `@prisma/adapter-pg`) |
-| Auth | iron-session (JWT cookie) + bcryptjs password hashing |
-| AI | Anthropic Claude via OpenRouter (plain `fetch`, no SDK) |
-| Containerisation | Docker + Docker Compose |
+| ORM | Prisma 7 |
+| Auth | iron-session + bcryptjs |
+| AI | OpenRouter-compatible chat completions via plain `fetch` |
+| Containerization | Docker + Docker Compose |
 
-## Repository layout
+## Key constraints
 
-```
-climb512/
-  app/              Next.js application
-  docs/             This documentation
-  scripts/          Start/stop helper scripts
-  docker-compose.yml
-  README.md
-  CLAUDE.md         Instructions for Claude Code AI assistant
-```
-
-## Key constraints (v1 demo)
-
-- Gym-only — no outdoor or geolocation features
-- Multi-user — anyone can register; each user's plans are isolated
-- Multiple plans per user are supported; any selection can be deleted at once
-- Mobile-first layout (390px primary viewport) but fully usable on desktop
+- gym-focused app
+- multi-user ownership isolation
+- multiple plans per user
+- mobile-first design target

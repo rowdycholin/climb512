@@ -3,7 +3,7 @@
 import bcrypt from "bcryptjs";
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
-import { getSession, getSessionBootId } from "@/lib/session";
+import { getSession, getSessionBootId, getSessionExpiresAt } from "@/lib/session";
 import {
   buildPlanSnapshot,
   createProfileSnapshot,
@@ -144,6 +144,7 @@ export async function login(_prevState: unknown, formData: FormData) {
   session.username = user.username;
   session.isLoggedIn = true;
   session.bootId = getSessionBootId();
+  session.expiresAt = getSessionExpiresAt();
   await session.save();
 
   const existingPlan = await prisma.plan.findFirst({
@@ -171,6 +172,7 @@ export async function register(_prevState: unknown, formData: FormData) {
   session.username = user.username;
   session.isLoggedIn = true;
   session.bootId = getSessionBootId();
+  session.expiresAt = getSessionExpiresAt();
   await session.save();
 
   redirect("/onboarding");
