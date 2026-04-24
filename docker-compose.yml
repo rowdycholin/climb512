@@ -13,9 +13,22 @@ services:
   migrate:
     image: postgres:16-alpine
     command: >
-      sh -c "until pg_isready -h postgres -U climber -d climbapp; do sleep 1; done;
+      sh -ec "until pg_isready -h postgres -U climber -d climbapp; do sleep 1; done;
+      psql -v ON_ERROR_STOP=1 postgresql://climber:climber512@postgres:5432/climbapp -c 'CREATE TABLE IF NOT EXISTS \"_app_migrations\" (name TEXT PRIMARY KEY, applied_at TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP)';
+      tracked_count=$$(psql -At postgresql://climber:climber512@postgres:5432/climbapp -c 'SELECT COUNT(*) FROM \"_app_migrations\"');
+      has_baseline=$$(psql -At postgresql://climber:climber512@postgres:5432/climbapp -c \"SELECT CASE WHEN EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'TrainingProfile') THEN 1 ELSE 0 END\");
+      if [ \"$$tracked_count\" = \"0\" ] && [ \"$$has_baseline\" = \"1\" ]; then
+        psql -v ON_ERROR_STOP=1 postgresql://climber:climber512@postgres:5432/climbapp -c \"INSERT INTO \\\"_app_migrations\\\" (name) VALUES ('20240101000000_init') ON CONFLICT (name) DO NOTHING\";
+        psql -v ON_ERROR_STOP=1 postgresql://climber:climber512@postgres:5432/climbapp -c \"INSERT INTO \\\"_app_migrations\\\" (name) VALUES ('20240201000000_add_users') ON CONFLICT (name) DO NOTHING\";
+      fi;
       for f in $$(ls /migrations/*/migration.sql | sort); do
-        psql postgresql://climber:climber512@postgres:5432/climbapp -f $$f || true;
+        name=$$(basename $$(dirname $$f));
+        applied=$$(psql -At postgresql://climber:climber512@postgres:5432/climbapp -c \"SELECT 1 FROM \\\"_app_migrations\\\" WHERE name = '$$name' LIMIT 1\");
+        if [ \"$$applied\" = \"1\" ]; then
+          continue;
+        fi;
+        psql -v ON_ERROR_STOP=1 postgresql://climber:climber512@postgres:5432/climbapp -f $$f;
+        psql -v ON_ERROR_STOP=1 postgresql://climber:climber512@postgres:5432/climbapp -c \"INSERT INTO \\\"_app_migrations\\\" (name) VALUES ('$$name')\";
       done"
     volumes:
       - ./app/prisma/migrations:/migrations:ro

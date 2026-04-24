@@ -6,7 +6,7 @@ Scope: Review of the `climb512` repository with a focus on correctness, security
 
 ## Findings
 
-### 1. Critical: Any authenticated user can view another user's training plan by guessing its ID
+### 1. Resolved: Any authenticated user can view another user's training plan by guessing its ID
 
 File: [app/src/app/plan/[id]/page.tsx](/c:/Users/beatt/projects/cursor/climb512/app/src/app/plan/[id]/page.tsx:12)
 
@@ -26,7 +26,13 @@ Recommendation:
 - Return `notFound()` or a 403-style path when the plan does not belong to the current user.
 - Add an end-to-end test proving cross-user access is denied.
 
-### 2. Critical: Exercise logging does not verify that the exercise belongs to the current user
+Status:
+- Resolved on 2026-04-23.
+- The plan page now loads through an ownership-checked helper that enforces `profile.userId === session.userId`.
+- Unauthorized access returns `notFound()`.
+- Playwright coverage was added to verify cross-user plan access is denied.
+
+### 2. Resolved: Exercise logging does not verify that the exercise belongs to the current user
 
 File: [app/src/app/actions.ts](/c:/Users/beatt/projects/cursor/climb512/app/src/app/actions.ts:179)
 
@@ -41,7 +47,13 @@ Recommendation:
 - Reject unknown or unauthorized exercise IDs.
 - Add Playwright coverage for "user A cannot log user B's exercise".
 
-### 3. High: Plan creation is not transactional, so failures leave orphaned or incomplete data behind
+Status:
+- Resolved on 2026-04-23.
+- Exercise logging now checks whether the exercise belongs to a plan owned by the current user before upserting.
+- Unauthorized exercise log writes are rejected.
+- Playwright coverage was added to verify cross-user exercise logging is blocked.
+
+### 3. Resolved: Plan creation is not transactional, so failures leave orphaned or incomplete data behind
 
 File: [app/src/app/actions.ts](/c:/Users/beatt/projects/cursor/climb512/app/src/app/actions.ts:85)
 
@@ -57,7 +69,13 @@ Recommendation:
 - Wrap the DB writes in a Prisma transaction.
 - Consider nested `create` operations or batched inserts instead of long sequential loops.
 
-### 4. High: The data model does not enforce user ownership at the database level
+Status:
+- Resolved on 2026-04-23.
+- `createPlan()` now generates AI output before durable writes begin.
+- Profile and nested plan persistence now run inside a single Prisma transaction using nested creates.
+- This removes the orphaned-profile and partial-plan write path called out in the review.
+
+### 4. Resolved: The data model does not enforce user ownership at the database level
 
 File: [app/prisma/schema.prisma](/c:/Users/beatt/projects/cursor/climb512/app/prisma/schema.prisma:16)
 
@@ -73,7 +91,13 @@ Recommendation:
 - Add database foreign keys and appropriate `onDelete` behavior.
 - Consider uniqueness rules that match the product intent, such as whether a user should have many profiles or one current profile plus many plans.
 
-### 5. Medium: Docker migration step hides failures and can report success after partial schema application
+Status:
+- Resolved on 2026-04-23.
+- Prisma relations were added from `TrainingProfile` to `User` and from `ExerciseLog` to `User`.
+- Database foreign keys and supporting indexes were added in a follow-up migration.
+- The migration now fails fast if orphaned ownership rows exist, preventing silent integrity drift.
+
+### 5. Resolved: Docker migration step hides failures and can report success after partial schema application
 
 File: [docker-compose.yml](/c:/Users/beatt/projects/cursor/climb512/docker-compose.yml:15)
 
@@ -88,6 +112,12 @@ That `|| true` suppresses migration errors, so Compose can continue even if one 
 Recommendation:
 - Remove `|| true` so startup fails fast on schema problems.
 - Prefer `prisma migrate deploy` in the app image or a dedicated migration image rather than replaying raw SQL with shell globbing.
+
+Status:
+- Resolved on 2026-04-23.
+- The Docker migration flow no longer suppresses SQL failures with `|| true`.
+- Migrations are now tracked in `_app_migrations`, so previously applied SQL files are not replayed blindly on every startup.
+- New migration errors now stop startup instead of being masked.
 
 ### 6. Medium: The advertised lint workflow is not automation-safe
 

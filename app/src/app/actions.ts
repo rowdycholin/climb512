@@ -2,11 +2,55 @@
 
 import { redirect } from "next/navigation";
 import bcrypt from "bcryptjs";
-import { getSession } from "@/lib/session";
+import { getSession, getSessionBootId } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
 import { upsertExerciseLogForUser } from "@/lib/plan-access";
 import type { PlanInput } from "@/lib/plan-generator";
+import type { Prisma } from "@prisma/client";
 import { generatePlanWithAI } from "@/lib/ai-plan-generator";
+
+function normalizeSessionDuration(duration: number | string | undefined) {
+  if (typeof duration === "number") return duration;
+  if (typeof duration === "string") return parseInt(duration, 10) || 45;
+  return 45;
+}
+
+function buildNestedPlanData(weeks: Awaited<ReturnType<typeof generatePlanWithAI>>): Prisma.TrainingPlanCreateWithoutProfileInput {
+  return {
+    weeks: {
+      create: weeks.map((week) => ({
+        weekNum: week.weekNum,
+        theme: week.theme,
+        days: {
+          create: week.days.map((day) => ({
+            dayNum: day.dayNum,
+            dayName: day.dayName,
+            focus: day.focus,
+            isRest: day.isRest,
+            sessions: {
+              create: day.sessions.map((session) => ({
+                name: session.name,
+                description: session.description,
+                duration: normalizeSessionDuration(session.duration),
+                exercises: {
+                  create: session.exercises.map((exercise, index) => ({
+                    name: exercise.name,
+                    sets: exercise.sets,
+                    reps: exercise.reps,
+                    duration: exercise.duration,
+                    rest: exercise.rest,
+                    notes: exercise.notes,
+                    order: index,
+                  })),
+                },
+              })),
+            },
+          })),
+        },
+      })),
+    },
+  };
+}
 
 export async function login(_prevState: unknown, formData: FormData) {
   const username = formData.get("username") as string;
@@ -21,6 +65,7 @@ export async function login(_prevState: unknown, formData: FormData) {
   session.userId = user.id;
   session.username = user.username;
   session.isLoggedIn = true;
+  session.bootId = getSessionBootId();
   await session.save();
 
   const existingPlan = await prisma.trainingPlan.findFirst({
@@ -47,6 +92,7 @@ export async function register(_prevState: unknown, formData: FormData) {
   session.userId = user.id;
   session.username = user.username;
   session.isLoggedIn = true;
+  session.bootId = getSessionBootId();
   await session.save();
 
   redirect("/onboarding");
@@ -83,44 +129,32 @@ export async function createPlan(formData: FormData) {
     discipline: (formData.get("discipline") as string) || "bouldering",
   };
 
-  const profile = await prisma.trainingProfile.create({
-    data: {
-      userId: session.userId,
-      goals: input.goals,
-      currentGrade: input.currentGrade,
-      targetGrade: input.targetGrade,
-      age: input.age,
-      weeksDuration: input.weeksDuration,
-      daysPerWeek: input.daysPerWeek,
-      equipment: input.equipment,
-    },
-  });
-
   const weekData = await generatePlanWithAI(input);
-
-  const plan = await prisma.trainingPlan.create({ data: { profileId: profile.id } });
-
-  for (const w of weekData) {
-    const week = await prisma.week.create({
-      data: { planId: plan.id, weekNum: w.weekNum, theme: w.theme },
+  const plan = await prisma.$transaction(async (tx) => {
+    const profile = await tx.trainingProfile.create({
+      data: {
+        userId: session.userId,
+        goals: input.goals,
+        currentGrade: input.currentGrade,
+        targetGrade: input.targetGrade,
+        age: input.age,
+        weeksDuration: input.weeksDuration,
+        daysPerWeek: input.daysPerWeek,
+        equipment: input.equipment,
+        plans: {
+          create: [buildNestedPlanData(weekData)],
+        },
+      },
+      include: {
+        plans: {
+          select: { id: true },
+          take: 1,
+        },
+      },
     });
-    for (const d of w.days) {
-      const day = await prisma.day.create({
-        data: { weekId: week.id, dayNum: d.dayNum, dayName: d.dayName, focus: d.focus, isRest: d.isRest },
-      });
-      for (const s of d.sessions) {
-        const sess = await prisma.daySession.create({
-          data: { dayId: day.id, name: s.name, description: s.description, duration: typeof s.duration === "string" ? parseInt(s.duration, 10) || 45 : (s.duration ?? 45) },
-        });
-        for (let i = 0; i < s.exercises.length; i++) {
-          const ex = s.exercises[i];
-          await prisma.exercise.create({
-            data: { sessionId: sess.id, name: ex.name, sets: ex.sets, reps: ex.reps, duration: ex.duration, rest: ex.rest, notes: ex.notes, order: i },
-          });
-        }
-      }
-    }
-  }
+
+    return profile.plans[0];
+  });
 
   redirect(`/plan/${plan.id}`);
 }

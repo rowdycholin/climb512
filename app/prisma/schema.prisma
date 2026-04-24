@@ -7,15 +7,18 @@ datasource db {
 }
 
 model User {
-  id           String   @id @default(cuid())
-  username     String   @unique
+  id           String            @id @default(cuid())
+  username     String            @unique
   passwordHash String
-  createdAt    DateTime @default(now())
+  createdAt    DateTime          @default(now())
+  profiles     TrainingProfile[]
+  exerciseLogs ExerciseLog[]
 }
 
 model TrainingProfile {
   id            String         @id @default(cuid())
   userId        String
+  user          User           @relation(fields: [userId], references: [id], onDelete: Cascade)
   goals         String[]
   currentGrade  String
   targetGrade   String
@@ -25,6 +28,8 @@ model TrainingProfile {
   equipment     String[]
   createdAt     DateTime       @default(now())
   plans         TrainingPlan[]
+
+  @@index([userId])
 }
 
 model TrainingPlan {
@@ -84,6 +89,7 @@ model ExerciseLog {
   exerciseId     String
   exercise       Exercise @relation(fields: [exerciseId], references: [id], onDelete: Cascade)
   userId         String
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   loggedAt       DateTime @default(now())
   setsCompleted  Int?
   repsCompleted  String?
@@ -93,4 +99,5 @@ model ExerciseLog {
   completed      Boolean  @default(false)
 
   @@unique([exerciseId, userId])
+  @@index([userId])
 }
