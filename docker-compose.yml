@@ -21,7 +21,10 @@ services:
         psql -v ON_ERROR_STOP=1 postgresql://climber:climber512@postgres:5432/climbapp -c \"INSERT INTO \\\"_app_migrations\\\" (name) VALUES ('20240101000000_init') ON CONFLICT (name) DO NOTHING\";
         psql -v ON_ERROR_STOP=1 postgresql://climber:climber512@postgres:5432/climbapp -c \"INSERT INTO \\\"_app_migrations\\\" (name) VALUES ('20240201000000_add_users') ON CONFLICT (name) DO NOTHING\";
       fi;
-      for f in $$(ls /migrations/*/migration.sql | sort); do
+      for f in /migrations/*/migration.sql; do
+        if [ ! -f "$$f" ]; then
+          continue;
+        fi;
         name=$$(basename $$(dirname $$f));
         applied=$$(psql -At postgresql://climber:climber512@postgres:5432/climbapp -c \"SELECT 1 FROM \\\"_app_migrations\\\" WHERE name = '$$name' LIMIT 1\");
         if [ \"$$applied\" = \"1\" ]; then

@@ -1,19 +1,43 @@
 # Security Notes
 
-Date: 2026-04-23
+Date: 2026-04-24
 
 ## Ownership rules
 
-- Training plans must only be readable by the user who owns the linked `TrainingProfile`.
-- Exercise logs must only be created or updated when the target `Exercise` belongs to a plan owned by the authenticated user.
+- A user may only load plans they own
+- A user may only log workouts against exercises inside plans they own
+- AI adjustment proposals may only be generated or applied for plans the user owns
 
-## Implementation
+## Current enforcement
 
-- Plan page access is now scoped through a server-side ownership query before any plan data is returned.
-- Exercise logging now checks plan ownership before upserting `ExerciseLog`.
-- Shared authorization logic lives in [app/src/lib/plan-access.ts](/c:/Users/beatt/projects/cursor/climb512/app/src/lib/plan-access.ts:1).
+Shared ownership logic lives in [app/src/lib/plan-access.ts](/abs/path/c:/Users/beatt/projects/cursor/climb512/app/src/lib/plan-access.ts).
 
-## Regression coverage
+Key controls:
 
-- [testing/tests/security.spec.ts](/c:/Users/beatt/projects/cursor/climb512/testing/tests/security.spec.ts:1) verifies that one user cannot load another user's plan.
-- The same test file also verifies that forged exercise-log writes are rejected for non-owners and still succeed for the rightful owner.
+- `findOwnedPlanById()` scopes plan lookup by `plan.id` and `userId`
+- `findOwnedPlanWithLogs()` only returns the authenticated user's current version and workout logs
+- `upsertExerciseLogForUser()` verifies the submitted `exerciseKey` exists inside the user's current plan snapshot before writing a `WorkoutLog`
+
+## Snapshot-model implications
+
+The app no longer trusts relational exercise IDs from a normalized plan tree.
+
+Instead, writes are authorized against:
+
+- `planId`
+- authenticated `userId`
+- snapshot `exerciseKey`
+- the plan's current `PlanVersion`
+
+That keeps unauthorized users from forging writes against another user's plan data even if they guess a key.
+
+## Current gaps
+
+- the previous security Playwright spec was tied to deleted tables and has been removed
+- security regression coverage should be rebuilt around the snapshot/version model
+
+Recommended follow-up tests:
+
+- user A cannot open user B's `/plan/[id]`
+- user A cannot submit `logExercise` for user B's `planId` + `exerciseKey`
+- user A cannot apply AI adjustments to user B's plan

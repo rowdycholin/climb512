@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { getSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
+import { parseProfileSnapshot } from "@/lib/plan-snapshot";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { logout } from "@/app/actions";
@@ -10,16 +11,33 @@ export default async function DashboardPage() {
   const session = await getSession();
   if (!session.isLoggedIn) redirect("/login");
 
-  const plans = await prisma.trainingPlan.findMany({
-    where: { profile: { userId: session.userId } },
-    include: { profile: true },
+  const plans = await prisma.plan.findMany({
+    where: { userId: session.userId },
+    include: { currentVersion: true },
     orderBy: { createdAt: "desc" },
   });
 
+  const planCards = plans
+    .filter((plan) => plan.currentVersion)
+    .map((plan) => {
+      const profile = parseProfileSnapshot(plan.currentVersion!.profileSnapshot);
+      return {
+        id: plan.id,
+        title: plan.title ?? `${profile.currentGrade} → ${profile.targetGrade}`,
+        createdAt: plan.createdAt,
+        profile: {
+          currentGrade: profile.currentGrade,
+          targetGrade: profile.targetGrade,
+          weeksDuration: profile.weeksDuration,
+          daysPerWeek: profile.daysPerWeek,
+        },
+      };
+    });
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-100 to-slate-50 p-4 py-8">
-      <div className="max-w-2xl mx-auto">
-        <div className="flex items-center justify-between mb-8">
+      <div className="mx-auto max-w-2xl">
+        <div className="mb-8 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <span className="text-3xl">🧗</span>
             <div>
@@ -38,10 +56,10 @@ export default async function DashboardPage() {
           </a>
         </div>
 
-        {plans.length > 0 && <DashboardClient plans={plans} />}
+        {planCards.length > 0 && <DashboardClient plans={planCards} />}
 
-        {plans.length === 0 && (
-          <Card className="bg-white border-slate-200 text-center shadow-sm">
+        {planCards.length === 0 && (
+          <Card className="border-slate-200 bg-white text-center shadow-sm">
             <CardContent className="py-12">
               <p className="text-slate-500">No plans yet. Create your first training plan above.</p>
             </CardContent>

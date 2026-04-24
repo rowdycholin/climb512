@@ -4,6 +4,11 @@ Date: 2026-04-23
 
 Scope: Review of the `climb512` repository with a focus on correctness, security, data integrity, operational readiness, and test coverage.
 
+Note:
+- This review was written against the older relational `TrainingProfile -> TrainingPlan -> Week -> Day -> Exercise` model.
+- The app now uses `Plan` + `PlanVersion` JSON snapshots plus `WorkoutLog`.
+- Findings remain useful as historical context, but schema-specific references below should be read in that context.
+
 ## Findings
 
 ### 1. Resolved: Any authenticated user can view another user's training plan by guessing its ID

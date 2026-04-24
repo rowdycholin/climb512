@@ -7,97 +7,74 @@ datasource db {
 }
 
 model User {
-  id           String            @id @default(cuid())
-  username     String            @unique
+  id           String       @id @default(cuid())
+  username     String       @unique
   passwordHash String
-  createdAt    DateTime          @default(now())
-  profiles     TrainingProfile[]
-  exerciseLogs ExerciseLog[]
+  createdAt    DateTime     @default(now())
+  plans        Plan[]
+  workoutLogs  WorkoutLog[]
 }
 
-model TrainingProfile {
-  id            String         @id @default(cuid())
-  userId        String
-  user          User           @relation(fields: [userId], references: [id], onDelete: Cascade)
-  goals         String[]
-  currentGrade  String
-  targetGrade   String
-  age           Int
-  weeksDuration Int
-  daysPerWeek   Int
-  equipment     String[]
-  createdAt     DateTime       @default(now())
-  plans         TrainingPlan[]
+model Plan {
+  id               String        @id @default(cuid())
+  userId           String
+  user             User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title            String?
+  currentVersionId String?       @unique
+  currentVersion   PlanVersion?  @relation("CurrentPlanVersion", fields: [currentVersionId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  versions         PlanVersion[] @relation("PlanVersions")
+  workoutLogs      WorkoutLog[]
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
 
   @@index([userId])
 }
 
-model TrainingPlan {
-  id        String          @id @default(cuid())
-  profileId String
-  profile   TrainingProfile @relation(fields: [profileId], references: [id])
-  createdAt DateTime        @default(now())
-  weeks     Week[]
+model PlanVersion {
+  id              String        @id @default(cuid())
+  planId          String
+  plan            Plan          @relation("PlanVersions", fields: [planId], references: [id], onDelete: Cascade)
+  versionNum      Int
+  basedOnVersionId String?
+  basedOnVersion  PlanVersion?  @relation("PlanVersionLineage", fields: [basedOnVersionId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  derivedVersions PlanVersion[] @relation("PlanVersionLineage")
+  changeType      String
+  changeSummary   String?
+  effectiveFromWeek Int?
+  profileSnapshot Json
+  planSnapshot    Json
+  createdAt       DateTime      @default(now())
+  workoutLogs     WorkoutLog[]
+  currentForPlan  Plan?         @relation("CurrentPlanVersion")
+
+  @@unique([planId, versionNum])
+  @@index([planId])
+  @@index([basedOnVersionId])
 }
 
-model Week {
-  id      String       @id @default(cuid())
-  planId  String
-  plan    TrainingPlan @relation(fields: [planId], references: [id])
-  weekNum Int
-  theme   String
-  days    Day[]
-}
+model WorkoutLog {
+  id                String      @id @default(cuid())
+  userId            String
+  user              User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  planId            String
+  plan              Plan        @relation(fields: [planId], references: [id], onDelete: Cascade)
+  planVersionId     String
+  planVersion       PlanVersion @relation(fields: [planVersionId], references: [id], onDelete: Cascade)
+  weekNum           Int
+  dayNum            Int
+  sessionKey        String
+  exerciseKey       String
+  exerciseName      String
+  prescribedSnapshot Json
+  setsCompleted     Int?
+  repsCompleted     String?
+  weightUsed        String?
+  durationActual    String?
+  notes             String?
+  completed         Boolean     @default(false)
+  loggedAt          DateTime    @default(now())
 
-model Day {
-  id       String       @id @default(cuid())
-  weekId   String
-  week     Week         @relation(fields: [weekId], references: [id])
-  dayNum   Int
-  dayName  String
-  focus    String
-  isRest   Boolean      @default(false)
-  sessions DaySession[]
-}
-
-model DaySession {
-  id          String     @id @default(cuid())
-  dayId       String
-  day         Day        @relation(fields: [dayId], references: [id])
-  name        String
-  description String
-  duration    Int
-  exercises   Exercise[]
-}
-
-model Exercise {
-  id        String        @id @default(cuid())
-  sessionId String
-  session   DaySession    @relation(fields: [sessionId], references: [id])
-  name      String
-  sets      String?
-  reps      String?
-  duration  String?
-  rest      String?
-  notes     String?
-  order     Int
-  logs      ExerciseLog[]
-}
-
-model ExerciseLog {
-  id             String   @id @default(cuid())
-  exerciseId     String
-  exercise       Exercise @relation(fields: [exerciseId], references: [id], onDelete: Cascade)
-  userId         String
-  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  loggedAt       DateTime @default(now())
-  setsCompleted  Int?
-  repsCompleted  String?
-  weightUsed     String?
-  durationActual String?
-  notes          String?
-  completed      Boolean  @default(false)
-
-  @@unique([exerciseId, userId])
-  @@index([userId])
+  @@unique([userId, planId, exerciseKey])
+  @@index([userId, planId])
+  @@index([planVersionId])
 }

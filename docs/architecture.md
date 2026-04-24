@@ -2,87 +2,114 @@
 
 ## System diagram
 
-```
+```text
 Browser
-  │
-  ▼
-Next.js 14 (App Router)          ← Docker container "web" (port 8080)
-  ├── Server Components           reads DB, renders HTML
-  ├── Server Actions              mutations, AI calls, session writes
-  └── Client Components          interactivity, logging forms, week picker
-        │
-        ├── iron-session cookie   stateless JWT, httpOnly
-        │
-        ├── Prisma 7 + pg adapter ──► PostgreSQL 16    ← Docker container "postgres" (port 5432, internal)
-        │
-        └── Anthropic Claude API  ──► claude-3-5-haiku (plan generation)
+  |
+  v
+Next.js 14 App Router           <- Docker service: web
+  |- Server Components
+  |- Server Actions
+  \- Client Components
+       |
+       |- iron-session cookie auth
+       |- Prisma 7 + pg adapter -> PostgreSQL 16   <- Docker service: postgres
+       \- OpenRouter-compatible AI API
 ```
 
-## Request lifecycle
+## Core request flows
 
-### Page load (Server Component)
+### Plan page load
+
 1. Browser requests `/plan/[id]`
-2. Next.js calls `getSession()` — reads iron-session cookie
-3. If not logged in → redirect to `/login`
-4. Prisma query fetches plan + weeks + days + sessions + exercises + logs in one call
-5. Calculates current week/day from `plan.createdAt`
-6. Renders `PlanViewer` as a Server Component shell; passes serialised data as props
-7. Client hydrates `PlanViewer` (accordion, week tabs, log forms)
+2. Server reads the session cookie
+3. If unauthenticated, redirect to `/login`
+4. `findOwnedPlanWithLogs()` loads the user's `Plan`, current `PlanVersion`, and `WorkoutLog` rows
+5. `planSnapshot` is parsed and merged with logs into a view model
+6. Current week/day is derived from `plan.createdAt`
+7. `PlanWorkspace` renders the adjuster plus viewer
 
-### Plan creation (Server Action)
-1. User submits onboarding form → `createPlan` server action fires
-2. Action validates session
-3. Saves `TrainingProfile` to DB
-4. Calls Anthropic API with structured prompt (goals, grade, age, equipment, schedule)
-5. Parses streamed JSON response into `Week → Day → DaySession → Exercise` hierarchy
-6. Inserts all records in a single sequential write loop
-7. Redirects to `/plan/[id]`
+### Plan creation
 
-### Exercise logging (Server Action)
-1. User fills log form or clicks checkbox → `logExercise` server action
-2. Action does a Prisma `upsert` on `ExerciseLog` by `(exerciseId, userId)` unique key
-3. Returns `{ ok: true }` — client shows "Saved!" feedback without a full page reload
+1. User submits onboarding
+2. `createPlan()` validates auth and converts form data to `PlanInput`
+3. `generatePlanWithAI()` builds weeks from the AI provider
+4. The app builds:
+   - `profileSnapshot`
+   - `planSnapshot`
+5. A `Plan` row is created
+6. A first `PlanVersion` row is created with `changeType = "generated"`
+7. `Plan.currentVersionId` is updated to point at that version
 
-## Component boundaries
+### Workout logging
 
-```
-app/plan/[id]/page.tsx   (Server Component)
-  └── PlanViewer.tsx     (Client — "use client")
-        ├── WeekCard     (inline, stateless render)
-        ├── DayCard      (inline, uses Accordion from base-ui)
-        ├── SessionBlock (inline, stateless render)
-        └── ExerciseRow  (inline, owns log form state + useTransition)
+1. User toggles completion or submits a log form
+2. `logExercise()` receives `planId` and snapshot `exerciseKey`
+3. `upsertExerciseLogForUser()` verifies the exercise belongs to the authenticated user's current plan
+4. A `WorkoutLog` row is created or updated using `(userId, planId, exerciseKey)`
+5. The log stores:
+   - plan version id
+   - week/day/session/exercise keys
+   - `prescribedSnapshot`
+   - actual performance fields
 
-app/login/page.tsx       (Server Component)
-  └── LoginForm.tsx      (Client — useFormState)
+### AI plan adjustment
 
-app/onboarding/page.tsx  (Server Component)
-  └── EquipmentPicker.tsx (Client — manages custom equipment array)
-```
+1. User selects a week and chooses `reorder` or `difficulty`
+2. `suggestPlanAdjustment()` loads the current snapshot week and sends a constrained prompt to the AI provider
+3. The proposal is validated against the existing week structure
+4. Nothing is saved until the user confirms
+5. `applyPlanAdjustment()` creates a new `PlanVersion`
+6. `Plan.currentVersionId` advances to the accepted version
 
-## Database connection (Prisma 7)
+## Data model strategy
 
-Prisma 7 removed `url = env("DATABASE_URL")` from `schema.prisma`. The URL is now provided in two places:
+The app intentionally uses versioned document storage for plans.
 
-- **Migrations** (`prisma migrate deploy`) — read from `prisma.config.ts` via `dotenv/config`
-- **Runtime** — passed to `new PrismaPg({ connectionString: process.env.DATABASE_URL })` in `src/lib/prisma.ts`
+- `Plan` is the stable parent record
+- `PlanVersion` stores:
+  - `profileSnapshot` JSON
+  - `planSnapshot` JSON
+- `WorkoutLog` stores immutable user history tied to a specific version and exercise key
 
-The singleton pattern (`globalThis.prisma`) prevents connection pool exhaustion during Next.js hot reload in development.
+This keeps revision history intact and makes AI-generated changes safer than mutating deeply normalized week/day/exercise rows in place.
 
-## Authentication
+## Main code boundaries
 
-iron-session stores a signed, encrypted cookie containing `{ userId, username, isLoggedIn }`. The secret is `SESSION_SECRET` from env. No database session table — stateless. Cookie is `httpOnly` and `secure` in production.
+### Server
 
-Demo credentials are hardcoded in `actions.ts`. To add real users: replace the hardcoded check with a DB lookup and bcrypt password comparison.
+- `app/src/app/actions.ts`
+  - auth
+  - plan creation
+  - plan deletion
+  - workout logging
+  - AI adjustment draft/apply
+- `app/src/lib/plan-access.ts`
+  - ownership-aware plan loading
+  - snapshot exercise lookup
+  - log upsert authorization
+- `app/src/lib/plan-snapshot.ts`
+  - snapshot types
+  - snapshot parsing
+  - plan view shaping
+- `app/src/lib/ai-plan-generator.ts`
+  - onboarding -> weeks AI generation
+- `app/src/lib/ai-plan-adjuster.ts`
+  - constrained week adjustments
 
-## Scalability notes
+### Client
 
-The current Docker Compose setup is single-node. To scale to thousands of users:
+- `PlanWorkspace`
+  - coordinates selected week between adjuster and viewer
+- `PlanAdjuster`
+  - draft and apply AI week changes
+- `PlanViewer`
+  - week tabs, day accordions, workout logging UI
+- `DashboardClient`
+  - multi-select plan deletion
 
-| Concern | Current | Production path |
-|---|---|---|
-| Web tier | 1 container | Horizontal scale (ECS tasks / K8s pods) — Next.js standalone is stateless |
-| Sessions | Cookie (stateless) | No change needed |
-| Database | 1 Postgres container | Managed RDS / Cloud SQL + PgBouncer connection pooler |
-| AI calls | Per-request | Add a queue (BullMQ / SQS) if plan generation should be async |
-| Static assets | Served by Next.js | Move to CDN (CloudFront / Cloudflare) |
+## Operational notes
+
+- sessions are cookie-based and stateless
+- Docker startup depends on the `migrate` service succeeding first
+- migrations are raw SQL files tracked in `_app_migrations`
+- the app is currently single-node but the web tier is horizontally scalable because session state is not stored in server memory

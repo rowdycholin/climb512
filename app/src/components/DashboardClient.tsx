@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 
 interface Plan {
   id: string;
+  title: string;
   createdAt: Date;
   profile: {
     currentGrade: string;
@@ -20,8 +21,8 @@ export default function DashboardClient({ plans }: { plans: Plan[] }) {
   const [selected, setSelected] = useState<Set<string>>(new Set());
 
   function toggle(id: string) {
-    setSelected((prev) => {
-      const next = new Set(prev);
+    setSelected((previous) => {
+      const next = new Set(previous);
       if (next.has(id)) next.delete(id);
       else next.add(id);
       return next;
@@ -31,7 +32,7 @@ export default function DashboardClient({ plans }: { plans: Plan[] }) {
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between">
-        <h2 className="text-slate-700 font-semibold">Previous Plans</h2>
+        <h2 className="font-semibold text-slate-700">Previous Plans</h2>
         {selected.size > 0 && (
           <form action={deletePlans}>
             {Array.from(selected).map((id) => (
@@ -41,9 +42,9 @@ export default function DashboardClient({ plans }: { plans: Plan[] }) {
               type="submit"
               size="sm"
               variant="destructive"
-              onClick={(e) => {
+              onClick={(event) => {
                 if (!confirm(`Delete ${selected.size} plan${selected.size > 1 ? "s" : ""}?`)) {
-                  e.preventDefault();
+                  event.preventDefault();
                 }
               }}
             >
@@ -59,24 +60,20 @@ export default function DashboardClient({ plans }: { plans: Plan[] }) {
             type="checkbox"
             checked={selected.has(plan.id)}
             onChange={() => toggle(plan.id)}
-            className="h-4 w-4 rounded border-slate-300 accent-primary cursor-pointer flex-shrink-0"
-            aria-label={`Select plan ${plan.profile.currentGrade} → ${plan.profile.targetGrade}`}
+            className="h-4 w-4 flex-shrink-0 cursor-pointer rounded border-slate-300 accent-primary"
+            aria-label={`Select plan ${plan.title}`}
           />
-          <a href={`/plan/${plan.id}`} className="flex-1 min-w-0">
-            <Card className="hover:bg-slate-50 transition-colors cursor-pointer bg-white border-slate-200 shadow-sm">
+          <a href={`/plan/${plan.id}`} className="min-w-0 flex-1">
+            <Card className="cursor-pointer border-slate-200 bg-white shadow-sm transition-colors hover:bg-slate-50">
               <CardContent className="py-4">
                 <div className="flex items-center justify-between">
                   <div>
-                    <p className="font-semibold text-slate-800">
-                      {plan.profile.currentGrade} → {plan.profile.targetGrade}
-                    </p>
+                    <p className="font-semibold text-slate-800">{plan.title}</p>
                     <p className="text-sm text-slate-500">
                       {plan.profile.weeksDuration} weeks · {plan.profile.daysPerWeek} days/week
                     </p>
                   </div>
-                  <p className="text-xs text-slate-400">
-                    {new Date(plan.createdAt).toLocaleDateString()}
-                  </p>
+                  <p className="text-xs text-slate-400">{new Date(plan.createdAt).toLocaleDateString()}</p>
                 </div>
               </CardContent>
             </Card>

@@ -1,54 +1,132 @@
 "use server";
 
-import { redirect } from "next/navigation";
 import bcrypt from "bcryptjs";
-import { getSession, getSessionBootId } from "@/lib/session";
+import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
-import { upsertExerciseLogForUser } from "@/lib/plan-access";
-import type { PlanInput } from "@/lib/plan-generator";
-import type { Prisma } from "@prisma/client";
+import { getSession, getSessionBootId } from "@/lib/session";
+import {
+  buildPlanSnapshot,
+  createProfileSnapshot,
+  parsePlanSnapshot,
+  parseProfileSnapshot,
+  toStoredJson,
+  type PlanSnapshot,
+  type ProfileSnapshot,
+} from "@/lib/plan-snapshot";
 import { generatePlanWithAI } from "@/lib/ai-plan-generator";
+import type { PlanInput } from "@/lib/plan-types";
+import { findOwnedPlanById, findOwnedPlanWithLogs, upsertExerciseLogForUser } from "@/lib/plan-access";
+import {
+  adjustmentModeSchema,
+  buildDifficultySnapshot,
+  buildReorderedSnapshot,
+  generatePlanAdjustment,
+  type ComparableWeek,
+  planAdjustmentProposalSchema,
+  type PlanAdjustmentProposal,
+  validateAdjustmentProposal,
+} from "@/lib/ai-plan-adjuster";
 
-function normalizeSessionDuration(duration: number | string | undefined) {
-  if (typeof duration === "number") return duration;
-  if (typeof duration === "string") return parseInt(duration, 10) || 45;
-  return 45;
+export interface PlanAdjustmentResponse {
+  error?: string;
+  proposal?: string;
+  summary?: string;
+  changes?: string[];
+  weekKey?: string;
+  mode?: "reorder" | "difficulty";
 }
 
-function buildNestedPlanData(weeks: Awaited<ReturnType<typeof generatePlanWithAI>>): Prisma.TrainingPlanCreateWithoutProfileInput {
+function toPlanInput(formData: FormData): PlanInput {
+  const goals = formData.getAll("goals") as string[];
+  const customGoal = (formData.get("customGoal") as string | null)?.trim();
+  const equipment = formData.getAll("equipment") as string[];
+  const customEquipment = (formData.get("customEquipment") as string | null)?.trim();
+
   return {
-    weeks: {
-      create: weeks.map((week) => ({
-        weekNum: week.weekNum,
-        theme: week.theme,
-        days: {
-          create: week.days.map((day) => ({
-            dayNum: day.dayNum,
-            dayName: day.dayName,
-            focus: day.focus,
-            isRest: day.isRest,
-            sessions: {
-              create: day.sessions.map((session) => ({
-                name: session.name,
-                description: session.description,
-                duration: normalizeSessionDuration(session.duration),
-                exercises: {
-                  create: session.exercises.map((exercise, index) => ({
-                    name: exercise.name,
-                    sets: exercise.sets,
-                    reps: exercise.reps,
-                    duration: exercise.duration,
-                    rest: exercise.rest,
-                    notes: exercise.notes,
-                    order: index,
-                  })),
-                },
-              })),
-            },
-          })),
-        },
-      })),
+    goals: customGoal ? [...goals, customGoal] : goals,
+    currentGrade: formData.get("currentGrade") as string,
+    targetGrade: formData.get("targetGrade") as string,
+    age: parseInt(formData.get("age") as string, 10),
+    weeksDuration: parseInt(formData.get("weeksDuration") as string, 10),
+    daysPerWeek: parseInt(formData.get("daysPerWeek") as string, 10),
+    equipment: customEquipment
+      ? [...equipment, ...customEquipment.split(",").map((item) => item.trim()).filter(Boolean)]
+      : equipment,
+    discipline: (formData.get("discipline") as string) || "bouldering",
+  };
+}
+
+async function createPlanVersion(params: {
+  planId: string;
+  profileSnapshot: ProfileSnapshot;
+  planSnapshot: PlanSnapshot;
+  changeType: string;
+  changeSummary?: string | null;
+  basedOnVersionId?: string | null;
+  effectiveFromWeek?: number | null;
+}) {
+  const { planId, profileSnapshot, planSnapshot, changeType, changeSummary, basedOnVersionId, effectiveFromWeek } = params;
+
+  const latest = await prisma.planVersion.findFirst({
+    where: { planId },
+    orderBy: { versionNum: "desc" },
+    select: { versionNum: true },
+  });
+
+  const version = await prisma.planVersion.create({
+    data: {
+      planId,
+      versionNum: (latest?.versionNum ?? 0) + 1,
+      basedOnVersionId: basedOnVersionId ?? null,
+      changeType,
+      changeSummary: changeSummary ?? null,
+      effectiveFromWeek: effectiveFromWeek ?? null,
+      profileSnapshot: toStoredJson(profileSnapshot),
+      planSnapshot: toStoredJson(planSnapshot),
     },
+  });
+
+  await prisma.plan.update({
+    where: { id: planId },
+    data: {
+      currentVersionId: version.id,
+      updatedAt: new Date(),
+    },
+  });
+
+  return version;
+}
+
+function buildComparableWeek(snapshot: PlanSnapshot, weekKey: string): ComparableWeek | null {
+  const week = snapshot.weeks.find((item) => item.key === weekKey);
+  if (!week) return null;
+
+  return {
+    id: week.key,
+    theme: week.theme,
+    days: week.days.map((day) => ({
+      id: day.key,
+      dayNum: day.dayNum,
+      dayName: day.dayName,
+      focus: day.focus,
+      isRest: day.isRest,
+      sessions: day.sessions.map((session) => ({
+        id: session.key,
+        name: session.name,
+        description: session.description,
+        duration: session.duration,
+        exercises: session.exercises.map((exercise, index) => ({
+          id: exercise.key,
+          name: exercise.name,
+          sets: exercise.sets ?? null,
+          reps: exercise.reps ?? null,
+          duration: exercise.duration ?? null,
+          rest: exercise.rest ?? null,
+          notes: exercise.notes ?? null,
+          order: index,
+        })),
+      })),
+    })),
   };
 }
 
@@ -68,8 +146,8 @@ export async function login(_prevState: unknown, formData: FormData) {
   session.bootId = getSessionBootId();
   await session.save();
 
-  const existingPlan = await prisma.trainingPlan.findFirst({
-    where: { profile: { userId: user.id } },
+  const existingPlan = await prisma.plan.findFirst({
+    where: { userId: user.id },
   });
   redirect(existingPlan ? "/dashboard" : "/onboarding");
 }
@@ -108,76 +186,27 @@ export async function createPlan(formData: FormData) {
   const session = await getSession();
   if (!session.isLoggedIn) redirect("/login");
 
-  const goals = formData.getAll("goals") as string[];
-  const customGoal = formData.get("customGoal") as string;
-  const allGoals = customGoal ? [...goals, customGoal] : goals;
+  const input = toPlanInput(formData);
+  const weeks = await generatePlanWithAI(input);
+  const profileSnapshot = createProfileSnapshot(input);
+  const planSnapshot = buildPlanSnapshot(weeks);
 
-  const equipment = formData.getAll("equipment") as string[];
-  const customEquipment = formData.get("customEquipment") as string;
-  const allEquipment = customEquipment
-    ? [...equipment, ...customEquipment.split(",").map((s) => s.trim()).filter(Boolean)]
-    : equipment;
+  const plan = await prisma.plan.create({
+    data: {
+      userId: session.userId,
+      title: `${input.currentGrade} → ${input.targetGrade}`,
+    },
+  });
 
-  const input: PlanInput = {
-    goals: allGoals,
-    currentGrade: formData.get("currentGrade") as string,
-    targetGrade: formData.get("targetGrade") as string,
-    age: parseInt(formData.get("age") as string, 10),
-    weeksDuration: parseInt(formData.get("weeksDuration") as string, 10),
-    daysPerWeek: parseInt(formData.get("daysPerWeek") as string, 10),
-    equipment: allEquipment,
-    discipline: (formData.get("discipline") as string) || "bouldering",
-  };
-
-  const weekData = await generatePlanWithAI(input);
-  const plan = await prisma.$transaction(async (tx) => {
-    const profile = await tx.trainingProfile.create({
-      data: {
-        userId: session.userId,
-        goals: input.goals,
-        currentGrade: input.currentGrade,
-        targetGrade: input.targetGrade,
-        age: input.age,
-        weeksDuration: input.weeksDuration,
-        daysPerWeek: input.daysPerWeek,
-        equipment: input.equipment,
-        plans: {
-          create: [buildNestedPlanData(weekData)],
-        },
-      },
-      include: {
-        plans: {
-          select: { id: true },
-          take: 1,
-        },
-      },
-    });
-
-    return profile.plans[0];
+  await createPlanVersion({
+    planId: plan.id,
+    profileSnapshot,
+    planSnapshot,
+    changeType: "generated",
+    changeSummary: "Initial AI-generated plan",
   });
 
   redirect(`/plan/${plan.id}`);
-}
-
-async function cascadeDeletePlan(planId: string) {
-  const weeks = await prisma.week.findMany({ where: { planId } });
-  for (const week of weeks) {
-    const days = await prisma.day.findMany({ where: { weekId: week.id } });
-    for (const day of days) {
-      const sessions = await prisma.daySession.findMany({ where: { dayId: day.id } });
-      for (const sess of sessions) {
-        const exercises = await prisma.exercise.findMany({ where: { sessionId: sess.id } });
-        for (const ex of exercises) {
-          await prisma.exerciseLog.deleteMany({ where: { exerciseId: ex.id } });
-        }
-        await prisma.exercise.deleteMany({ where: { sessionId: sess.id } });
-      }
-      await prisma.daySession.deleteMany({ where: { dayId: day.id } });
-    }
-    await prisma.day.deleteMany({ where: { weekId: week.id } });
-  }
-  await prisma.week.deleteMany({ where: { planId } });
-  await prisma.trainingPlan.delete({ where: { id: planId } });
 }
 
 export async function deletePlan(formData: FormData) {
@@ -185,12 +214,12 @@ export async function deletePlan(formData: FormData) {
   if (!session.isLoggedIn) redirect("/login");
 
   const planId = formData.get("planId") as string;
-  const plan = await prisma.trainingPlan.findFirst({
-    where: { id: planId, profile: { userId: session.userId } },
+  const plan = await prisma.plan.findFirst({
+    where: { id: planId, userId: session.userId },
   });
   if (!plan) return;
 
-  await cascadeDeletePlan(planId);
+  await prisma.plan.delete({ where: { id: planId } });
   redirect("/dashboard");
 }
 
@@ -199,14 +228,12 @@ export async function deletePlans(formData: FormData) {
   if (!session.isLoggedIn) redirect("/login");
 
   const planIds = formData.getAll("planIds") as string[];
-
-  for (const planId of planIds) {
-    const plan = await prisma.trainingPlan.findFirst({
-      where: { id: planId, profile: { userId: session.userId } },
-    });
-    if (!plan) continue;
-    await cascadeDeletePlan(planId);
-  }
+  await prisma.plan.deleteMany({
+    where: {
+      userId: session.userId,
+      id: { in: planIds },
+    },
+  });
 
   redirect("/dashboard");
 }
@@ -215,7 +242,8 @@ export async function logExercise(formData: FormData) {
   const session = await getSession();
   if (!session.isLoggedIn) return { error: "Not authenticated" };
 
-  const exerciseId = formData.get("exerciseId") as string;
+  const planId = formData.get("planId") as string;
+  const exerciseKey = formData.get("exerciseId") as string;
   const setsCompleted = formData.get("setsCompleted") ? parseInt(formData.get("setsCompleted") as string, 10) : null;
   const repsCompleted = (formData.get("repsCompleted") as string) || null;
   const weightUsed = (formData.get("weightUsed") as string) || null;
@@ -224,7 +252,8 @@ export async function logExercise(formData: FormData) {
   const completed = formData.get("completed") === "true";
 
   return upsertExerciseLogForUser({
-    exerciseId,
+    planId,
+    exerciseKey,
     userId: session.userId,
     setsCompleted,
     repsCompleted,
@@ -233,4 +262,121 @@ export async function logExercise(formData: FormData) {
     notes,
     completed,
   });
+}
+
+export async function suggestPlanAdjustment(formData: FormData): Promise<PlanAdjustmentResponse> {
+  const session = await getSession();
+  if (!session.isLoggedIn) return { error: "Please sign in again" };
+
+  const planId = formData.get("planId");
+  const weekKey = formData.get("weekId");
+  const mode = formData.get("mode");
+  const request = (formData.get("request") as string | null)?.trim() ?? "";
+
+  if (typeof planId !== "string" || typeof weekKey !== "string" || typeof mode !== "string") {
+    return { error: "Missing adjustment details" };
+  }
+
+  if (!request) return { error: "Tell the coach what you want to change first" };
+
+  const parsedMode = adjustmentModeSchema.safeParse(mode);
+  if (!parsedMode.success) return { error: "Unsupported adjustment type" };
+
+  const plan = await findOwnedPlanWithLogs(planId, session.userId);
+  if (!plan) return { error: "Plan not found" };
+
+  const comparableWeek = buildComparableWeek(plan.currentVersion.planSnapshot, weekKey);
+  if (!comparableWeek) return { error: "Week not found" };
+
+  const weekNum = parseInt(weekKey.replace("week-", ""), 10);
+  const hasLogs = plan.workoutLogs.some((log) => log.weekNum === weekNum);
+  if (hasLogs) {
+    return { error: "Adjustments are only available before you start logging that week" };
+  }
+
+  const profileSnapshot = parseProfileSnapshot(plan.currentVersion.profileSnapshot);
+
+  try {
+    const proposal = await generatePlanAdjustment(profileSnapshot, comparableWeek, parsedMode.data, request);
+    return {
+      proposal: JSON.stringify(proposal),
+      summary: proposal.summary,
+      changes: proposal.changes,
+      weekKey,
+      mode: parsedMode.data,
+    };
+  } catch (error) {
+    return { error: (error as Error).message };
+  }
+}
+
+export async function applyPlanAdjustment(formData: FormData): Promise<{ error?: string; ok?: true }> {
+  const session = await getSession();
+  if (!session.isLoggedIn) return { error: "Please sign in again" };
+
+  const planId = formData.get("planId");
+  const weekKey = formData.get("weekId");
+  const proposalRaw = formData.get("proposal");
+  const mode = formData.get("mode");
+
+  if (typeof planId !== "string" || typeof weekKey !== "string" || typeof proposalRaw !== "string" || typeof mode !== "string") {
+    return { error: "Missing adjustment payload" };
+  }
+
+  const parsedMode = adjustmentModeSchema.safeParse(mode);
+  if (!parsedMode.success) return { error: "Unsupported adjustment type" };
+
+  const plan = await findOwnedPlanById(planId, session.userId);
+  if (!plan?.currentVersion) return { error: "Plan not found" };
+
+  let parsedProposal: unknown;
+  try {
+    parsedProposal = JSON.parse(proposalRaw);
+  } catch {
+    return { error: "Adjustment proposal could not be read" };
+  }
+
+  const proposal = planAdjustmentProposalSchema.safeParse(parsedProposal);
+  if (!proposal.success) return { error: "Adjustment proposal was invalid" };
+
+  const currentSnapshot = parsePlanSnapshot(plan.currentVersion.planSnapshot);
+  const comparableWeek = buildComparableWeek(currentSnapshot, weekKey);
+  if (!comparableWeek) return { error: "Week not found" };
+
+  try {
+    validateAdjustmentProposal(comparableWeek, parsedMode.data, proposal.data);
+  } catch (error) {
+    return { error: (error as Error).message };
+  }
+
+  const weekNum = parseInt(weekKey.replace("week-", ""), 10);
+  const existingLog = await prisma.workoutLog.findFirst({
+    where: {
+      userId: session.userId,
+      planId,
+      weekNum,
+    },
+    select: { id: true },
+  });
+
+  if (existingLog) {
+    return { error: "This week already has workout logs, so it can no longer be adjusted safely" };
+  }
+
+  const nextSnapshot =
+    proposal.data.mode === "reorder"
+      ? buildReorderedSnapshot(currentSnapshot, weekKey, proposal.data)
+      : buildDifficultySnapshot(currentSnapshot, weekKey, proposal.data);
+
+  await createPlanVersion({
+    planId,
+    profileSnapshot: parseProfileSnapshot(plan.currentVersion.profileSnapshot),
+    planSnapshot: nextSnapshot,
+    changeType: proposal.data.mode === "reorder" ? "ai_reorder" : "ai_difficulty",
+    changeSummary: proposal.data.summary,
+    basedOnVersionId: plan.currentVersion.id,
+    effectiveFromWeek: weekNum,
+  });
+
+  return { ok: true };
 }

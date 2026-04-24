@@ -1,4 +1,4 @@
-import type { PlanInput, WeekData, DayData, SessionData, ExerciseData } from "./plan-generator";
+import type { PlanInput, WeekData, DayData, SessionData, ExerciseData } from "./plan-types";
 
 const MODEL = process.env.ANTHROPIC_MODEL ?? "anthropic/claude-haiku-4-5";
 const MAX_TOKENS = parseInt(process.env.ANTHROPIC_MAX_TOKENS ?? "5000", 10);

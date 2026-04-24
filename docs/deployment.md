@@ -1,117 +1,93 @@
 # Deployment Guide
 
-## Docker Compose (local / single-server)
+## Docker Compose services
 
-### Services
+| Service | Role |
+|---|---|
+| `postgres` | PostgreSQL 16 database |
+| `migrate` | one-shot SQL migration runner |
+| `web` | Next.js standalone app |
 
-| Service | Image | Role |
-|---|---|---|
-| `postgres` | postgres:16-alpine | Database. Data persisted in `postgres_data` named volume. |
-| `migrate` | postgres:16-alpine | One-shot container. Applies `migration.sql` via `psql` then exits. |
-| `web` | climb512-web (built from `app/Dockerfile`) | Next.js app. Starts after `migrate` completes. |
-
-### Start
+## Startup
 
 ```bash
-# From repo root
 docker compose up --build -d
 ```
 
-Use `--build` any time the application code has changed. Without it, Docker reuses the cached image.
+The startup order is:
 
-### Stop
+1. `postgres`
+2. `migrate`
+3. `web`
+
+`web` will not start until `migrate` exits successfully.
+
+## Migration behavior
+
+The migration container:
+
+- waits for Postgres to accept connections
+- creates `_app_migrations` if needed
+- applies each `app/prisma/migrations/*/migration.sql` once
+- records applied migration names
+- fails fast if any SQL file fails
+
+This is important now that the app depends on the snapshot schema:
+
+- `User`
+- `Plan`
+- `PlanVersion`
+- `WorkoutLog`
+
+## Rebuild / reset
+
+### Normal rebuild
 
 ```bash
-docker compose down
+docker compose up --build -d
 ```
 
-Data is preserved in the `postgres_data` volume. To also delete data:
+### Full reset
+
+Use this when the schema changed incompatibly or you want a clean demo DB:
+
 ```bash
 docker compose down -v
-```
-
-### Logs
-
-```bash
-docker compose logs web          # app logs
-docker compose logs web -f       # follow
-docker compose logs migrate      # migration output
-docker compose logs postgres     # DB logs
-```
-
-### Rebuild after code changes
-
-```bash
 docker compose up --build -d
+```
+
+## Logs
+
+```bash
+docker compose logs web --tail=20
+docker compose logs migrate --tail=50
+docker compose logs postgres --tail=50
 ```
 
 ## Environment variables
 
-The `docker-compose.yml` hardcodes dev credentials. Before any shared or production deployment, move secrets to a `.env` file and reference them:
+The app uses these values:
 
-```yaml
-# docker-compose.yml
-environment:
-  DATABASE_URL: ${DATABASE_URL}
-  SESSION_SECRET: ${SESSION_SECRET}
-  ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+| Variable | Purpose |
+|---|---|
+| `DATABASE_URL` | Postgres connection string |
+| `SESSION_SECRET` | cookie encryption/signing |
+| `ANTHROPIC_API_KEY` | AI provider key |
+| `ANTHROPIC_BASE_URL` | provider base URL |
+| `ANTHROPIC_MODEL` | model name |
+| `ANTHROPIC_MAX_TOKENS` | output cap |
+
+OpenRouter should use:
+
+```text
+ANTHROPIC_BASE_URL=https://openrouter.ai/api
 ```
 
-Then create a `.env` at the repo root (never commit it):
-```
-DATABASE_URL=postgresql://climber:climber512@postgres:5432/climbapp
-SESSION_SECRET=<strong-random-secret-min-32-chars>
-ANTHROPIC_API_KEY=sk-...
-```
+Do not include `/v1`; the app appends `/v1/chat/completions`.
 
-**Important:** The `ANTHROPIC_API_KEY` must be added to the `web` service environment in `docker-compose.yml` (or the root `.env`) for AI plan generation to work.
+## Production notes
 
-## Dockerfile overview
-
-```
-stage: deps     → npm ci (install dependencies)
-stage: builder  → copy source, prisma generate, npm run build
-stage: runner   → copy .next/standalone + .next/static + prisma engines
-                  runs as non-root user "nextjs"
-                  CMD: node server.js
-```
-
-The standalone output (`output: "standalone"` in `next.config.mjs`) means only `node server.js` is needed — no `node_modules` in the runner stage (except Prisma engines).
-
-## Scaling for production
-
-### Horizontal web scaling
-
-Next.js standalone output is stateless (sessions are in cookies, not server memory). You can run multiple `web` containers behind a load balancer.
-
-```yaml
-# docker-compose.yml — simple scaling
-web:
-  deploy:
-    replicas: 3
-```
-
-Or deploy to ECS / Cloud Run / Kubernetes with autoscaling.
-
-### Database
-
-Replace the `postgres` Docker service with a managed database:
-- AWS RDS (PostgreSQL)
-- Google Cloud SQL
-- Supabase
-- Neon
-
-Update `DATABASE_URL` in the environment. Add PgBouncer for connection pooling if running many web replicas.
-
-### TLS / HTTPS
-
-In production, terminate TLS at a reverse proxy (nginx, Caddy, ALB, Cloudflare) in front of the `web` container. The app itself runs plain HTTP on port 8080.
-
-## Migration strategy
-
-The current migration system is a single `migration.sql` applied via `psql || true` (idempotent — safe to re-run, duplicate constraint errors are ignored). For production:
-
-- Graduate to proper Prisma migrations (`prisma migrate deploy`) by providing a real DB at build time
-- Or maintain the manual SQL approach — add new migration files and apply them in order
-
-Never run `prisma migrate dev` in production.
+- the web tier is stateless and can be horizontally scaled
+- the DB should move to a managed Postgres service in production
+- TLS should terminate at a reverse proxy or load balancer
+- migrations should still run as a separate one-shot job before the new app version receives traffic

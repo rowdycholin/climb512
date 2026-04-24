@@ -1,71 +1,57 @@
-import { Prisma } from "@prisma/client";
 import { prisma } from "./prisma";
-
-export const ownedPlanInclude = {
-  profile: true,
-  weeks: {
-    orderBy: { weekNum: "asc" },
-    include: {
-      days: {
-        orderBy: { dayNum: "asc" },
-        include: {
-          sessions: {
-            include: {
-              exercises: {
-                orderBy: { order: "asc" },
-              },
-            },
-          },
-        },
-      },
-    },
-  },
-} satisfies Prisma.TrainingPlanInclude;
+import {
+  buildPlanView,
+  findExerciseInSnapshot,
+  parsePlanSnapshot,
+  toStoredJson,
+  type PlanSnapshot,
+} from "./plan-snapshot";
 
 export async function findOwnedPlanById(planId: string, userId: string) {
-  return prisma.trainingPlan.findFirst({
+  return prisma.plan.findFirst({
     where: {
       id: planId,
-      profile: { userId },
+      userId,
     },
-    include: ownedPlanInclude,
+    include: {
+      currentVersion: true,
+    },
   });
 }
 
-export async function findOwnedPlanWithUserLogs(planId: string, userId: string) {
-  return prisma.trainingPlan.findFirst({
+export async function findOwnedPlanWithLogs(planId: string, userId: string) {
+  const plan = await prisma.plan.findFirst({
     where: {
       id: planId,
-      profile: { userId },
+      userId,
     },
     include: {
-      profile: true,
-      weeks: {
-        orderBy: { weekNum: "asc" },
-        include: {
-          days: {
-            orderBy: { dayNum: "asc" },
-            include: {
-              sessions: {
-                include: {
-                  exercises: {
-                    orderBy: { order: "asc" },
-                    include: {
-                      logs: { where: { userId } },
-                    },
-                  },
-                },
-              },
-            },
-          },
-        },
+      currentVersion: true,
+      workoutLogs: {
+        where: { userId },
+        orderBy: { loggedAt: "desc" },
       },
     },
   });
+
+  if (!plan || !plan.currentVersion) return null;
+
+  const snapshot = parsePlanSnapshot(plan.currentVersion.planSnapshot);
+  const view = buildPlanView(snapshot, plan.workoutLogs);
+
+  return {
+    ...plan,
+    currentVersion: {
+      ...plan.currentVersion,
+      planSnapshot: snapshot,
+    },
+    planView: view,
+  };
 }
 
-export interface ExerciseLogInput {
-  exerciseId: string;
+export interface WorkoutLogInput {
+  planId: string;
+  exerciseKey: string;
   userId: string;
   setsCompleted: number | null;
   repsCompleted: string | null;
@@ -75,42 +61,56 @@ export interface ExerciseLogInput {
   completed: boolean;
 }
 
-export async function userCanAccessExercise(userId: string, exerciseId: string) {
-  const exercise = await prisma.exercise.findFirst({
+async function findAuthorizedExercise(planId: string, userId: string, exerciseKey: string) {
+  const plan = await prisma.plan.findFirst({
     where: {
-      id: exerciseId,
-      session: {
-        day: {
-          week: {
-            plan: {
-              profile: { userId },
-            },
-          },
-        },
-      },
+      id: planId,
+      userId,
     },
-    select: { id: true },
+    include: {
+      currentVersion: true,
+    },
   });
 
-  return Boolean(exercise);
+  if (!plan?.currentVersion) return null;
+
+  const snapshot = parsePlanSnapshot(plan.currentVersion.planSnapshot);
+  const match = findExerciseInSnapshot(snapshot, exerciseKey);
+  if (!match) return null;
+
+  return {
+    plan,
+    snapshot,
+    match,
+  };
 }
 
-export async function upsertExerciseLogForUser(input: ExerciseLogInput) {
-  const isAuthorized = await userCanAccessExercise(input.userId, input.exerciseId);
-  if (!isAuthorized) {
+export async function upsertExerciseLogForUser(input: WorkoutLogInput) {
+  const authorized = await findAuthorizedExercise(input.planId, input.userId, input.exerciseKey);
+  if (!authorized) {
     return { error: "Not authorized" as const };
   }
 
-  await prisma.exerciseLog.upsert({
+  const { plan, match } = authorized;
+
+  await prisma.workoutLog.upsert({
     where: {
-      exerciseId_userId: {
-        exerciseId: input.exerciseId,
+      userId_planId_exerciseKey: {
         userId: input.userId,
+        planId: input.planId,
+        exerciseKey: input.exerciseKey,
       },
     },
     create: {
-      exerciseId: input.exerciseId,
       userId: input.userId,
+      planId: input.planId,
+      planVersionId: plan.currentVersionId!,
+      weekNum: match.week.weekNum,
+      dayNum: match.day.dayNum,
+      sessionKey: match.session.key,
+      exerciseKey: input.exerciseKey,
+      exerciseName: match.exercise.name,
+      prescribedSnapshot: toStoredJson(match.exercise),
       setsCompleted: input.setsCompleted,
       repsCompleted: input.repsCompleted,
       weightUsed: input.weightUsed,
@@ -119,6 +119,12 @@ export async function upsertExerciseLogForUser(input: ExerciseLogInput) {
       completed: input.completed,
     },
     update: {
+      planVersionId: plan.currentVersionId!,
+      weekNum: match.week.weekNum,
+      dayNum: match.day.dayNum,
+      sessionKey: match.session.key,
+      exerciseName: match.exercise.name,
+      prescribedSnapshot: toStoredJson(match.exercise),
       setsCompleted: input.setsCompleted,
       repsCompleted: input.repsCompleted,
       weightUsed: input.weightUsed,
@@ -130,4 +136,8 @@ export async function upsertExerciseLogForUser(input: ExerciseLogInput) {
   });
 
   return { ok: true as const };
+}
+
+export function clonePlanSnapshot(snapshot: PlanSnapshot): PlanSnapshot {
+  return JSON.parse(JSON.stringify(snapshot)) as PlanSnapshot;
 }

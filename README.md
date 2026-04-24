@@ -1,58 +1,75 @@
-# Climb512 — AI Climbing Training App
+# Climb512 - AI Climbing Training App
 
-A personalised climbing training plan generator. Fill in your goals, grade, age, equipment and schedule — get a day-by-day plan for 4–16 weeks.
+Climb512 is a Next.js app that generates personalized climbing plans, stores them as versioned JSON snapshots, and lets users log workouts against the exact plan version they performed.
 
-## Quick Start (Docker)
+## Quick start
 
 ```bash
-# From the repo root
-docker compose up --build
+docker compose up --build -d
 ```
 
-Then open http://localhost:8080
+Then open `http://localhost:8080`.
 
-**Login:** `climber1` / `climbin512!`
+Register a user on the login page. There are no hardcoded app credentials.
 
 ## What it does
 
-1. **Login** with the demo credentials
-2. **Onboarding form** — select goals, current/target grade, age, plan length, days/week, and available equipment (preset + custom)
-3. **Plan generation** — a structured day-by-day training plan is generated based on your inputs
-4. **Plan viewer** — week-by-week scrollable selector; each week shows all 7 days; click any day to expand/collapse it
+1. Register or sign in
+2. Fill out onboarding with goals, grades, age, schedule, equipment, and discipline
+3. Generate an AI plan
+4. View and log workouts week by week
+5. Ask AI to reorder a week or adjust difficulty
+6. Accept changes as a new plan version
 
-## Architecture
+## Current architecture
 
-```
-climb512/
-  app/              # Next.js 14 (App Router)
-    src/
-      app/          # Pages & server actions
-      components/   # React components
-      lib/          # Prisma client, session, plan generator
-    prisma/         # Schema & migrations
-  docker-compose.yml
-```
+- Framework: Next.js 14 App Router + React 18
+- Auth: `iron-session` cookie auth + `bcryptjs`
+- DB: PostgreSQL 16 + Prisma 7
+- AI: OpenRouter-compatible chat completions via plain `fetch`
+- Storage model:
+  - `Plan` is the long-lived container
+  - `PlanVersion` stores `profileSnapshot` and `planSnapshot` JSON
+  - `WorkoutLog` stores what the user actually did against snapshot exercise keys
 
-- **Auth**: Iron session with hardcoded demo user
-- **Database**: PostgreSQL (Docker) + Prisma ORM
-- **AI**: Deterministic plan generator (swappable for Claude API)
-- **UI**: shadcn/ui + Tailwind CSS
+See [docs/data-model.md](/abs/path/c:/Users/beatt/projects/cursor/climb512/docs/data-model.md) for the full schema and snapshot shapes.
 
-## Scaling to 1000s of users
-
-The Docker Compose setup is single-node but the architecture is ready to scale:
-
-- Replace `docker compose` with Kubernetes / ECS and scale the `web` service horizontally
-- Add a connection pooler (PgBouncer) in front of PostgreSQL
-- Add Redis for session storage (swap iron-session cookie store)
-- The `migrate` service runs once on deploy and is idempotent
-
-## Development (without Docker)
+## Development
 
 ```bash
 cd app
 npm install
-# Set DATABASE_URL in .env to your local PostgreSQL
-npx prisma migrate dev
-npm run dev
+npx prisma generate
+npx tsc --noEmit
+npm run build
 ```
+
+## Docker workflow
+
+```bash
+docker compose up --build -d
+docker compose logs web --tail=20
+docker compose down
+docker compose down -v
+```
+
+The `migrate` container replays SQL migration files from `app/prisma/migrations` and records applied files in `_app_migrations`.
+
+## Tests
+
+The Playwright suite lives in `testing/`.
+
+```bash
+cd testing
+npx playwright test tests/auth.spec.ts tests/dashboard.spec.ts
+npx playwright test tests/onboarding.spec.ts --grep "generates a plan end-to-end"
+```
+
+## Documentation
+
+- [docs/overview.md](/abs/path/c:/Users/beatt/projects/cursor/climb512/docs/overview.md)
+- [docs/architecture.md](/abs/path/c:/Users/beatt/projects/cursor/climb512/docs/architecture.md)
+- [docs/data-model.md](/abs/path/c:/Users/beatt/projects/cursor/climb512/docs/data-model.md)
+- [docs/development.md](/abs/path/c:/Users/beatt/projects/cursor/climb512/docs/development.md)
+- [docs/deployment.md](/abs/path/c:/Users/beatt/projects/cursor/climb512/docs/deployment.md)
+- [docs/ai-integration.md](/abs/path/c:/Users/beatt/projects/cursor/climb512/docs/ai-integration.md)

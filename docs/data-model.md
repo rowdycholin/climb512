@@ -2,115 +2,181 @@
 
 Schema file: `app/prisma/schema.prisma`
 
-## Entity hierarchy
+## Model overview
 
+The app now uses a versioned plan model:
+
+```text
+User
+  └── Plan
+        ├── currentVersionId -> PlanVersion
+        ├── PlanVersion (1:many)
+        └── WorkoutLog (1:many)
 ```
-TrainingProfile
-  └── TrainingPlan (1:many — a profile can have multiple plans)
-        └── Week
-              └── Day
-                    └── DaySession
-                          └── Exercise
-                                └── ExerciseLog (one per user per exercise)
-```
+
+Instead of storing weeks, days, sessions, and exercises as separate relational rows, each accepted plan revision is stored as a JSON snapshot on `PlanVersion`.
+
+That gives the app:
+
+- immutable plan history
+- safer AI adjustments
+- simpler diff / approval flows
+- durable workout logs tied to the exact plan version they came from
 
 ## Tables
 
-### TrainingProfile
-Stores the user's inputs from the onboarding form.
+### User
+
+Stores registered app users.
 
 | Column | Type | Notes |
 |---|---|---|
 | id | TEXT (cuid) | PK |
-| userId | TEXT | `"demo-user-001"` for demo account |
-| goals | TEXT[] | e.g. `["send-project", "improve-finger"]` |
-| currentGrade | TEXT | e.g. `"V4"` |
-| targetGrade | TEXT | e.g. `"V6"` |
-| age | INT | |
-| weeksDuration | INT | 4, 8, 12, or 16 |
-| daysPerWeek | INT | 2–6 |
-| equipment | TEXT[] | e.g. `["hangboard", "bouldering-wall"]` |
+| username | TEXT | Unique |
+| passwordHash | TEXT | bcrypt hash |
+| createdAt | TIMESTAMP | |
+| updatedAt | TIMESTAMP | |
+
+### Plan
+
+The long-lived container for one user plan.
+
+| Column | Type | Notes |
+|---|---|---|
+| id | TEXT (cuid) | PK |
+| userId | TEXT | FK -> User |
+| title | TEXT? | Display label, usually `currentGrade -> targetGrade` |
+| currentVersionId | TEXT? | FK -> PlanVersion, current active revision |
+| createdAt | TIMESTAMP | Used to anchor the current week calculation |
+| updatedAt | TIMESTAMP | Updated when a new version becomes current |
+
+### PlanVersion
+
+Stores one full accepted snapshot of the plan and onboarding profile.
+
+| Column | Type | Notes |
+|---|---|---|
+| id | TEXT (cuid) | PK |
+| planId | TEXT | FK -> Plan |
+| versionNum | INT | Monotonic within a plan |
+| basedOnVersionId | TEXT? | FK -> PlanVersion, parent revision |
+| changeType | TEXT | e.g. `generated`, `ai_reorder`, `ai_difficulty` |
+| changeSummary | TEXT? | Human-readable summary |
+| effectiveFromWeek | INT? | First week affected by the revision |
+| profileSnapshot | JSONB | Onboarding input snapshot |
+| planSnapshot | JSONB | Full week/day/session/exercise snapshot |
 | createdAt | TIMESTAMP | |
 
-### TrainingPlan
-Links a profile to a set of weeks. A profile can have multiple plans (e.g. re-generated).
+**Unique constraint:** `(planId, versionNum)`
+
+### WorkoutLog
+
+Stores what the user actually did for one exercise in one plan.
 
 | Column | Type | Notes |
 |---|---|---|
 | id | TEXT (cuid) | PK |
-| profileId | TEXT | FK → TrainingProfile |
-| createdAt | TIMESTAMP | Used to calculate "current week" on load |
-
-### Week
-One week of the training plan.
-
-| Column | Type | Notes |
-|---|---|---|
-| id | TEXT (cuid) | PK |
-| planId | TEXT | FK → TrainingPlan |
-| weekNum | INT | 1-based (1, 2, 3…) |
-| theme | TEXT | e.g. `"Foundation & Technique"`, `"Deload & Recovery"` |
-
-### Day
-One day within a week (always 7 days per week, including rest days).
-
-| Column | Type | Notes |
-|---|---|---|
-| id | TEXT (cuid) | PK |
-| weekId | TEXT | FK → Week |
-| dayNum | INT | 1–7 |
-| dayName | TEXT | `"Monday"` … `"Sunday"` |
-| focus | TEXT | e.g. `"Finger Strength"`, `"Rest & Recovery"` |
-| isRest | BOOLEAN | Rest days still have an Active Recovery session |
-
-### DaySession
-A named block within a day (e.g. Warm-Up, Climbing Endurance, Cool-Down).
-
-| Column | Type | Notes |
-|---|---|---|
-| id | TEXT (cuid) | PK |
-| dayId | TEXT | FK → Day |
-| name | TEXT | e.g. `"Warm-Up"` |
-| description | TEXT | One-sentence description of the session block |
-| duration | INT | Total minutes for this block |
-
-### Exercise
-A single exercise within a session block.
-
-| Column | Type | Notes |
-|---|---|---|
-| id | TEXT (cuid) | PK |
-| sessionId | TEXT | FK → DaySession |
-| name | TEXT | e.g. `"Half-crimp hangs"` |
-| sets | TEXT? | e.g. `"4"` |
-| reps | TEXT? | e.g. `"3–5 attempts"` |
-| duration | TEXT? | e.g. `"7s on / 3s off × 6 reps"` |
-| rest | TEXT? | e.g. `"3 min between sets"` |
-| notes | TEXT? | Coaching cue or modification note |
-| order | INT | Display order within the session |
-
-All prescription fields are TEXT (not INT) to accommodate ranges and compound values like `"7s on / 3s off"`.
-
-### ExerciseLog
-Records what the user actually did for one exercise. One row per user per exercise (upserted).
-
-| Column | Type | Notes |
-|---|---|---|
-| id | TEXT (cuid) | PK |
-| exerciseId | TEXT | FK → Exercise (CASCADE delete) |
-| userId | TEXT | Ties log to a user without a full User table |
-| loggedAt | TIMESTAMP | Updated on each save |
+| userId | TEXT | FK -> User |
+| planId | TEXT | FK -> Plan |
+| planVersionId | TEXT | FK -> PlanVersion |
+| weekNum | INT | Week number from the referenced plan version |
+| dayNum | INT | Day number from the referenced plan version |
+| sessionKey | TEXT | Stable session key from the snapshot |
+| exerciseKey | TEXT | Stable exercise key from the snapshot |
+| exerciseName | TEXT | Convenience copy for history views |
+| prescribedSnapshot | JSONB | Stored prescription for that exercise at log time |
 | setsCompleted | INT? | Actual sets done |
-| repsCompleted | TEXT? | Actual reps / time (free text) |
-| weightUsed | TEXT? | e.g. `"10kg"`, `"bodyweight"` |
-| durationActual | TEXT? | e.g. `"7s"`, `"22 min"` |
-| notes | TEXT? | How it felt, modifications made |
-| completed | BOOLEAN | Checkbox — marks the exercise as done |
+| repsCompleted | TEXT? | Actual reps / time |
+| weightUsed | TEXT? | e.g. `10kg`, `bodyweight` |
+| durationActual | TEXT? | e.g. `7s`, `20 min` |
+| notes | TEXT? | User-entered notes |
+| completed | BOOLEAN | Marked complete in the UI |
+| loggedAt | TIMESTAMP | Updated on each save |
 
-**Unique constraint:** `(exerciseId, userId)` — one log entry per exercise per user. The `logExercise` server action uses Prisma `upsert` against this constraint.
+**Unique constraint:** `(userId, planId, exerciseKey)`
 
-## Planned fields (not yet implemented)
+## Snapshot shapes
 
-- `Day.completedAt` — timestamp when user marked entire day done
-- `TrainingProfile.notes` — freeform notes from onboarding
-- `User` table — when multi-tenancy is added
+### `profileSnapshot`
+
+JSON copy of the onboarding form:
+
+```json
+{
+  "goals": ["send-project"],
+  "currentGrade": "V4",
+  "targetGrade": "V6",
+  "age": 28,
+  "weeksDuration": 4,
+  "daysPerWeek": 2,
+  "equipment": ["hangboard"],
+  "discipline": "bouldering",
+  "createdAt": "2026-04-24T18:00:00.000Z"
+}
+```
+
+### `planSnapshot`
+
+Full plan content for one accepted version:
+
+```json
+{
+  "weeks": [
+    {
+      "key": "week-1",
+      "weekNum": 1,
+      "theme": "Foundation",
+      "days": [
+        {
+          "key": "w1-d1",
+          "dayNum": 1,
+          "dayName": "Monday",
+          "focus": "Finger Strength",
+          "isRest": false,
+          "sessions": [
+            {
+              "key": "w1-d1-s1-finger-strength",
+              "name": "Finger Strength",
+              "description": "Short max recruitment session",
+              "duration": 45,
+              "exercises": [
+                {
+                  "key": "w1-d1-s1-e1-half-crimp-hangs",
+                  "name": "Half-crimp hangs",
+                  "sets": "4",
+                  "reps": null,
+                  "duration": "7s",
+                  "rest": "3 min",
+                  "notes": "Stay engaged"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
+```
+
+## How revisions work
+
+When a user accepts an AI adjustment:
+
+1. the existing `Plan` stays the same
+2. a new `PlanVersion` row is created
+3. `Plan.currentVersionId` is updated to point at that new version
+4. old `WorkoutLog` rows remain attached to the earlier version they were logged against
+
+This means a user can:
+
+- log Weeks 1-3 on Version 1
+- accept a Week 4+ adjustment
+- continue on Version 2
+- still review their old Week 1-3 prescribed work and logged performance later
+
+## Key design rule
+
+Plans are versioned documents.
+
+Logs are immutable facts tied to a specific plan version and snapshot exercise key.

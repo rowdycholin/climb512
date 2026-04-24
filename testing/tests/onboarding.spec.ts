@@ -62,6 +62,6 @@ test.describe("Onboarding form", () => {
     // Submit — AI call can take a while
     await page.click('button:has-text("Generate My Training Plan")');
     await expect(page).toHaveURL(/\/plan\//, { timeout: 90_000 });
-    await expect(page.getByText(/Week 1/i)).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByRole("heading", { name: /Week 1/i })).toBeVisible({ timeout: 10_000 });
   });
 });
