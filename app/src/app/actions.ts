@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import bcrypt from "bcryptjs";
 import { getSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
+import { upsertExerciseLogForUser } from "@/lib/plan-access";
 import type { PlanInput } from "@/lib/plan-generator";
 import { generatePlanWithAI } from "@/lib/ai-plan-generator";
 
@@ -188,11 +189,14 @@ export async function logExercise(formData: FormData) {
   const notes = (formData.get("notes") as string) || null;
   const completed = formData.get("completed") === "true";
 
-  await prisma.exerciseLog.upsert({
-    where: { exerciseId_userId: { exerciseId, userId: session.userId } },
-    create: { exerciseId, userId: session.userId, setsCompleted, repsCompleted, weightUsed, durationActual, notes, completed },
-    update: { setsCompleted, repsCompleted, weightUsed, durationActual, notes, completed, loggedAt: new Date() },
+  return upsertExerciseLogForUser({
+    exerciseId,
+    userId: session.userId,
+    setsCompleted,
+    repsCompleted,
+    weightUsed,
+    durationActual,
+    notes,
+    completed,
   });
-
-  return { ok: true };
 }

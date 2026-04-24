@@ -1,6 +1,6 @@
 import { notFound, redirect } from "next/navigation";
 import { getSession } from "@/lib/session";
-import { prisma } from "@/lib/prisma";
+import { findOwnedPlanWithUserLogs } from "@/lib/plan-access";
 import PlanViewer from "@/components/PlanViewer";
 import { logout } from "@/app/actions";
 import { Button } from "@/components/ui/button";
@@ -9,32 +9,7 @@ export default async function PlanPage({ params }: { params: { id: string } }) {
   const session = await getSession();
   if (!session.isLoggedIn) redirect("/login");
 
-  const plan = await prisma.trainingPlan.findUnique({
-    where: { id: params.id },
-    include: {
-      profile: true,
-      weeks: {
-        orderBy: { weekNum: "asc" },
-        include: {
-          days: {
-            orderBy: { dayNum: "asc" },
-            include: {
-              sessions: {
-                include: {
-                  exercises: {
-                    orderBy: { order: "asc" },
-                    include: {
-                      logs: { where: { userId: session.userId } },
-                    },
-                  },
-                },
-              },
-            },
-          },
-        },
-      },
-    },
-  });
+  const plan = await findOwnedPlanWithUserLogs(params.id, session.userId);
 
   if (!plan) notFound();
 

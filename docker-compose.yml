@@ -29,11 +29,12 @@ services:
       context: ./app
       target: runner
     restart: unless-stopped
-    network_mode: host
+    ports:
+      - "8080:8080"
     env_file:
       - ./app/.env
     environment:
-      DATABASE_URL: postgresql://climber:climber512@localhost:5432/climbapp
+      DATABASE_URL: postgresql://climber:climber512@postgres:5432/climbapp
       SESSION_SECRET: super-secret-session-key-change-in-production-32chars!!
     depends_on:
       migrate:
