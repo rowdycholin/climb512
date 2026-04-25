@@ -1,325 +1,92 @@
-# AI Simulator Options
+# AI Simulator
 
-## Goal
+## Current status
 
-Provide a zero-cost AI backend simulator for local development, Docker demos, and automated testing so the app can:
+The simulator is now implemented as a separate top-level service in:
 
-- generate plans
-- exercise the same parsing and validation code paths as live plan generation
-- avoid paid model calls during routine testing
+- `simulator/`
 
-The preferred design is to keep the simulator completely separate from the production app code in its own top-level `simulator/` directory.
+It currently supports **plan generation only**.
 
-This document is intentionally scoped to **plan generation only**.
-
-AI-based plan adjustments are out of scope for now because that feature direction is likely to be redesigned rather than extended from the current implementation.
-
-## Current scope
-
-The simulator only needs to satisfy the current plan generation path:
-
-- [app/src/lib/ai-plan-generator.ts](/abs/path/c:/Users/beatt/projects/cursor/climb512/app/src/lib/ai-plan-generator.ts)
-
-Out of scope:
+Out of scope for now:
 
 - AI reorder adjustments
 - AI difficulty adjustments
-- any future conversational coaching workflow
+- future conversational coaching flows
 
-Those should be revisited later when the AI adjustment UX and backend contract are redesigned.
+## Why it exists
 
-## Requirements
+The simulator lets the app exercise the plan-generation path without spending money on a live model during normal development, Docker demos, or automated tests.
 
-The simulator should:
+## Current structure
 
-- be free to run
-- work in Docker and local dev
-- support plan generation requests only
-- return valid JSON in the same broad shape as the live provider
-- be deterministic enough for tests
-- be easy to turn on and off with env vars
-
-Nice to have:
-
-- optional seeded randomness for more realistic outputs
-- response delay controls to simulate network/model latency
-- error-mode toggles to test retries and parse failures
-
-## Option 1: In-Process Mock Provider
-
-### How it works
-
-Add a small abstraction layer in the app:
-
-- `generatePlanWithAI()` stops calling `fetch()` directly
-- it calls a shared provider interface such as `completeJson({ kind, prompt, input })`
-- when `AI_PROVIDER=mock`, the app uses in-process TypeScript generation instead of HTTP
-
-Example:
-
-- `app/src/lib/ai-provider.ts`
-- `app/src/lib/mock-ai-provider.ts`
-
-The mock provider would:
-
-- generate week JSON from the structured `PlanInput`
-- return objects that match the same parsed schema used today
-
-### Pros
-
-- fastest and simplest runtime
-- no extra container or service
-- easiest to debug
-- easiest to make deterministic for tests
-- strongest type safety because it lives in the same codebase
-
-### Cons
-
-- does not exercise the HTTP integration layer
-- can drift away from real provider response shapes if not maintained
-- less realistic if we want to test transport failures, timeouts, or malformed bodies
-- weak separation from production app code
-
-### Best fit
-
-- unit/integration testing
-- local dev when speed matters most
-- deterministic CI
-
-## Option 2: Local HTTP Simulator Service
-
-### How it works
-
-Run a local service that mimics the OpenAI-compatible API:
-
-- listens on something like `http://simulator:8787/v1/chat/completions`
-- Docker and local env point `ANTHROPIC_BASE_URL` to that service
-- the app continues using `fetch()` unchanged
-
-The service would inspect the request and return generated week JSON for plan generation prompts.
-
-It should be implemented in its own top-level directory, for example:
-
-- `simulator/`
 - `simulator/package.json`
-- `simulator/src/server.ts`
-- `simulator/src/routes/chat-completions.ts`
-- `simulator/src/lib/generate-plan.ts`
-- `simulator/src/lib/templates.ts`
+- `simulator/Dockerfile`
+- `simulator/src/server.js`
+- `simulator/src/generate-plan.js`
+- `simulator/src/templates.js`
 
-Not recommended:
+## Current API
 
-- a Next route inside `app/`, because that blurs the boundary between the real app and the fake provider
+### `POST /v1/chat/completions`
 
-### Pros
+Accepts an OpenAI-compatible chat completions payload and returns generated week JSON for plan-generation prompts.
 
-- preserves the current HTTP call pattern
-- exercises headers, request body shape, response parsing, and network errors
-- easy to add simulation modes:
-  - slow responses
-  - 500s
-  - invalid JSON
-  - truncated output
-- strong separation from app code
+### `GET /health`
 
-### Cons
+Simple liveness check.
 
-- more moving parts than an in-process provider
-- another service to start and maintain
-- slightly slower and noisier in tests
+### `GET /config`
 
-### Best fit
+Returns the active simulator runtime config:
 
-- full-stack E2E testing
-- Docker demo mode
-- verifying provider integration behavior without paid calls
+- `seed`
+- `scenario`
+- `latencyMs`
+- `errorMode`
+- supported scenarios
 
-## Option 3: Recorded Fixture Replay
+## Docker behavior
 
-### How it works
-
-Capture a library of real plan-generation responses once, then replay them locally.
-
-The replay layer maps known inputs to stored outputs:
-
-- `simulator/fixtures/plan-generation/*.json`
-
-At runtime:
-
-- compute a lookup key from the request
-- load a stored response
-- return it either in-process or over a mock HTTP endpoint
-
-### Pros
-
-- realistic output style if fixtures came from real model responses
-- highly deterministic
-- very cheap to run after fixtures exist
-- useful for regression testing parser behavior
-
-### Cons
-
-- narrow coverage unless many fixtures are curated
-- brittle when prompts evolve
-- not flexible for arbitrary user inputs in manual testing
-- requires periodic fixture refresh if response contracts change
-
-### Best fit
-
-- regression suites
-- parser validation
-- stable smoke tests
-
-## Option 4: Rule-Based Plan Generator Service
-
-### How it works
-
-Use a deterministic rule engine to generate believable week JSON without any real model call.
-
-For plan generation:
-
-- derive training days from `daysPerWeek`
-- assign themes by week number and training phase
-- choose exercise templates by discipline and equipment
-- return compact strings that match the current schema contract
-
-This is the most practical “fake AI” option for the current app because it supports arbitrary plan-generation inputs without relying on live provider calls.
-
-### Pros
-
-- flexible for arbitrary testing inputs
-- deterministic enough for CI
-- can be made realistic enough for manual testing
-- works well as the core logic behind a standalone simulator service
-
-### Cons
-
-- more implementation work than a simple mock
-- still not a real model
-- requires thought to keep outputs varied but valid
-
-### Best fit
-
-- ongoing demo mode
-- local manual testing
-- Docker-based development
-
-## Comparison
-
-| Option | Realism | Simplicity | Tests | Exercises HTTP layer | Flexibility | Separation |
-|---|---|---:|---:|---:|---:|---:|
-| In-process mock | Medium | High | High | No | Medium | Low |
-| Local HTTP simulator | High | Medium | High | Yes | Medium | High |
-| Fixture replay | Medium | Medium | High | Optional | Low | High |
-| Rule-based generator service | Medium-High | Medium | High | Yes, if wrapped in HTTP | High | High |
-
-## Recommendation
-
-Recommend **a rule-based plan generator exposed through a separate top-level `simulator/` HTTP service**.
-
-In practice that means:
-
-1. build a small rule-based simulator service in `simulator/`
-2. expose it through a local OpenAI-compatible mock endpoint
-3. switch between real AI and simulator with env vars
-
-This gives the best balance for this project because:
-
-- it preserves the current `fetch()` integration path
-- it works cleanly in Docker
-- it supports both manual testing and Playwright tests
-- it can generate arbitrary plans instead of only replaying canned fixtures
-- it can still offer deterministic modes for CI
-- it keeps the fake backend clearly separate from production app code
-- it avoids investing in AI-adjustment simulation before that feature is redesigned
-
-## Recommended Design
-
-### Environment switch
-
-Add env vars such as:
+In Docker, the `web` service points `ANTHROPIC_BASE_URL` at:
 
 ```text
-AI_MODE=live | simulate
+http://simulator:8787
+```
+
+So plan generation uses the simulator by default unless you explicitly override the base URL.
+
+## Runtime controls
+
+Environment variables:
+
+```text
 AI_SIMULATOR_SEED=demo-seed
+AI_SIMULATOR_SCENARIO=baseline
 AI_SIMULATOR_LATENCY_MS=0
 AI_SIMULATOR_ERROR_MODE=none
 ```
 
-Behavior:
+### Seed
 
-- `AI_MODE=live`: current provider behavior
-- `AI_MODE=simulate`: point the app to the local simulator service
+`AI_SIMULATOR_SEED` makes generated plans deterministic for the same input + scenario combination.
 
-Suggested base URLs:
+### Scenario
 
-- local dev: `ANTHROPIC_BASE_URL=http://localhost:8787`
-- Docker: `ANTHROPIC_BASE_URL=http://simulator:8787`
+Current scenarios:
 
-### Suggested architecture
+- `baseline`
+- `hangboard_bouldering`
+- `sport_endurance`
+- `deload_preview`
 
-Simulator service:
+### Latency
 
-- `simulator/`
-- `simulator/package.json`
-- `simulator/src/server.ts`
-- `simulator/src/routes/chat-completions.ts`
-- `simulator/src/lib/generate-plan.ts`
-- `simulator/src/lib/templates.ts`
+`AI_SIMULATOR_LATENCY_MS` adds an artificial delay before the response.
 
-Responsibilities:
+### Error mode
 
-- generate week JSON from `PlanInput`
-- support seeded deterministic output
-- optionally simulate provider-like errors and latency
-
-The simulator should return a response shaped like:
-
-```json
-{
-  "choices": [
-    {
-      "message": {
-        "content": "{\"weekNum\":1,\"theme\":\"Foundation\",\"days\":[...]}"
-      },
-      "finish_reason": "stop"
-    }
-  ]
-}
-```
-
-That keeps [ai-plan-generator.ts](/abs/path/c:/Users/beatt/projects/cursor/climb512/app/src/lib/ai-plan-generator.ts) very close to its current behavior while preserving a clean app/provider boundary.
-
-### Suggested routing logic
-
-The simulator can detect plan-generation requests from the existing prompt shape for now.
-
-Longer-term, a cleaner design would be to pass explicit metadata into a shared AI client:
-
-- `taskType: "plan_generation"`
-
-That would reduce prompt parsing fragility and make the simulator contract clearer.
-
-## Example behaviors
-
-### Plan generation
-
-Inputs:
-
-- `daysPerWeek=3`
-- `discipline=bouldering`
-- `equipment=["hangboard"]`
-
-Simulator output:
-
-- 3 training days + 4 rest days
-- week theme based on phase
-- strength/power exercises chosen from a template library
-- compact strings matching current schema rules
-
-## Error simulation modes
-
-The simulator should support a few targeted failure modes:
+Current error modes:
 
 - `none`
 - `http_500`
@@ -327,41 +94,46 @@ The simulator should support a few targeted failure modes:
 - `invalid_json`
 - `truncated_json`
 
-That will let us test:
+## Logging
 
-- retry behavior
-- JSON repair
-- user-facing error messages
+The simulator logs plan-generation requests so you can tail it during testing:
 
-## Rollout Plan
+```bash
+docker compose logs -f simulator
+```
 
-### Phase 1
+Example line:
 
-- add simulator doc and env contract
-- implement rule-based simulator service in `simulator/`
-- support plan generation only
+```text
+[simulator] generated plan week user=climber1 week=1/4 daysPerWeek=2 discipline=bouldering grades=V4->V6 scenario=baseline seed=demo-seed mode=none
+```
 
-### Phase 2
+The username header is only sent when the app is talking to a simulator-like local backend, not to a live provider.
 
-- wire it into Docker compose
-- run it as a separate `simulator` service
-- add Playwright config for simulator mode
+## Current generator behavior
 
-### Phase 3
+The simulator uses a rule-based generator:
 
-- add deterministic fixture-backed scenarios for regression tests
-- add error simulation modes
+- training day pattern comes from `daysPerWeek`
+- theme comes from week number and phase
+- exercise templates come from discipline
+- equipment can swap in specific exercise variants
+- seeded randomness adds controlled variation
 
-## Recommended first implementation
+This keeps plans believable enough for UI testing without pretending to be a real model.
 
-If we want the smallest useful first step:
+## Recommended use
 
-- create `simulator/`
-- create a local mock chat completions endpoint in that service
-- gate it with `AI_MODE=simulate`
-- support:
-  - plan generation
-  - deterministic seed
-  - optional latency and error modes
+- Docker demos
+- Playwright onboarding generation tests
+- manual testing of the plan-generation path
+- parser and error-handling checks
 
-That would give us a practical, no-cost testing mode without changing the product UX or spending API money during normal development.
+## Future improvements
+
+The next reasonable simulator improvements would be:
+
+- more scenarios
+- fixture-backed regression cases
+- stronger log visibility and request introspection
+- explicit scenario overrides from tests

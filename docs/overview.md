@@ -1,47 +1,38 @@
-# Climb512 - Application Overview
+# Application Overview
 
 ## What it does
 
-Climb512 is a web application that generates personalized climbing training plans, stores them as versioned snapshots, and lets users log what they actually did in each workout.
+Climb512 generates personalized climbing plans, stores them as versioned snapshots, and lets users log what they actually performed.
 
-Users:
+Users can:
 
 - register or sign in
-- fill out onboarding
-- generate an AI plan
-- view the plan by week
-- log workout performance
-- revise the plan over time through new plan versions
+- create multiple plans
+- generate a plan from onboarding inputs
+- log workouts by week and day
+- edit future weeks directly
+- preserve history when plans change later
 
-## Core user flow
+## Core flow
 
 ```text
-Register / Login -> Dashboard or Onboarding -> Generate plan -> View week -> Log workouts -> Revise future weeks
+Register / Login -> Dashboard or Onboarding -> Generate plan -> View week -> Log workouts -> Edit future weeks -> Save new version
 ```
-
-1. Login or register
-2. Dashboard lists the user's existing plans
-3. Onboarding captures goals, grades, age, equipment, schedule, and discipline
-4. AI generates the initial plan
-5. The app stores it as `Plan` + `PlanVersion`
-6. Users view and log workouts on the plan page
-7. Future changes are intended to move toward direct week editing, with AI as optional assistance
 
 ## Current product direction
 
-The app now has the right backend foundation for plan revision:
+The current backend is designed around revision-safe plans:
 
 - plans are versioned
-- logs remain tied to the version they came from
-- future edits can create new versions without corrupting history
+- logs stay attached to the version they came from
+- future edits create new `PlanVersion` rows instead of mutating history
 
-Because of that, the preferred UX direction is:
+The preferred UX direction is:
 
-- direct editing for reorder / move / delete / duplicate
-- AI used as a coach or helper
-- mobile-first interactions that do not depend entirely on drag-and-drop or text prompts
-
-See [plan-editing.md](/abs/path/c:/Users/beatt/projects/cursor/climb512/docs/plan-editing.md) for the proposed editing UX.
+- direct editing for day and exercise changes
+- mobile-friendly interactions
+- AI focused on plan generation
+- AI-assisted week adjustments treated as experimental and likely to be redesigned later
 
 ## Technology stack
 
@@ -53,12 +44,10 @@ See [plan-editing.md](/abs/path/c:/Users/beatt/projects/cursor/climb512/docs/pla
 | Database | PostgreSQL 16 |
 | ORM | Prisma 7 |
 | Auth | iron-session + bcryptjs |
-| AI | OpenRouter-compatible chat completions via plain `fetch` |
-| Containerization | Docker + Docker Compose |
+| AI transport | OpenAI-compatible chat completions via plain `fetch` |
+| Test stack | Playwright |
+| Containers | Docker Compose |
 
-## Key constraints
+## Important operational note
 
-- gym-focused app
-- multi-user ownership isolation
-- multiple plans per user
-- mobile-first design target
+In Docker, the app currently uses the local simulator service for plan generation by default. That keeps normal testing and demos off the paid provider path.

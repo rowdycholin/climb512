@@ -6,7 +6,7 @@
 - npm 10+
 - Docker Desktop
 
-## Initial setup
+## Local setup
 
 ```bash
 cd app
@@ -14,7 +14,9 @@ npm install
 npx prisma generate
 ```
 
-The app expects `app/.env` to provide:
+## Environment
+
+`app/.env` is used for non-Docker local app runs and still contains the live-provider defaults, for example:
 
 ```bash
 DATABASE_URL="postgresql://climber:climber512@localhost:5432/climbapp"
@@ -25,16 +27,29 @@ ANTHROPIC_MODEL="anthropic/claude-haiku-4-5"
 ANTHROPIC_MAX_TOKENS="5000"
 ```
 
-## Running locally
+In Docker, `docker-compose.yml` overrides the AI base URL so the app talks to the local simulator by default.
+
+## Running the app
 
 ### Docker-first workflow
 
 ```bash
 docker compose up --build -d
 docker compose logs web --tail=20
+docker compose logs simulator --tail=20
 ```
 
-App: `http://localhost:8080`
+Services:
+
+- app: `http://localhost:8080`
+- simulator: `http://localhost:8787`
+
+Useful simulator checks:
+
+```bash
+curl http://localhost:8787/health
+curl http://localhost:8787/config
+```
 
 ### Next.js dev server
 
@@ -44,6 +59,8 @@ If you want the app outside Docker, start PostgreSQL separately and then:
 cd app
 npm run dev
 ```
+
+Note: if you run the app outside Docker and keep `app/.env` unchanged, plan generation will go to the live provider, not the simulator.
 
 ## Migrations
 
@@ -66,7 +83,7 @@ The `migrate` service:
 - applies each `migration.sql` exactly once
 - fails fast on SQL errors
 
-If you need a clean DB because the schema changed incompatibly:
+If you need a clean DB:
 
 ```bash
 docker compose down -v
@@ -75,32 +92,29 @@ docker compose up --build -d
 
 ## Current schema model
 
-The app no longer stores plans as relational `Week/Day/Exercise` rows.
-
-Instead:
+The app stores plans as snapshots, not relational `Week/Day/Exercise` rows.
 
 - `Plan` is the top-level record
 - `PlanVersion` stores `profileSnapshot` and `planSnapshot` JSON
-- `WorkoutLog` stores actual performed work against snapshot exercise keys
+- `WorkoutLog` stores performed work against snapshot exercise keys
 
-That means most plan-shape changes now happen in snapshot helpers rather than Prisma nested relational writes.
+That means most plan-shape changes now happen in snapshot helpers rather than nested relational writes.
 
 ## Core commands
 
 ```bash
 cd app
+npx prisma generate
 npx tsc --noEmit
 npm run build
 npm run lint
 ```
 
+`npm run lint` may still require repository-level cleanup before it becomes a dependable automation check. `npm run build` is the more reliable verification command today.
+
 ## Common issues
 
 ### Prisma client types are stale
-
-You changed `schema.prisma` but the generated client still exposes old models.
-
-Fix:
 
 ```bash
 cd app
@@ -108,8 +122,6 @@ npx prisma generate
 ```
 
 ### Docker migration fails on startup
-
-Check:
 
 ```bash
 docker compose logs migrate
@@ -127,28 +139,26 @@ Check:
 
 ```bash
 docker compose logs web --tail=100
+docker compose logs simulator --tail=100
 ```
 
 Typical causes:
 
-- missing AI key
-- malformed model JSON
-- provider credit / token limit issues
-- failed DB write
+- simulator config not matching expectations
+- malformed JSON from the current AI backend
+- DB write failure after generation
 
-### Old session survives code changes unexpectedly
+### Old session survives longer than expected
 
-Session invalidation is tied to the running container boot marker. Recreating the app container should invalidate old sessions from a previous boot.
+Sessions are boot-scoped and time-limited. Recreating the `web` container should invalidate old sessions from a previous boot.
 
-### Logging or plan adjustments behave oddly
-
-Remember that logs and adjustments are now keyed by snapshot exercise/week identifiers, not relational exercise row IDs.
+### Direct editing or logging behaves oddly
 
 The first places to inspect are:
 
 - `app/src/lib/plan-snapshot.ts`
 - `app/src/lib/plan-access.ts`
-- `app/src/lib/ai-plan-adjuster.ts`
+- `app/src/components/PlanEditor.tsx`
 
 ## Tests
 
@@ -163,5 +173,5 @@ npx playwright test tests/onboarding.spec.ts --grep "generates a plan end-to-end
 Notes:
 
 - the current suite covers auth, dashboard, and onboarding
-- a legacy security spec was removed during the snapshot-model refactor because it targeted deleted tables
-- security regression coverage should be reintroduced against `Plan`, `PlanVersion`, and `WorkoutLog`
+- global teardown removes the shared `climber1` test user after a run
+- security regression coverage should be rebuilt around `Plan`, `PlanVersion`, and `WorkoutLog`

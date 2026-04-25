@@ -37,6 +37,37 @@ function getTrainingDayPattern(daysPerWeek) {
   return patterns[Math.max(1, Math.min(7, daysPerWeek))];
 }
 
+function hashString(value) {
+  let hash = 2166136261;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+
+  return hash >>> 0;
+}
+
+function createRng(seedValue) {
+  let state = seedValue >>> 0;
+  return () => {
+    state += 0x6d2b79f5;
+    let next = state;
+    next = Math.imul(next ^ (next >>> 15), next | 1);
+    next ^= next + Math.imul(next ^ (next >>> 7), next | 61);
+    return ((next ^ (next >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function shuffleList(items, rng) {
+  const next = [...items];
+  for (let index = next.length - 1; index > 0; index -= 1) {
+    const swapIndex = Math.floor(rng() * (index + 1));
+    [next[index], next[swapIndex]] = [next[swapIndex], next[index]];
+  }
+
+  return next;
+}
+
 function getPhaseTheme(weekNum, weeksDuration) {
   if (weekNum % 4 === 0) return "Deload & Movement";
 
@@ -45,6 +76,30 @@ function getPhaseTheme(weekNum, weeksDuration) {
   if (progress < 0.6) return "Strength Build";
   if (progress < 0.85) return "Power Focus";
   return "Peak & Specificity";
+}
+
+function applyScenarioOverrides(input, scenario) {
+  switch (scenario) {
+    case "hangboard_bouldering":
+      return {
+        ...input,
+        discipline: "bouldering",
+        equipment: Array.from(new Set([...input.equipment, "hangboard"])),
+      };
+    case "sport_endurance":
+      return {
+        ...input,
+        discipline: "sport",
+        daysPerWeek: Math.max(input.daysPerWeek, 3),
+      };
+    case "deload_preview":
+      return {
+        ...input,
+        weekNum: 4,
+      };
+    default:
+      return input;
+  }
 }
 
 function addEquipmentTweaks(exercises, equipment) {
@@ -84,8 +139,9 @@ function addEquipmentTweaks(exercises, equipment) {
   });
 }
 
-function buildTrainingDay(template, dayNum, equipment) {
+function buildTrainingDay(template, dayNum, equipment, rng) {
   const exercises = addEquipmentTweaks(template.exercises.slice(0, 4), equipment);
+  const durationJitter = Math.floor(rng() * 2) * 5;
 
   return {
     dayNum,
@@ -96,7 +152,7 @@ function buildTrainingDay(template, dayNum, equipment) {
       {
         name: template.sessionName,
         description: template.description,
-        duration: 45 + (exercises.length - 3) * 10,
+        duration: 45 + (exercises.length - 3) * 10 + durationJitter,
         exercises
       }
     ]
@@ -113,11 +169,15 @@ function buildRestDay(dayNum) {
   };
 }
 
-function generateWeekFromPrompt(prompt) {
-  const input = parsePrompt(prompt);
-  const templates = getTemplatesForDiscipline(input.discipline).focuses;
+function generateWeekFromPrompt(prompt, options = {}) {
+  const scenario = options.scenario ?? "baseline";
+  const seed = options.seed ?? "demo-seed";
+  const parsedInput = parsePrompt(prompt);
+  const input = applyScenarioOverrides(parsedInput, scenario);
+  const rng = createRng(hashString(`${seed}:${scenario}:${prompt}`));
+  const templates = shuffleList(getTemplatesForDiscipline(input.discipline).focuses, rng);
   const trainingDays = new Set(getTrainingDayPattern(input.daysPerWeek));
-  const weekOffset = Math.max(0, input.weekNum - 1);
+  const weekOffset = Math.max(0, input.weekNum - 1) + Math.floor(rng() * templates.length);
 
   const days = DAY_NAMES.map((_, index) => {
     const dayNum = index + 1;
@@ -127,7 +187,7 @@ function generateWeekFromPrompt(prompt) {
 
     const trainingIndex = Array.from(trainingDays).indexOf(dayNum);
     const template = templates[(trainingIndex + weekOffset) % templates.length];
-    return buildTrainingDay(template, dayNum, input.equipment);
+    return buildTrainingDay(template, dayNum, input.equipment, rng);
   });
 
   return {

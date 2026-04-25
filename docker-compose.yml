@@ -5,6 +5,8 @@ services:
     restart: unless-stopped
     environment:
       PORT: 8787
+      AI_SIMULATOR_SEED: ${AI_SIMULATOR_SEED:-demo-seed}
+      AI_SIMULATOR_SCENARIO: ${AI_SIMULATOR_SCENARIO:-baseline}
       AI_SIMULATOR_LATENCY_MS: ${AI_SIMULATOR_LATENCY_MS:-0}
       AI_SIMULATOR_ERROR_MODE: ${AI_SIMULATOR_ERROR_MODE:-none}
     ports:

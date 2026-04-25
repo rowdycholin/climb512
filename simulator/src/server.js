@@ -5,6 +5,9 @@ const { generateWeekFromPrompt } = require("./generate-plan");
 const PORT = parseInt(process.env.PORT ?? "8787", 10);
 const LATENCY_MS = parseInt(process.env.AI_SIMULATOR_LATENCY_MS ?? "0", 10);
 const ERROR_MODE = process.env.AI_SIMULATOR_ERROR_MODE ?? "none";
+const SEED = process.env.AI_SIMULATOR_SEED ?? "demo-seed";
+const SCENARIO = process.env.AI_SIMULATOR_SCENARIO ?? "baseline";
+const VALID_SCENARIOS = new Set(["baseline", "hangboard_bouldering", "sport_endurance", "deload_preview"]);
 
 function logLine(message) {
   const line = `${message}\n`;
@@ -59,6 +62,15 @@ function extractPlanSummary(prompt) {
     currentGrade: gradeMatch ? gradeMatch[1].trim() : "unknown",
     targetGrade: gradeMatch ? gradeMatch[2].trim() : "unknown"
   };
+}
+
+function getScenario(request) {
+  const headerValue = request.headers["x-ai-simulator-scenario"];
+  if (typeof headerValue === "string" && VALID_SCENARIOS.has(headerValue)) {
+    return headerValue;
+  }
+
+  return SCENARIO;
 }
 
 function buildChatCompletionResponse(content, finishReason = "stop") {
@@ -120,6 +132,19 @@ const server = http.createServer((request, response) => {
     return;
   }
 
+  if (request.method === "GET" && request.url === "/config") {
+    sendJson(response, 200, {
+      ok: true,
+      port: PORT,
+      latencyMs: LATENCY_MS,
+      errorMode: ERROR_MODE,
+      seed: SEED,
+      scenario: SCENARIO,
+      supportedScenarios: Array.from(VALID_SCENARIOS),
+    });
+    return;
+  }
+
   if (request.method !== "POST" || request.url !== "/v1/chat/completions") {
     sendText(response, 404, "Not found");
     return;
@@ -147,18 +172,25 @@ const server = http.createServer((request, response) => {
       return;
     }
 
-    const week = generateWeekFromPrompt(prompt);
+    const scenario = getScenario(request);
+    const week = generateWeekFromPrompt(prompt, {
+      seed: SEED,
+      scenario,
+    });
     const content = JSON.stringify(week);
     const username = request.headers["x-climb-user"] || "unknown-user";
     const summary = extractPlanSummary(prompt);
 
     const respond = () => {
       if (applyErrorMode(response, content)) {
+        logLine(
+          `[simulator] response mode=${ERROR_MODE} user=${username} week=${summary.weekNum}/${summary.weeksDuration ?? "?"} scenario=${scenario} seed=${SEED}`,
+        );
         return;
       }
 
       logLine(
-        `[simulator] generated plan week user=${username} week=${summary.weekNum}/${summary.weeksDuration ?? "?"} daysPerWeek=${summary.daysPerWeek ?? "?"} discipline=${summary.discipline} grades=${summary.currentGrade}->${summary.targetGrade}`,
+        `[simulator] generated plan week user=${username} week=${summary.weekNum}/${summary.weeksDuration ?? "?"} daysPerWeek=${summary.daysPerWeek ?? "?"} discipline=${summary.discipline} grades=${summary.currentGrade}->${summary.targetGrade} scenario=${scenario} seed=${SEED} mode=${ERROR_MODE}`,
       );
 
       sendJson(response, 200, buildChatCompletionResponse(content, "stop"));

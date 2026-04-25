@@ -19,7 +19,7 @@ Instead of storing weeks, days, sessions, and exercises as separate relational r
 That gives the app:
 
 - immutable plan history
-- safer AI adjustments
+- safer future revisions
 - simpler diff / approval flows
 - durable workout logs tied to the exact plan version they came from
 
@@ -60,7 +60,7 @@ Stores one full accepted snapshot of the plan and onboarding profile.
 | planId | TEXT | FK -> Plan |
 | versionNum | INT | Monotonic within a plan |
 | basedOnVersionId | TEXT? | FK -> PlanVersion, parent revision |
-| changeType | TEXT | e.g. `generated`, `ai_reorder`, `ai_difficulty` |
+| changeType | TEXT | e.g. `generated`, `manual_edit`, `ai_reorder`, `ai_difficulty` |
 | changeSummary | TEXT? | Human-readable summary |
 | effectiveFromWeek | INT? | First week affected by the revision |
 | profileSnapshot | JSONB | Onboarding input snapshot |
@@ -161,7 +161,7 @@ Full plan content for one accepted version:
 
 ## How revisions work
 
-When a user accepts an AI adjustment:
+When a user accepts a plan change:
 
 1. the existing `Plan` stays the same
 2. a new `PlanVersion` row is created
@@ -171,7 +171,7 @@ When a user accepts an AI adjustment:
 This means a user can:
 
 - log Weeks 1-3 on Version 1
-- accept a Week 4+ adjustment
+- save a Week 4+ edit or accept a future AI-driven revision
 - continue on Version 2
 - still review their old Week 1-3 prescribed work and logged performance later
 
