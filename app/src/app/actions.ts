@@ -358,7 +358,7 @@ export async function createPlan(formData: FormData) {
   if (!session.isLoggedIn) redirect("/login");
 
   const input = toPlanInput(formData);
-  const weeks = await generatePlanWithAI(input);
+  const weeks = await generatePlanWithAI(input, session.username);
   const profileSnapshot = createProfileSnapshot(input);
   const planSnapshot = buildPlanSnapshot(weeks);
 

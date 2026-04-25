@@ -7,6 +7,7 @@ const MAX_TOKENS = parseInt(process.env.ANTHROPIC_MAX_TOKENS ?? "5000", 10);
 // We always hit the OpenAI-compatible /v1/chat/completions endpoint.
 const BASE_URL = (process.env.ANTHROPIC_BASE_URL ?? "https://openrouter.ai/api").replace(/\/$/, "");
 const API_KEY = process.env.ANTHROPIC_API_KEY ?? "";
+const SEND_SIMULATOR_USER_HEADER = /^https?:\/\/(simulator|localhost|127\.0\.0\.1)(:\d+)?$/i.test(BASE_URL);
 
 const DAY_NAMES = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
 
@@ -194,7 +195,7 @@ interface ApiResult {
   finishReason: string;
 }
 
-async function callApi(input: PlanInput, weekNum: number): Promise<ApiResult> {
+async function callApi(input: PlanInput, weekNum: number, username?: string): Promise<ApiResult> {
   const url = `${BASE_URL}/v1/chat/completions`;
 
   const res = await fetch(url, {
@@ -202,6 +203,7 @@ async function callApi(input: PlanInput, weekNum: number): Promise<ApiResult> {
     headers: {
       "Content-Type": "application/json",
       "Authorization": `Bearer ${API_KEY}`,
+      ...(SEND_SIMULATOR_USER_HEADER && username ? { "X-Climb-User": username } : {}),
     },
     body: JSON.stringify({
       model: MODEL,
@@ -244,13 +246,13 @@ async function callApi(input: PlanInput, weekNum: number): Promise<ApiResult> {
   return { text, finishReason };
 }
 
-async function generateWeek(input: PlanInput, weekNum: number): Promise<WeekData> {
+async function generateWeek(input: PlanInput, weekNum: number, username?: string): Promise<WeekData> {
   const errors: string[] = [];
 
   for (let attempt = 1; attempt <= 2; attempt++) {
     let apiResult: ApiResult;
     try {
-      apiResult = await callApi(input, weekNum);
+      apiResult = await callApi(input, weekNum, username);
     } catch (e) {
       errors.push(`attempt ${attempt}: ${(e as Error).message}`);
       continue;
@@ -291,12 +293,12 @@ async function generateWeek(input: PlanInput, weekNum: number): Promise<WeekData
   throw new Error(`AI failed to generate week ${weekNum} after 2 attempts. ${errors.join(" | ")}`);
 }
 
-export async function generatePlanWithAI(input: PlanInput): Promise<WeekData[]> {
+export async function generatePlanWithAI(input: PlanInput, username?: string): Promise<WeekData[]> {
   const started = Date.now();
   console.log(`[ai-plan] generating ${input.weeksDuration} weeks in parallel`);
 
   const weeks = await Promise.all(
-    Array.from({ length: input.weeksDuration }, (_, i) => generateWeek(input, i + 1)),
+    Array.from({ length: input.weeksDuration }, (_, i) => generateWeek(input, i + 1, username)),
   );
 
   weeks.sort((a, b) => a.weekNum - b.weekNum);
