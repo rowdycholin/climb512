@@ -36,6 +36,37 @@ export interface PlanAdjustmentResponse {
   mode?: "reorder" | "difficulty";
 }
 
+interface EditedExerciseInput {
+  id: string;
+  name: string;
+  sets: string | null;
+  reps: string | null;
+  duration: string | null;
+  rest: string | null;
+  notes: string | null;
+}
+
+interface EditedSessionInput {
+  id: string;
+  name: string;
+  description: string;
+  duration: number;
+  exercises: EditedExerciseInput[];
+}
+
+interface EditedDayInput {
+  id: string;
+  focus: string;
+  isRest: boolean;
+  sessions: EditedSessionInput[];
+}
+
+interface EditedWeekInput {
+  id: string;
+  theme: string;
+  days: EditedDayInput[];
+}
+
 function toPlanInput(formData: FormData): PlanInput {
   const goals = formData.getAll("goals") as string[];
   const customGoal = (formData.get("customGoal") as string | null)?.trim();
@@ -128,6 +159,144 @@ function buildComparableWeek(snapshot: PlanSnapshot, weekKey: string): Comparabl
       })),
     })),
   };
+}
+
+function normalizeNullableString(value: unknown) {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return trimmed ? trimmed : null;
+}
+
+function parseEditedWeek(raw: unknown): EditedWeekInput | null {
+  if (!raw || typeof raw !== "object") return null;
+  const week = raw as Record<string, unknown>;
+  if (typeof week.id !== "string" || typeof week.theme !== "string" || !Array.isArray(week.days)) {
+    return null;
+  }
+
+  const days = week.days.map((day) => {
+    if (!day || typeof day !== "object") return null;
+    const item = day as Record<string, unknown>;
+    if (
+      typeof item.id !== "string" ||
+      typeof item.focus !== "string" ||
+      typeof item.isRest !== "boolean" ||
+      !Array.isArray(item.sessions)
+    ) {
+      return null;
+    }
+
+    const sessions = item.sessions.map((session) => {
+      if (!session || typeof session !== "object") return null;
+      const value = session as Record<string, unknown>;
+      if (
+        typeof value.id !== "string" ||
+        typeof value.name !== "string" ||
+        typeof value.description !== "string" ||
+        typeof value.duration !== "number" ||
+        !Array.isArray(value.exercises)
+      ) {
+        return null;
+      }
+
+      const exercises = value.exercises.map((exercise) => {
+        if (!exercise || typeof exercise !== "object") return null;
+        const entry = exercise as Record<string, unknown>;
+        if (typeof entry.id !== "string" || typeof entry.name !== "string") {
+          return null;
+        }
+
+        return {
+          id: entry.id,
+          name: entry.name.trim(),
+          sets: normalizeNullableString(entry.sets),
+          reps: normalizeNullableString(entry.reps),
+          duration: normalizeNullableString(entry.duration),
+          rest: normalizeNullableString(entry.rest),
+          notes: normalizeNullableString(entry.notes),
+        } satisfies EditedExerciseInput;
+      });
+
+      if (exercises.some((exercise) => !exercise || !exercise.name)) {
+        return null;
+      }
+
+      return {
+        id: value.id,
+        name: value.name.trim(),
+        description: value.description.trim(),
+        duration: Math.max(0, Math.min(300, Math.round(value.duration))),
+        exercises: exercises as EditedExerciseInput[],
+      } satisfies EditedSessionInput;
+    });
+
+    if (sessions.some((session) => !session || !session.name)) {
+      return null;
+    }
+
+    return {
+      id: item.id,
+      focus: item.focus.trim() || (item.isRest ? "Rest" : "Training"),
+      isRest: item.isRest,
+      sessions: sessions as EditedSessionInput[],
+    } satisfies EditedDayInput;
+  });
+
+  if (days.length !== 7 || days.some((day) => !day)) {
+    return null;
+  }
+
+  return {
+    id: week.id,
+    theme: week.theme.trim() || "Updated week",
+    days: days as EditedDayInput[],
+  };
+}
+
+function applyEditedWeekToSnapshot(currentSnapshot: PlanSnapshot, editedWeek: EditedWeekInput) {
+  const nextSnapshot = parsePlanSnapshot(JSON.parse(JSON.stringify(currentSnapshot)));
+  const weekIndex = nextSnapshot.weeks.findIndex((week) => week.key === editedWeek.id);
+  if (weekIndex === -1) {
+    throw new Error("Week not found");
+  }
+
+  const originalWeek = nextSnapshot.weeks[weekIndex];
+  const originalDayIds = new Set(originalWeek.days.map((day) => day.key));
+  const editedDayIds = new Set(editedWeek.days.map((day) => day.id));
+  if (
+    originalDayIds.size !== editedDayIds.size ||
+    Array.from(originalDayIds).some((id) => !editedDayIds.has(id))
+  ) {
+    throw new Error("Edited week changed the day structure");
+  }
+
+  const dayNames = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+
+  originalWeek.theme = editedWeek.theme;
+  originalWeek.days = editedWeek.days.map((day, index) => ({
+    key: day.id,
+    dayNum: index + 1,
+    dayName: dayNames[index],
+    focus: day.isRest ? "Rest" : day.focus,
+    isRest: day.isRest,
+    sessions: day.sessions.map((session) => ({
+      key: session.id,
+      name: session.name,
+      description: session.description,
+      duration: session.duration,
+      exercises: session.exercises.map((exercise) => ({
+        key: exercise.id,
+        name: exercise.name,
+        sets: exercise.sets,
+        reps: exercise.reps,
+        duration: exercise.duration,
+        rest: exercise.rest,
+        notes: exercise.notes,
+      })),
+    })),
+  }));
+
+  return nextSnapshot;
 }
 
 export async function login(_prevState: unknown, formData: FormData) {
@@ -379,6 +548,67 @@ export async function applyPlanAdjustment(formData: FormData): Promise<{ error?:
     basedOnVersionId: plan.currentVersion.id,
     effectiveFromWeek: weekNum,
   });
+
+  return { ok: true };
+}
+
+export async function saveEditedWeek(formData: FormData): Promise<{ error?: string; ok?: true }> {
+  const session = await getSession();
+  if (!session.isLoggedIn) return { error: "Please sign in again" };
+
+  const planId = formData.get("planId");
+  const weekKey = formData.get("weekId");
+  const editedWeekRaw = formData.get("editedWeek");
+
+  if (typeof planId !== "string" || typeof weekKey !== "string" || typeof editedWeekRaw !== "string") {
+    return { error: "Missing edited week payload" };
+  }
+
+  const plan = await findOwnedPlanById(planId, session.userId);
+  if (!plan?.currentVersion) return { error: "Plan not found" };
+
+  let parsedWeekJson: unknown;
+  try {
+    parsedWeekJson = JSON.parse(editedWeekRaw);
+  } catch {
+    return { error: "Edited week could not be read" };
+  }
+
+  const editedWeek = parseEditedWeek(parsedWeekJson);
+  if (!editedWeek || editedWeek.id !== weekKey) {
+    return { error: "Edited week payload was invalid" };
+  }
+
+  const weekNum = parseInt(weekKey.replace("week-", ""), 10);
+  const existingLog = await prisma.workoutLog.findFirst({
+    where: {
+      userId: session.userId,
+      planId,
+      weekNum,
+    },
+    select: { id: true },
+  });
+
+  if (existingLog) {
+    return { error: "This week already has workout logs, so it can no longer be edited safely" };
+  }
+
+  try {
+    const currentSnapshot = parsePlanSnapshot(plan.currentVersion.planSnapshot);
+    const nextSnapshot = applyEditedWeekToSnapshot(currentSnapshot, editedWeek);
+
+    await createPlanVersion({
+      planId,
+      profileSnapshot: parseProfileSnapshot(plan.currentVersion.profileSnapshot),
+      planSnapshot: nextSnapshot,
+      changeType: "manual_edit",
+      changeSummary: `Manual edit for Week ${weekNum}`,
+      basedOnVersionId: plan.currentVersion.id,
+      effectiveFromWeek: weekNum,
+    });
+  } catch (error) {
+    return { error: (error as Error).message };
+  }
 
   return { ok: true };
 }

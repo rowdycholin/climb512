@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import PlanEditor from "@/components/PlanEditor";
 import PlanAdjuster from "@/components/PlanAdjuster";
 import PlanViewer from "@/components/PlanViewer";
 
@@ -19,6 +20,7 @@ export default function PlanWorkspace({
 
   return (
     <>
+      <PlanEditor planId={planId} week={weeks[activeWeekIndex]} />
       <PlanAdjuster planId={planId} week={weeks[activeWeekIndex]} />
       <PlanViewer
         planId={planId}

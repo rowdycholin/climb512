@@ -128,9 +128,9 @@ export default function PlanAdjuster({ planId, week }: PlanAdjusterProps) {
   return (
     <Card className="mb-6 border-slate-200 bg-white shadow-sm">
       <CardHeader>
-        <CardTitle className="text-slate-800">Adjust This Week With AI</CardTitle>
+        <CardTitle className="text-slate-800">Ask The Coach</CardTitle>
         <CardDescription>
-          Ask for a reorder or a difficulty change for Week {week.weekNum}. You&apos;ll review the proposal before anything is saved.
+          Use AI when you want guidance or a suggested rewrite for Week {week.weekNum}. Manual editing now lives above this panel.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">

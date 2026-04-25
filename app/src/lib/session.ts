@@ -1,5 +1,5 @@
 import { getIronSession, IronSession } from "iron-session";
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
 
 export interface SessionData {
   userId: string;
@@ -21,20 +21,42 @@ export function getSessionExpiresAt() {
   return Date.now() + SESSION_TIMEOUT_MS;
 }
 
-const sessionOptions = {
-  password: process.env.SESSION_SECRET!,
-  cookieName: "climb-session",
-  ttl: SESSION_TIMEOUT_SECONDS,
-  cookieOptions: {
-    secure: process.env.NODE_ENV === "production",
-    httpOnly: true,
-    sameSite: "lax" as const,
-    maxAge: SESSION_TIMEOUT_SECONDS,
-  },
-};
+function isSecureRequest(headerStore: Headers) {
+  const forwardedProto = headerStore.get("x-forwarded-proto");
+  if (forwardedProto) {
+    return forwardedProto.split(",")[0]?.trim() === "https";
+  }
+
+  const origin = headerStore.get("origin");
+  if (origin) {
+    return origin.startsWith("https://");
+  }
+
+  const referer = headerStore.get("referer");
+  if (referer) {
+    return referer.startsWith("https://");
+  }
+
+  return false;
+}
+
+async function getSessionOptions() {
+  const headerStore = await headers();
+  return {
+    password: process.env.SESSION_SECRET!,
+    cookieName: "climb-session",
+    ttl: SESSION_TIMEOUT_SECONDS,
+    cookieOptions: {
+      secure: isSecureRequest(headerStore),
+      httpOnly: true,
+      sameSite: "lax" as const,
+      maxAge: SESSION_TIMEOUT_SECONDS,
+    },
+  };
+}
 
 export async function getSession(): Promise<IronSession<SessionData>> {
-  const session = await getIronSession<SessionData>(await cookies(), sessionOptions);
+  const session = await getIronSession<SessionData>(await cookies(), await getSessionOptions());
   const isExpired = !session.expiresAt || session.expiresAt <= Date.now();
 
   if (session.isLoggedIn && (session.bootId !== SESSION_BOOT_ID || isExpired)) {
