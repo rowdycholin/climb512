@@ -2,9 +2,9 @@
 
 import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Badge } from "@/components/ui/badge";
-import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { logExercise } from "@/app/actions";
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
+import { Badge } from "@/components/ui/badge";
 
 interface ExerciseLog {
   id: string;
@@ -54,7 +54,7 @@ interface Week {
 const FOCUS_COLORS: Record<string, string> = {
   "Finger Strength": "bg-red-100 text-red-700 border-red-200",
   Endurance: "bg-blue-100 text-blue-700 border-blue-200",
-  "Project Climbing": "bg-purple-100 text-purple-700 border-purple-200",
+  "Project Climbing": "bg-violet-100 text-violet-700 border-violet-200",
   "Mobility & Antagonist": "bg-green-100 text-green-700 border-green-200",
   Rest: "bg-slate-100 text-slate-500 border-slate-200",
   "Rest & Recovery": "bg-slate-100 text-slate-500 border-slate-200",
@@ -198,7 +198,7 @@ function ExerciseRow({ planId, exercise }: { planId: string; exercise: Exercise 
       </div>
 
       {open && (
-        <form onSubmit={handleSubmit} className="border-t border-slate-100 bg-slate-50 px-3 pt-3 pb-3">
+        <form onSubmit={handleSubmit} className="border-t border-slate-100 bg-slate-50 px-3 pb-3 pt-3">
           <input type="hidden" name="planId" value={planId} />
           <input type="hidden" name="exerciseId" value={exercise.id} />
           <p className="mb-2 text-xs font-medium text-slate-500">Record what you actually did:</p>
@@ -273,8 +273,8 @@ function SessionBlock({ planId, session }: { planId: string; session: DaySession
     <div className="mb-4 last:mb-0">
       <div className="mb-2 flex items-center gap-2 px-1">
         <div className="h-px flex-1 bg-slate-200" />
-        <span className="whitespace-nowrap text-xs font-semibold tracking-wider text-slate-400 uppercase">
-          {session.name} · {session.duration} min
+        <span className="whitespace-nowrap text-xs font-semibold uppercase tracking-wider text-slate-400">
+          {session.name} | {session.duration} min
         </span>
         <div className="h-px flex-1 bg-slate-200" />
       </div>
@@ -304,7 +304,17 @@ function ChevronIcon({ className }: { className?: string }) {
   );
 }
 
-function DayCard({ planId, day, isToday }: { planId: string; day: Day; isToday: boolean }) {
+function DayCard({
+  planId,
+  day,
+  isHighlighted,
+  onSelect,
+}: {
+  planId: string;
+  day: Day;
+  isHighlighted: boolean;
+  onSelect: (dayId: string) => void;
+}) {
   const colorClass = FOCUS_COLORS[day.focus] ?? "border-slate-200 bg-slate-100 text-slate-600";
   const totalDuration = day.sessions.reduce((sum, session) => sum + session.duration, 0);
   const totalExercises = day.sessions.flatMap((session) => session.exercises).length;
@@ -317,17 +327,20 @@ function DayCard({ planId, day, isToday }: { planId: string; day: Day; isToday: 
     <AccordionItem
       value={day.id}
       className={`mb-2 overflow-hidden rounded-xl border ${
-        isToday ? "border-blue-300 bg-blue-50/50" : "border-slate-200 bg-white"
+        isHighlighted ? "border-blue-300 bg-blue-50/50" : "border-slate-200 bg-white"
       }`}
     >
-      <AccordionTrigger className="group px-4 py-3 hover:bg-slate-50 hover:no-underline [&[data-state=open]]:bg-slate-50">
+      <AccordionTrigger
+        className="group px-4 py-3 hover:bg-slate-50 hover:no-underline [&[data-state=open]]:bg-slate-50"
+        onClick={() => onSelect(day.id)}
+      >
         <div className="flex w-full items-center gap-2 text-left">
           <ChevronIcon className="h-4 w-4 shrink-0 text-slate-400 transition-transform duration-200 group-aria-expanded:rotate-180" />
           <div className="w-[72px] shrink-0">
-            <span className={`text-xs font-semibold ${isToday ? "text-blue-600" : "text-slate-500"}`}>
+            <span className={`text-xs font-semibold ${isHighlighted ? "text-blue-600" : "text-slate-500"}`}>
               {day.dayName}
             </span>
-            {isToday && <span className="block text-[10px] font-medium text-blue-500">Today</span>}
+            {isHighlighted && <span className="block text-[10px] font-medium text-blue-500">Today</span>}
           </div>
           <div className="min-w-0 flex-1">
             <span className="text-sm font-semibold text-slate-700">{day.focus}</span>
@@ -343,7 +356,7 @@ function DayCard({ planId, day, isToday }: { planId: string; day: Day; isToday: 
           </div>
         </div>
       </AccordionTrigger>
-      <AccordionContent className="border-t border-slate-100 px-4 pt-3 pb-4">
+      <AccordionContent className="border-t border-slate-100 px-4 pb-4 pt-3">
         {day.sessions.map((session) => (
           <SessionBlock key={session.id} planId={planId} session={session} />
         ))}
@@ -352,13 +365,21 @@ function DayCard({ planId, day, isToday }: { planId: string; day: Day; isToday: 
   );
 }
 
-function WeekCard({ planId, week, todayDayIndex }: { planId: string; week: Week; todayDayIndex: number }) {
+function WeekCard({ planId, week, initialDayIndex }: { planId: string; week: Week; initialDayIndex: number }) {
   const trainingDays = week.days.filter((day) => !day.isRest).length;
   const allExercises = week.days.flatMap((day) => day.sessions.flatMap((session) => session.exercises));
   const completedCount = allExercises.filter((exercise) => exercise.logs[0]?.completed).length;
-  const defaultOpenValues = week.days
-    .filter((_, index) => index === todayDayIndex)
+  const initialOpenValues = week.days
+    .filter((_, index) => index === initialDayIndex)
     .map((day) => day.id);
+
+  const [openDayIds, setOpenDayIds] = useState<string[]>(initialOpenValues);
+  const [highlightedDayId, setHighlightedDayId] = useState<string | null>(initialOpenValues[0] ?? null);
+
+  useEffect(() => {
+    setOpenDayIds(initialOpenValues);
+    setHighlightedDayId(initialOpenValues[0] ?? null);
+  }, [initialDayIndex, week.id]);
 
   return (
     <div>
@@ -372,11 +393,17 @@ function WeekCard({ planId, week, todayDayIndex }: { planId: string; week: Week;
             </span>
           )}
         </div>
-        <p className="mt-1 text-sm text-slate-500">{trainingDays} training days · {7 - trainingDays} rest days</p>
+        <p className="mt-1 text-sm text-slate-500">{trainingDays} training days | {7 - trainingDays} rest days</p>
       </div>
-      <Accordion multiple defaultValue={defaultOpenValues} className="space-y-0">
+      <Accordion multiple value={openDayIds} onValueChange={setOpenDayIds} className="space-y-0">
         {week.days.map((day, index) => (
-          <DayCard key={day.id} planId={planId} day={day} isToday={index === todayDayIndex} />
+          <DayCard
+            key={day.id}
+            planId={planId}
+            day={day}
+            isHighlighted={highlightedDayId ? day.id === highlightedDayId : index === initialDayIndex}
+            onSelect={setHighlightedDayId}
+          />
         ))}
       </Accordion>
     </div>
@@ -452,7 +479,7 @@ export default function PlanViewer({
       <WeekCard
         planId={planId}
         week={weeks[resolvedActiveWeek]}
-        todayDayIndex={resolvedActiveWeek === initialWeekIndex ? initialDayIndex : -1}
+        initialDayIndex={resolvedActiveWeek === initialWeekIndex ? initialDayIndex : -1}
       />
     </div>
   );

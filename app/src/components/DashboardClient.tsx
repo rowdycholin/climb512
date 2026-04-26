@@ -1,9 +1,10 @@
 "use client";
 
+import Link from "next/link";
 import { useState } from "react";
 import { deletePlans } from "@/app/actions";
-import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
 
 interface Plan {
   id: string;
@@ -32,7 +33,7 @@ export default function DashboardClient({ plans }: { plans: Plan[] }) {
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between">
-        <h2 className="font-semibold text-slate-700">Previous Plans</h2>
+        <h2 className="text-lg font-semibold text-slate-900">Saved Plans</h2>
         {selected.size > 0 && (
           <form action={deletePlans}>
             {Array.from(selected).map((id) => (
@@ -63,21 +64,21 @@ export default function DashboardClient({ plans }: { plans: Plan[] }) {
             className="h-4 w-4 flex-shrink-0 cursor-pointer rounded border-slate-300 accent-primary"
             aria-label={`Select plan ${plan.title}`}
           />
-          <a href={`/plan/${plan.id}`} className="min-w-0 flex-1">
+          <Link href={`/plan/${plan.id}`} className="min-w-0 flex-1">
             <Card className="cursor-pointer border-slate-200 bg-white shadow-sm transition-colors hover:bg-slate-50">
               <CardContent className="py-4">
-                <div className="flex items-center justify-between">
+                <div className="flex items-start justify-between gap-4">
                   <div>
-                    <p className="font-semibold text-slate-800">{plan.title}</p>
+                    <p className="text-base font-semibold text-slate-900">{plan.title}</p>
                     <p className="text-sm text-slate-500">
-                      {plan.profile.weeksDuration} weeks · {plan.profile.daysPerWeek} days/week
+                      {plan.profile.weeksDuration} weeks | {plan.profile.daysPerWeek} days/week
                     </p>
                   </div>
-                  <p className="text-xs text-slate-400">{new Date(plan.createdAt).toLocaleDateString()}</p>
+                  <p className="whitespace-nowrap text-xs text-slate-400">{new Date(plan.createdAt).toLocaleDateString()}</p>
                 </div>
               </CardContent>
             </Card>
-          </a>
+          </Link>
         </div>
       ))}
     </div>

@@ -57,6 +57,12 @@ curl http://localhost:8787/health
 curl http://localhost:8787/config
 ```
 
+Useful app check:
+
+```bash
+curl -I http://localhost:8080/login
+```
+
 ## Environment variables
 
 ### Web service
@@ -105,4 +111,5 @@ docker compose up --build -d
 - the DB should move to a managed Postgres service in production
 - TLS should terminate at a reverse proxy or load balancer
 - migrations should still run as a separate one-shot job before new app traffic is accepted
+- session behavior is intentionally short-lived today: cookies are boot-scoped and expire after 30 minutes
 - a real production deployment should explicitly decide whether plan generation points to the simulator or a live provider

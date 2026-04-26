@@ -1,11 +1,11 @@
 "use client";
 
 import { useState } from "react";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 
 const PRESET_EQUIPMENT = [
   { value: "bouldering-wall", label: "Bouldering Wall" },
@@ -38,14 +38,17 @@ export default function EquipmentPicker() {
     <Card>
       <CardHeader>
         <CardTitle>Available Equipment at Your Gym</CardTitle>
-        <CardDescription>Select what you have access to — and add anything extra</CardDescription>
+        <CardDescription>Select what you have access to and add anything extra.</CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          {PRESET_EQUIPMENT.map((e) => (
-            <label key={e.value} className="flex items-center gap-3 p-3 rounded-lg border cursor-pointer hover:bg-accent transition-colors">
-              <Checkbox name="equipment" value={e.value} />
-              <span className="text-sm">{e.label}</span>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          {PRESET_EQUIPMENT.map((equipment) => (
+            <label
+              key={equipment.value}
+              className="flex items-center gap-3 rounded-lg border border-slate-200 p-3 transition-colors hover:bg-slate-50"
+            >
+              <Checkbox name="equipment" value={equipment.value} />
+              <span className="text-sm">{equipment.label}</span>
             </label>
           ))}
         </div>
@@ -56,7 +59,7 @@ export default function EquipmentPicker() {
               <Badge key={item} variant="secondary" className="pr-1">
                 <input type="hidden" name="equipment" value={item} />
                 {item}
-                <button type="button" onClick={() => removeCustom(item)} className="ml-2 hover:text-destructive">×</button>
+                <button type="button" onClick={() => removeCustom(item)} className="ml-2 hover:text-destructive">x</button>
               </Badge>
             ))}
           </div>
@@ -65,8 +68,13 @@ export default function EquipmentPicker() {
         <div className="flex gap-2">
           <Input
             value={inputVal}
-            onChange={(e) => setInputVal(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addCustom(); } }}
+            onChange={(event) => setInputVal(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                event.preventDefault();
+                addCustom();
+              }
+            }}
             placeholder="Add custom equipment..."
           />
           <Button type="button" variant="outline" onClick={addCustom}>Add</Button>

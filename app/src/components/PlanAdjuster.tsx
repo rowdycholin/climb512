@@ -2,6 +2,7 @@
 
 import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
+import { Sparkles } from "lucide-react";
 import { suggestPlanAdjustment, applyPlanAdjustment } from "@/app/actions";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -34,6 +35,8 @@ interface Week {
 interface PlanAdjusterProps {
   planId: string;
   week: Week;
+  isOpen?: boolean;
+  onOpenChange?: (open: boolean) => void;
 }
 
 const STARTER_PROMPTS = {
@@ -47,7 +50,8 @@ const STARTER_PROMPTS = {
   ],
 };
 
-export default function PlanAdjuster({ planId, week }: PlanAdjusterProps) {
+export default function PlanAdjuster({ planId, week, isOpen, onOpenChange }: PlanAdjusterProps) {
+  const [internalOpen, setInternalOpen] = useState(false);
   const [mode, setMode] = useState<"reorder" | "difficulty">("reorder");
   const [request, setRequest] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -70,6 +74,18 @@ export default function PlanAdjuster({ planId, week }: PlanAdjusterProps) {
       ),
     [week.days],
   );
+
+  const open = isOpen ?? internalOpen;
+
+  function setOpen(nextValue: boolean | ((value: boolean) => boolean)) {
+    const next = typeof nextValue === "function" ? nextValue(open) : nextValue;
+    if (onOpenChange) {
+      onOpenChange(next);
+      return;
+    }
+
+    setInternalOpen(next);
+  }
 
   function loadPrompt(prompt: string) {
     setRequest(prompt);
@@ -121,17 +137,32 @@ export default function PlanAdjuster({ planId, week }: PlanAdjusterProps) {
 
       setProposal(null);
       setRequest("");
+      setOpen(false);
       router.refresh();
     });
+  }
+
+  if (!open) {
+    return null;
   }
 
   return (
     <Card className="mb-6 border-slate-200 bg-white shadow-sm">
       <CardHeader>
-        <CardTitle className="text-slate-800">Ask The Coach</CardTitle>
-        <CardDescription>
-          Use AI when you want guidance or a suggested rewrite for Week {week.weekNum}. Manual editing now lives above this panel.
-        </CardDescription>
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <CardTitle className="flex items-center gap-2 text-slate-800">
+              <Sparkles className="h-4 w-4" />
+              Ask The Coach
+            </CardTitle>
+            <CardDescription>
+              Use AI when you want guidance or a suggested rewrite for Week {week.weekNum}.
+            </CardDescription>
+          </div>
+          <Button type="button" variant="outline" onClick={() => setOpen(false)} disabled={isSuggesting || isApplying}>
+            Close
+          </Button>
+        </div>
       </CardHeader>
       <CardContent className="space-y-4">
         {hasLogs ? (
@@ -205,7 +236,7 @@ export default function PlanAdjuster({ planId, week }: PlanAdjusterProps) {
             <p className="mt-1 text-sm text-slate-600">{proposal.summary}</p>
             <ul className="mt-3 space-y-1 text-sm text-slate-700">
               {proposal.changes.map((change) => (
-                <li key={change}>• {change}</li>
+                <li key={change}>- {change}</li>
               ))}
             </ul>
             <div className="mt-4 flex items-center gap-2">

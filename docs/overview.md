@@ -11,6 +11,7 @@ Users can:
 - generate a plan from onboarding inputs
 - log workouts by week and day
 - edit future weeks directly
+- move around the authenticated screens from a shared menu
 - preserve history when plans change later
 
 ## Core flow
@@ -34,6 +35,13 @@ The preferred UX direction is:
 - AI focused on plan generation
 - AI-assisted week adjustments treated as experimental and likely to be redesigned later
 
+Current editing behavior:
+
+- the pencil icon opens `Edit This Week`
+- day reordering happens in the compact `Day order` list
+- detailed editing currently renders training days only
+- add / duplicate / delete actions are icon-based inside the editor
+
 ## Technology stack
 
 | Layer | Technology |
@@ -51,3 +59,5 @@ The preferred UX direction is:
 ## Important operational note
 
 In Docker, the app currently uses the local simulator service for plan generation by default. That keeps normal testing and demos off the paid provider path.
+
+Sessions are also boot-scoped and currently expire after 30 minutes.

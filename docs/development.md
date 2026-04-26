@@ -168,10 +168,19 @@ Playwright tests live in `testing/`.
 cd testing
 npx playwright test tests/auth.spec.ts tests/dashboard.spec.ts
 npx playwright test tests/onboarding.spec.ts --grep "generates a plan end-to-end"
+npx playwright test tests/plan-editor-icons.spec.ts
 ```
 
 Notes:
 
 - the current suite covers auth, dashboard, and onboarding
+- `plan-editor-icons.spec.ts` is the focused regression check for edit-mode add / duplicate / delete controls
 - global teardown removes the shared `climber1` test user after a run
 - security regression coverage should be rebuilt around `Plan`, `PlanVersion`, and `WorkoutLog`
+
+## Current editing behavior
+
+- edit controls are visible only inside `Edit This Week`
+- the detailed edit cards currently render training days only
+- day reordering still lives in the compact `Day order` list
+- cross-day moves currently rely on swipe gestures rather than a dropdown

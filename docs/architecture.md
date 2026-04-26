@@ -27,7 +27,8 @@ Next.js 14 App Router              <- Docker service: web
 3. If unauthenticated, redirect to `/login`
 4. `findOwnedPlanWithLogs()` loads the user's `Plan`, current `PlanVersion`, and `WorkoutLog` rows
 5. `planSnapshot` is parsed and merged with logs into the plan view model
-6. `PlanWorkspace` renders the editor, AI adjuster prototype, and viewer
+6. `PlanPageShell` renders summary actions, the shared menu, and `PlanWorkspace`
+7. `PlanWorkspace` renders the editor, AI adjuster prototype, and viewer
 
 ### Plan creation
 
@@ -55,12 +56,19 @@ Next.js 14 App Router              <- Docker service: web
 
 ### Manual plan editing
 
-1. User opens `Edit This Week`
+1. User opens `Edit This Week` from the pencil icon in the plan summary
 2. The client edits the current week in local state
 3. `saveEditedWeek()` validates the edited week payload
 4. Logged weeks are rejected to preserve history
 5. A new `PlanVersion` is created with `changeType = "manual_edit"`
 6. `Plan.currentVersionId` advances to the new version
+
+Current editor behavior:
+
+- day reordering happens in the compact `Day order` list
+- detailed exercise editing is shown only for training days
+- add / duplicate / delete actions are icon-based
+- AI coaching tools remain separate and secondary
 
 ## Data model strategy
 
@@ -100,6 +108,10 @@ This keeps revision history intact and avoids the complexity of mutating a deep 
 
 ### Client
 
+- `PlanPageShell`
+  - plan summary
+  - pencil / coach actions
+  - shared navigation menu
 - `PlanWorkspace`
   - coordinates selected week across editor, adjuster, and viewer
 - `PlanEditor`
@@ -113,7 +125,7 @@ This keeps revision history intact and avoids the complexity of mutating a deep 
 
 ## Operational notes
 
-- sessions are cookie-based and stateless
+- sessions are cookie-based, boot-scoped, and currently expire after 30 minutes
 - the `migrate` service must succeed before `web` starts
 - migrations are raw SQL files tracked in `_app_migrations`
 - Docker defaults the app to the local simulator for plan generation

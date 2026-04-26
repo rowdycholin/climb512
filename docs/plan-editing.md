@@ -2,6 +2,22 @@
 
 Date: 2026-04-24
 
+## Current implementation status
+
+Since this proposal was written, the app has already moved partway in this direction:
+
+- direct editing is the primary week-adjustment path
+- the pencil icon opens `Edit This Week`
+- the editor has icon-based add / duplicate / delete controls
+- the detailed edit section renders training days only
+- AI coaching remains present, but as a secondary prototype
+
+What is still not finished:
+
+- the editor is still split between `Day order` and detailed cards
+- exercise reordering within a day is not yet fully gesture-driven
+- the UI still relies on inline fields more than bottom sheets
+
 ## Goal
 
 Move the app from:
@@ -23,17 +39,16 @@ The new snapshot-based plan storage makes this much easier because a week can no
 4. Every accepted manual edit should create a new `PlanVersion`
 5. Logged weeks must remain protected from destructive changes
 
-## Problems with the current flow
+## Problems with the remaining current flow
 
-The current `Adjust This Week With AI` flow is good for constrained experiments, but it feels heavy for everyday use.
+The original AI-first adjuster is no longer the main problem. The larger remaining gap is that the manual editor still feels more like a draft tool than a polished mobile editing surface.
 
 Current pain points:
 
-- users must describe simple edits in text
-- the UI blocks direct manipulation
-- reorder and delete are slower than they should be
-- mobile interaction depends too much on typing and confirmation
-- users cannot quickly remove or move exercises on their own
+- day reordering and exercise editing still live in two separate zones
+- mobile interaction still leans heavily on inline form fields
+- exercise reordering is not as direct as it should be
+- some interactions still require too much scrolling
 
 ## Recommended direction
 
@@ -143,6 +158,11 @@ On the plan page, replace the current adjuster-first emphasis with:
 
 - primary button: `Edit week`
 - secondary button: `Ask coach`
+
+Status:
+
+- implemented via icon actions in the plan summary
+- still worth refining, but no longer adjuster-first
 
 When `Edit week` is active:
 

@@ -2,7 +2,7 @@
 
 import { type PointerEvent as ReactPointerEvent, type ReactNode, useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Hand, GripVertical } from "lucide-react";
+import { CirclePlus, Copy, Hand, GripVertical, Trash2 } from "lucide-react";
 import { saveEditedWeek } from "@/app/actions";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -185,8 +185,18 @@ function SwipeSurface({
   );
 }
 
-export default function PlanEditor({ planId, week }: { planId: string; week: Week }) {
-  const [isEditing, setIsEditing] = useState(false);
+export default function PlanEditor({
+  planId,
+  week,
+  isOpen,
+  onOpenChange,
+}: {
+  planId: string;
+  week: Week;
+  isOpen?: boolean;
+  onOpenChange?: (open: boolean) => void;
+}) {
+  const [internalOpen, setInternalOpen] = useState(false);
   const [draft, setDraft] = useState<EditableWeek>(() => toEditableWeek(week));
   const [error, setError] = useState<string | null>(null);
   const [armedDayId, setArmedDayId] = useState<string | null>(null);
@@ -212,14 +222,28 @@ export default function PlanEditor({ planId, week }: { planId: string; week: Wee
     [week.days],
   );
 
+  const isEditing = isOpen ?? internalOpen;
+
+  function setEditing(nextValue: boolean | ((value: boolean) => boolean)) {
+    const next = typeof nextValue === "function" ? nextValue(isEditing) : nextValue;
+    if (onOpenChange) {
+      onOpenChange(next);
+      return;
+    }
+
+    setInternalOpen(next);
+  }
+
   useEffect(() => {
     setDraft(toEditableWeek(week));
-    setIsEditing(false);
+    if (!onOpenChange) {
+      setInternalOpen(false);
+    }
     setError(null);
     setArmedDayId(null);
     setActiveDragDayId(null);
     setDragIndicatorY(null);
-  }, [week]);
+  }, [onOpenChange, week]);
 
   const onWindowPointerMove = useCallback((event: PointerEvent) => {
     pointerMoveLogicRef.current?.(event);
@@ -345,6 +369,7 @@ export default function PlanEditor({ planId, week }: { planId: string; week: Wee
     if (pending) return;
     if (dayHoldTimeoutRef.current) clearTimeout(dayHoldTimeoutRef.current);
 
+    event.preventDefault();
     dragStartPointRef.current = { x: event.clientX, y: event.clientY };
     setArmedDayId(dayId);
     window.addEventListener("pointermove", onWindowPointerMove);
@@ -443,7 +468,7 @@ export default function PlanEditor({ planId, week }: { planId: string; week: Wee
   function discardChanges() {
     setDraft(toEditableWeek(week));
     setError(null);
-    setIsEditing(false);
+    setEditing(false);
   }
 
   function handleSave() {
@@ -460,12 +485,10 @@ export default function PlanEditor({ planId, week }: { planId: string; week: Wee
         return;
       }
 
-      setIsEditing(false);
+      setEditing(false);
       router.refresh();
     });
   }
-
-  const movableTargets = draft.days.filter((day) => !day.isRest);
 
   function moveExerciseToAdjacentTrainingDay(
     dayIndex: number,
@@ -482,6 +505,10 @@ export default function PlanEditor({ planId, week }: { planId: string; week: Wee
     moveExercise(dayIndex, sessionIndex, exerciseIndex, draft.days[targetTrainingIndex].id);
   }
 
+  if (!isEditing) {
+    return null;
+  }
+
   return (
     <Card className="mb-6 border-slate-200 bg-white shadow-sm">
       <CardHeader>
@@ -492,8 +519,8 @@ export default function PlanEditor({ planId, week }: { planId: string; week: Wee
               Reorder days, drop exercises, move work around, and save a new version without going back to AI.
             </CardDescription>
           </div>
-          <Button type="button" variant={isEditing ? "outline" : "default"} onClick={() => setIsEditing((value) => !value)} disabled={hasLogs || pending}>
-            {isEditing ? "Close editor" : "Edit week"}
+          <Button type="button" variant="outline" onClick={() => setEditing(false)} disabled={pending}>
+            Close
           </Button>
         </div>
       </CardHeader>
@@ -502,7 +529,7 @@ export default function PlanEditor({ planId, week }: { planId: string; week: Wee
           <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
             This week already has workout logs, so direct edits are locked to protect history.
           </div>
-        ) : isEditing ? (
+        ) : (
           <>
             <div className="space-y-2">
               <Label htmlFor="week-theme">Week theme</Label>
@@ -533,9 +560,11 @@ export default function PlanEditor({ planId, week }: { planId: string; week: Wee
                       ref={(element) => {
                         dayCardRefs.current[day.id] = element;
                       }}
-                      className={`flex items-center gap-3 rounded-lg border border-slate-200 bg-white px-3 py-2 transition-shadow ${
+                      className={`flex select-none items-center gap-3 rounded-lg border border-slate-200 bg-white px-3 py-2 transition-shadow ${
                         activeDragDayId === day.id ? "shadow-xl ring-2 ring-blue-300" : ""
                       }`}
+                      style={{ WebkitUserSelect: "none", WebkitTouchCallout: "none" }}
+                      onContextMenu={(event) => event.preventDefault()}
                     >
                       <button
                         type="button"
@@ -544,11 +573,12 @@ export default function PlanEditor({ planId, week }: { planId: string; week: Wee
                         className={`inline-flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-500 shadow-sm transition ${
                           armedDayId === day.id || activeDragDayId === day.id ? "scale-105 border-blue-300 text-blue-600" : "active:scale-95"
                         }`}
-                        style={{ touchAction: "none" }}
+                        style={{ touchAction: "none", WebkitUserSelect: "none", WebkitTouchCallout: "none" }}
+                        onContextMenu={(event) => event.preventDefault()}
                       >
                         {activeDragDayId === day.id ? <Hand className="h-4 w-4" /> : <GripVertical className="h-4 w-4" />}
                       </button>
-                      <div className="min-w-0 flex-1">
+                      <div className="min-w-0 flex-1 select-none" style={{ WebkitUserSelect: "none", WebkitTouchCallout: "none" }}>
                         <p className="text-sm font-semibold text-slate-800">{dayIndex + 1}. {DAY_NAMES[dayIndex]}</p>
                         <p className="truncate text-xs text-slate-500">{day.isRest ? "Rest day" : day.focus}</p>
                       </div>
@@ -564,7 +594,10 @@ export default function PlanEditor({ planId, week }: { planId: string; week: Wee
                   ))}
                 </div>
               </div>
-              {draft.days.map((day, dayIndex) => (
+              {draft.days
+                .map((day, dayIndex) => ({ day, dayIndex }))
+                .filter(({ day }) => !day.isRest)
+                .map(({ day, dayIndex }) => (
                 <div
                   key={day.id}
                   className="rounded-xl border border-slate-200 bg-slate-50 p-3"
@@ -576,17 +609,25 @@ export default function PlanEditor({ planId, week }: { planId: string; week: Wee
                       </div>
                     </div>
 
-                    {!day.isRest && (
-                      <div className="mt-3 space-y-3">
-                        {day.sessions.map((session, sessionIndex) => (
-                          <div key={session.id} className="rounded-lg border border-slate-200 bg-white p-3">
+                    <div className="mt-3 space-y-3">
+                      {day.sessions.map((session, sessionIndex) => (
+                        <div key={session.id} className="rounded-lg border border-slate-200 bg-white p-3">
                           <div className="mb-2 flex items-center justify-between gap-3">
                             <div>
                               <p className="text-sm font-medium text-slate-800">{session.name}</p>
                               <p className="text-xs text-slate-500">{session.duration} min</p>
                             </div>
-                            <Button type="button" size="sm" variant="outline" onClick={() => addCustomExercise(dayIndex)}>
-                              Add exercise
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="outline"
+                              onClick={() => addCustomExercise(dayIndex)}
+                              aria-label={`Add exercise to ${session.name}`}
+                              title="Add exercise"
+                              className="gap-1.5 rounded-full border-sky-200 bg-sky-50 text-sky-700 shadow-sm transition hover:border-sky-300 hover:bg-sky-100 hover:text-sky-800"
+                            >
+                              <CirclePlus className="h-4 w-4" />
+                              <span className="text-[11px] font-semibold uppercase tracking-[0.12em]">Add</span>
                             </Button>
                           </div>
 
@@ -608,23 +649,41 @@ export default function PlanEditor({ planId, week }: { planId: string; week: Wee
                                 }
                               >
                                 <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
-                                  <div className="mb-2 flex items-center justify-between gap-2">
-                                    <div className="flex-1">
-                                      <Input
-                                        value={exercise.name}
-                                        onChange={(event) => updateExerciseName(dayIndex, sessionIndex, exerciseIndex, event.target.value)}
-                                        className="bg-white"
-                                      />
-                                      <p className="mt-1 text-[11px] text-slate-400">Swipe to move between training days.</p>
+                                  <div className="mb-2">
+                                    <div className="flex items-end justify-between gap-2">
+                                      <div className="flex-1">
+                                        <Input
+                                          value={exercise.name}
+                                          onChange={(event) => updateExerciseName(dayIndex, sessionIndex, exerciseIndex, event.target.value)}
+                                          className="bg-white"
+                                        />
+                                      </div>
+                                      <div className="flex items-center gap-1 pb-px">
+                                        <Button
+                                          type="button"
+                                          size="icon"
+                                          variant="outline"
+                                          onClick={() => duplicateExercise(dayIndex, sessionIndex, exerciseIndex)}
+                                          aria-label={`Duplicate ${exercise.name}`}
+                                          title="Duplicate exercise"
+                                          className="rounded-full border-slate-300 bg-white text-slate-600 shadow-sm transition hover:border-sky-200 hover:bg-sky-50 hover:text-sky-700"
+                                        >
+                                          <Copy className="h-4 w-4" />
+                                        </Button>
+                                        <Button
+                                          type="button"
+                                          size="icon"
+                                          variant="outline"
+                                          onClick={() => removeExercise(dayIndex, sessionIndex, exerciseIndex)}
+                                          aria-label={`Delete ${exercise.name}`}
+                                          title="Delete exercise"
+                                          className="rounded-full border-red-200 bg-white text-red-600 shadow-sm transition hover:border-red-300 hover:bg-red-50 hover:text-red-700"
+                                        >
+                                          <Trash2 className="h-4 w-4" />
+                                        </Button>
+                                      </div>
                                     </div>
-                                    <div className="flex gap-2">
-                                      <Button type="button" size="sm" variant="outline" onClick={() => duplicateExercise(dayIndex, sessionIndex, exerciseIndex)}>
-                                        Duplicate
-                                      </Button>
-                                      <Button type="button" size="sm" variant="outline" onClick={() => removeExercise(dayIndex, sessionIndex, exerciseIndex)}>
-                                        Delete
-                                      </Button>
-                                    </div>
+                                    <p className="mt-1 text-[11px] text-slate-400">Swipe to move between training days.</p>
                                   </div>
 
                                   <div className="grid grid-cols-2 gap-2">
@@ -660,40 +719,14 @@ export default function PlanEditor({ planId, week }: { planId: string; week: Wee
                                         className="bg-white"
                                       />
                                     </div>
-                                    <div className="col-span-2 hidden sm:block">
-                                      <Label className="mb-1 block text-xs text-slate-500">Move to another training day</Label>
-                                      <select
-                                        defaultValue=""
-                                        onChange={(event) => {
-                                          const value = event.target.value;
-                                          if (!value) return;
-                                          moveExercise(dayIndex, sessionIndex, exerciseIndex, value);
-                                          event.currentTarget.value = "";
-                                        }}
-                                        className="flex h-10 w-full rounded-md border border-input bg-white px-3 py-2 text-sm"
-                                      >
-                                        <option value="">Choose a day</option>
-                                        {movableTargets
-                                          .filter((target) => target.id !== day.id)
-                                          .map((target) => {
-                                            const targetIndex = draft.days.findIndex((item) => item.id === target.id);
-                                            return (
-                                              <option key={target.id} value={target.id}>
-                                                {DAY_NAMES[targetIndex] ?? `Day ${targetIndex + 1}`}
-                                              </option>
-                                            );
-                                          })}
-                                      </select>
-                                    </div>
                                   </div>
                                 </div>
                               </SwipeSurface>
                             ))}
                           </div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
+                        </div>
+                      ))}
+                    </div>
                   </div>
               ))}
             </div>
@@ -713,10 +746,6 @@ export default function PlanEditor({ planId, week }: { planId: string; week: Wee
               </Button>
             </div>
           </>
-        ) : (
-          <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600">
-            Start with direct editing for routine changes. AI suggestions remain available below when you want coaching help.
-          </div>
         )}
       </CardContent>
     </Card>

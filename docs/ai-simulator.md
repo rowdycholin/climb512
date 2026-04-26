@@ -126,6 +126,7 @@ This keeps plans believable enough for UI testing without pretending to be a rea
 
 - Docker demos
 - Playwright onboarding generation tests
+- plan-page and editor UI tests that should avoid paid generation calls
 - manual testing of the plan-generation path
 - parser and error-handling checks
 

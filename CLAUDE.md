@@ -58,6 +58,9 @@ climb512/
 - plan storage uses `Plan` + `PlanVersion` JSON snapshots
 - user workout history uses `WorkoutLog`
 - direct week editing is implemented through `PlanEditor`
+- the plan page uses shared hamburger navigation
+- edit controls appear only inside `Edit This Week`
+- the detailed editor currently shows training days only
 - AI plan generation is live
 - AI week-adjustment code still exists, but it is experimental and not the primary product direction
 - Docker defaults plan generation to the local `simulator` service
@@ -66,10 +69,10 @@ climb512/
 
 ```text
 User
-  └── Plan
-        ├── currentVersionId -> PlanVersion
-        ├── PlanVersion[]
-        └── WorkoutLog[]
+  -> Plan
+     |- currentVersionId -> PlanVersion
+     |- PlanVersion[]
+     -> WorkoutLog[]
 ```
 
 `PlanVersion` stores:
@@ -105,6 +108,7 @@ docker compose down -v
 cd testing
 npx playwright test tests/auth.spec.ts tests/dashboard.spec.ts
 npx playwright test tests/onboarding.spec.ts --grep "generates a plan end-to-end"
+npx playwright test tests/plan-editor-icons.spec.ts
 ```
 
 ## Architecture notes
@@ -127,11 +131,13 @@ npx playwright test tests/onboarding.spec.ts --grep "generates a plan end-to-end
 - `PlanEditor` is the main path for future week changes
 - saving edits creates a new `PlanVersion`
 - logged weeks are protected from structural edits
+- add / duplicate / delete controls are icon-driven inside edit mode
 - the AI adjuster is still present, but it should be treated as a prototype
 
 ## Operational notes
 
 - sessions are boot-scoped and time-limited
+- session cookies currently expire after 30 minutes
 - recreating the `web` container invalidates prior boot sessions
 - `migrate` must complete successfully before `web` starts
 - migrations are tracked in `_app_migrations`
