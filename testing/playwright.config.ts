@@ -8,7 +8,7 @@ export default defineConfig({
   reporter: "list",
   use: {
     baseURL: "http://localhost:8080",
-    headless: false,
+    headless: true,
     screenshot: "only-on-failure",
     video: "retain-on-failure",
   },

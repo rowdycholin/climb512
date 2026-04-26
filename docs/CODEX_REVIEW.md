@@ -58,34 +58,36 @@ Status:
 - SQL failures are no longer masked
 - applied migrations are tracked in `_app_migrations`
 
-### 6. Medium: The advertised lint workflow is not automation-safe
+### 6. Resolved: The advertised lint workflow was not automation-safe
 
-This remains relevant.
+Status:
 
-Observed issue:
+- resolved on 2026-04-26
+- `app/.eslintrc.json` is now committed
+- `npm run lint` runs non-interactively and exits normally
 
-- `npm run lint` is not yet a trustworthy non-interactive automation step
+Remaining note:
 
-Recommendation:
+- lint is now automation-safe
+- teams may still want to tighten or expand rules over time, but the setup gap itself is closed
 
-- finish repository ESLint setup
-- make lint safe for CI
-
-### 7. Partially addressed: The end-to-end suite depended on the external AI provider
+### 7. Resolved: The end-to-end suite depended on the external AI provider
 
 Current state:
 
 - Docker now routes plan generation to the local simulator by default
 - the onboarding generation test can run against the simulator without paid API calls
+- Playwright now runs headlessly by default
+- `testing` now has runnable Playwright npm scripts
+- CI now starts the simulator-backed Docker stack before running Playwright
 
 Remaining recommendation:
 
-- make simulator-backed testing the explicit default for CI
 - keep any live-provider smoke checks separate and optional
 
 ## Additional recommendations
 
-- rebuild security E2E coverage around `Plan`, `PlanVersion`, and `WorkoutLog`
+- continue rebuilding security E2E coverage around `Plan`, `PlanVersion`, and `WorkoutLog`
 - clean up remaining documentation drift when product direction changes
 - continue moving the plan-editing experience toward direct editing first
 - treat the current AI week-adjustment prototype as experimental until the redesign lands

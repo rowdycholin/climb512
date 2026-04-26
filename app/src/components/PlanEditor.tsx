@@ -284,7 +284,7 @@ export default function PlanEditor({
     });
   }
 
-  function moveDayToIndex(dayId: string, targetIndex: number) {
+  const moveDayToIndex = useCallback((dayId: string, targetIndex: number) => {
     updateDraft((current) => {
       const fromIndex = current.days.findIndex((day) => day.id === dayId);
       if (fromIndex < 0 || targetIndex < 0 || targetIndex >= current.days.length || fromIndex === targetIndex) {
@@ -295,7 +295,7 @@ export default function PlanEditor({
       current.days.splice(targetIndex, 0, moved);
       return current;
     });
-  }
+  }, []);
 
   const clearDayDragState = useCallback(() => {
     if (dayHoldTimeoutRef.current) clearTimeout(dayHoldTimeoutRef.current);
@@ -363,7 +363,7 @@ export default function PlanEditor({
         moveDayToIndex(draggingDayId, lastIndex);
       }
     };
-  }, [clearDayDragState, draft]);
+  }, [clearDayDragState, draft, moveDayToIndex]);
 
   function beginDayHold(dayId: string, event: ReactPointerEvent<HTMLButtonElement>) {
     if (pending) return;

@@ -41,7 +41,8 @@ test.describe("Authentication", () => {
     await page.fill('input[name="password"]', "climbin512!");
     await page.click('button[type="submit"]');
     await page.waitForURL(/\/(dashboard|onboarding)/);
-    await page.click('button:has-text("Logout")');
+    await page.getByRole("button", { name: /Open menu/i }).click();
+    await page.getByRole("button", { name: "Logout" }).click();
     await expect(page).toHaveURL(/\/login/);
   });
 });

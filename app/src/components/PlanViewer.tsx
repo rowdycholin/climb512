@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { logExercise } from "@/app/actions";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
@@ -369,9 +369,13 @@ function WeekCard({ planId, week, initialDayIndex }: { planId: string; week: Wee
   const trainingDays = week.days.filter((day) => !day.isRest).length;
   const allExercises = week.days.flatMap((day) => day.sessions.flatMap((session) => session.exercises));
   const completedCount = allExercises.filter((exercise) => exercise.logs[0]?.completed).length;
-  const initialOpenValues = week.days
-    .filter((_, index) => index === initialDayIndex)
-    .map((day) => day.id);
+  const initialOpenValues = useMemo(
+    () =>
+      week.days
+        .filter((_, index) => index === initialDayIndex)
+        .map((day) => day.id),
+    [initialDayIndex, week.days],
+  );
 
   const [openDayIds, setOpenDayIds] = useState<string[]>(initialOpenValues);
   const [highlightedDayId, setHighlightedDayId] = useState<string | null>(initialOpenValues[0] ?? null);
@@ -379,7 +383,7 @@ function WeekCard({ planId, week, initialDayIndex }: { planId: string; week: Wee
   useEffect(() => {
     setOpenDayIds(initialOpenValues);
     setHighlightedDayId(initialOpenValues[0] ?? null);
-  }, [initialDayIndex, week.id]);
+  }, [initialOpenValues]);
 
   return (
     <div>

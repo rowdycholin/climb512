@@ -4,7 +4,10 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "playwright test",
+    "test:ci": "playwright test",
+    "test:onboarding": "playwright test tests/onboarding.spec.ts --grep \"generates a plan end-to-end\"",
+    "test:security": "playwright test tests/security.spec.ts"
   },
   "keywords": [],
   "author": "",
