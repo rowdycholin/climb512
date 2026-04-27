@@ -10,6 +10,7 @@ interface Plan {
   id: string;
   title: string;
   createdAt: Date;
+  createdAtLabel: string;
   profile: {
     currentGrade: string;
     targetGrade: string;
@@ -74,7 +75,7 @@ export default function DashboardClient({ plans }: { plans: Plan[] }) {
                       {plan.profile.weeksDuration} weeks | {plan.profile.daysPerWeek} days/week
                     </p>
                   </div>
-                  <p className="whitespace-nowrap text-xs text-slate-400">{new Date(plan.createdAt).toLocaleDateString()}</p>
+                  <p className="whitespace-nowrap text-xs text-slate-400">{plan.createdAtLabel}</p>
                 </div>
               </CardContent>
             </Card>

@@ -2,7 +2,7 @@
 
 import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Sparkles } from "lucide-react";
+import { MessageCircle } from "lucide-react";
 import { suggestPlanAdjustment, applyPlanAdjustment } from "@/app/actions";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -152,7 +152,7 @@ export default function PlanAdjuster({ planId, week, isOpen, onOpenChange }: Pla
         <div className="flex items-start justify-between gap-3">
           <div>
             <CardTitle className="flex items-center gap-2 text-slate-800">
-              <Sparkles className="h-4 w-4" />
+              <MessageCircle className="h-4 w-4" />
               Ask The Coach
             </CardTitle>
             <CardDescription>

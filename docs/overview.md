@@ -8,18 +8,20 @@ Users can:
 
 - register or sign in
 - create multiple plans
-- generate a plan from onboarding inputs
+- create a plan through guided chat intake
+- generate a plan from manual onboarding inputs or guided-intake `PlanRequest` answers
 - choose a plan start date, including dates in the past for testing
 - open plans to the current calendar week/day based on that start date
 - log workouts by week and day
 - edit future weeks directly
 - move around authenticated screens from a shared menu
+- use a shared vertical icon+label menu, with a chat bubble for AI/chat flows and a wrench for manual setup or editing
 - preserve history when plans change later
 
 ## Core Flow
 
 ```text
-Register -> Login -> Dashboard or Onboarding -> Generate plan -> View current week/day -> Log workouts -> Edit future weeks -> Save new version
+Register -> Login -> Dashboard -> Guided intake or manual onboarding -> Generate plan -> View current week/day -> Log workouts -> Edit future weeks -> Save new version
 ```
 
 ## Current Product Direction
@@ -36,14 +38,15 @@ The preferred UX direction is:
 
 - direct editing for day and exercise changes
 - mobile-friendly interactions
-- AI focused on plan generation
+- AI-style intake focused on producing a generic `PlanRequest`
+- AI focused on plan generation from validated inputs
 - AI-assisted week adjustments treated as experimental and likely to be redesigned later
 
 Current editing behavior:
 
 - the pencil icon opens `Edit This Week`
 - day reordering happens in the compact `Day order` list
-- detailed editing currently renders training days only
+- detailed editing includes rest days so exercises can be added when a rest day becomes a training day
 - add / duplicate / delete actions are icon-based inside the editor
 
 ## Technology Stack

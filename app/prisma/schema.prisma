@@ -14,7 +14,7 @@ model User {
   email        String       @unique
   age          Int
   passwordHash String
-  createdAt    DateTime     @default(now())
+  createdAt    DateTime     @default(now()) @db.Timestamptz(3)
   plans        Plan[]
   workoutLogs  WorkoutLog[]
 }
@@ -28,9 +28,9 @@ model Plan {
   currentVersion   PlanVersion?  @relation("CurrentPlanVersion", fields: [currentVersionId], references: [id], onDelete: SetNull, onUpdate: Cascade)
   versions         PlanVersion[] @relation("PlanVersions")
   workoutLogs      WorkoutLog[] 
-  startDate        DateTime      @default(now())
-  createdAt        DateTime      @default(now())
-  updatedAt        DateTime      @updatedAt
+  startDate        DateTime      @default(now()) @db.Timestamptz(3)
+  createdAt        DateTime      @default(now()) @db.Timestamptz(3)
+  updatedAt        DateTime      @updatedAt @db.Timestamptz(3)
 
   @@index([userId])
 }
@@ -48,7 +48,7 @@ model PlanVersion {
   effectiveFromWeek Int?
   profileSnapshot Json
   planSnapshot    Json
-  createdAt       DateTime      @default(now())
+  createdAt       DateTime      @default(now()) @db.Timestamptz(3)
   workoutLogs     WorkoutLog[]
   currentForPlan  Plan?         @relation("CurrentPlanVersion")
 
@@ -77,7 +77,7 @@ model WorkoutLog {
   durationActual    String?
   notes             String?
   completed         Boolean     @default(false)
-  loggedAt          DateTime    @default(now())
+  loggedAt          DateTime    @default(now()) @db.Timestamptz(3)
 
   @@unique([userId, planId, exerciseKey])
   @@index([userId, planId])

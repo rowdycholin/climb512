@@ -6,7 +6,7 @@ Date: 2026-04-25
 
 Parts of this proposal are still future-facing, but the current editor has already changed since it was written:
 
-- the detailed editor section now renders training days only
+- the detailed editor section includes rest days, and adding an exercise converts that day to training
 - add / duplicate / delete are icon actions
 - the old `move to another training day` dropdown has been removed
 

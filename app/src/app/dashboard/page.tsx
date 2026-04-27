@@ -1,12 +1,12 @@
-import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
 import { parseProfileSnapshot } from "@/lib/plan-snapshot";
 import AppHeader from "@/components/AppHeader";
 import DashboardClient from "@/components/DashboardClient";
-import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+
+const dateFormatter = new Intl.DateTimeFormat("en-US", { timeZone: "UTC" });
 
 export default async function DashboardPage() {
   const session = await getSession();
@@ -26,6 +26,7 @@ export default async function DashboardPage() {
         id: plan.id,
         title: plan.title ?? `${profile.currentGrade} to ${profile.targetGrade}`,
         createdAt: plan.createdAt,
+        createdAtLabel: dateFormatter.format(plan.createdAt),
         profile: {
           currentGrade: profile.currentGrade,
           targetGrade: profile.targetGrade,
@@ -57,18 +58,12 @@ export default async function DashboardPage() {
           </div>
         </section>
 
-        <div className="mb-6">
-          <Link href="/onboarding">
-            <Button size="lg" className="w-full">Create New Training Plan</Button>
-          </Link>
-        </div>
-
         {planCards.length > 0 && <DashboardClient plans={planCards} />}
 
         {planCards.length === 0 && (
           <Card className="border-slate-200 bg-white text-center shadow-sm">
             <CardContent className="py-12">
-              <p className="text-slate-500">No plans yet. Create your first training plan above.</p>
+              <p className="text-slate-500">No plans yet. Use the menu to start a guided chat or manual setup.</p>
             </CardContent>
           </Card>
         )}

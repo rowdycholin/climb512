@@ -21,8 +21,16 @@ test.describe("Dashboard", () => {
     await expect(page.getByRole("heading", { name: /Climb512/i })).toBeVisible();
   });
 
-  test("has a link to create a new plan", async ({ page }) => {
-    await expect(page.getByRole("link", { name: /Create|New Plan|Build/i })).toBeVisible();
+  test("has menu links for guided chat and manual setup", async ({ page }) => {
+    await page.getByRole("button", { name: "Open menu" }).click();
+
+    const aiChatLink = page.getByRole("link", { name: "AI Chat" });
+    const manualLink = page.getByRole("link", { name: "Manual Setup" });
+
+    await expect(aiChatLink).toBeVisible();
+    await expect(aiChatLink.locator("svg")).toBeVisible();
+    await expect(manualLink).toBeVisible();
+    await expect(manualLink.locator("svg")).toBeVisible();
   });
 
   test("existing plans link through to plan viewer", async ({ page }) => {

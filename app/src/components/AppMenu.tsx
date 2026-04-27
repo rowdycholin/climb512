@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { List, LogOut, Menu, PlusCircle, X } from "lucide-react";
+import { List, LogOut, Menu, MessageCircle, Wrench, X } from "lucide-react";
 import { logout } from "@/app/actions";
 import { Button } from "@/components/ui/button";
 
@@ -55,12 +55,20 @@ export default function AppMenu() {
             My Plans
           </Link>
           <Link
+            href="/intake"
+            className="mt-1 flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-slate-700 transition-colors hover:bg-slate-100"
+            onClick={() => setOpen(false)}
+          >
+            <MessageCircle className="h-4 w-4" />
+            AI Chat
+          </Link>
+          <Link
             href="/onboarding"
             className="mt-1 flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-slate-700 transition-colors hover:bg-slate-100"
             onClick={() => setOpen(false)}
           >
-            <PlusCircle className="h-4 w-4" />
-            New Plan
+            <Wrench className="h-4 w-4" />
+            Manual Setup
           </Link>
           <form action={logout} className="mt-1">
             <button

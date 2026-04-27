@@ -136,7 +136,9 @@ The app stores plans as snapshots, not relational `Week/Day/Exercise` rows.
 - `User` stores account profile data and login identity
 - `Plan` is the top-level record and stores `startDate`
 - `PlanVersion` stores `profileSnapshot` and `planSnapshot` JSON
+- guided intake builds `PlanRequest` first, then adapts it to the legacy generator input for now
 - `WorkoutLog` stores performed work against snapshot exercise keys
+- Date/time columns use PostgreSQL `TIMESTAMPTZ(3)` and the Docker database runs in UTC.
 
 That means most plan-shape changes now happen in snapshot helpers rather than nested relational writes.
 
@@ -190,7 +192,7 @@ docker compose up --build -d
 
 If using `scripts/start-dev.sh`, `./app` is bind-mounted and changes should flow into Next dev without rebuilding.
 
-### Plan generation stays on `/onboarding`
+### Plan generation fails from `/intake` or `/onboarding`
 
 Check:
 
@@ -227,6 +229,7 @@ Playwright tests live in `testing/`.
 cd testing
 npm test
 npx playwright test tests/onboarding.spec.ts
+npx playwright test tests/intake.spec.ts
 npx playwright test tests/plan-start-date.spec.ts
 npx playwright test tests/plan-viewer-progress.spec.ts
 npx playwright test tests/plan-editor-icons.spec.ts
@@ -237,17 +240,18 @@ Current focused regressions include:
 
 - auth and registration
 - dashboard plan links and deletion surface
+- guided intake interview, draft creation, and plan generation
 - onboarding grade-system switching
 - plan start date opening the correct calendar day
 - preserving an expanded non-Monday day after marking an exercise complete
 - plan editor icon actions
 - cross-user plan access denial
 
-Global teardown removes generated test users with prefixes such as `pw-*`, `dashplan-*`, `onboard-*`, `progress-*`, and `startdate-*`.
+Global teardown removes generated test users with prefixes such as `pw-*`, `dashplan-*`, `onboard-*`, `progress-*`, `startdate-*`, and `intake-*`.
 
 ## Current Editing Behavior
 
 - edit controls are visible only inside `Edit This Week`
-- the detailed edit cards currently render training days only
+- detailed edit cards include rest days, and adding an exercise converts the day to training
 - day reordering still lives in the compact `Day order` list
 - cross-day moves currently rely on swipe gestures rather than a dropdown

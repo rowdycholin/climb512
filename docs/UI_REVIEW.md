@@ -88,7 +88,7 @@ The current editor works, but it is still closer to a draft editor than a polish
 Current state:
 
 - day reordering still lives in the separate `Day order` list
-- detailed editing now renders training days only
+- detailed editing includes rest days, and adding an exercise converts that day to training
 - add / duplicate / delete controls are icon-based
 - the old move dropdown is gone
 

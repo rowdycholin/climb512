@@ -39,7 +39,7 @@ Stores registered app users.
 | email | TEXT | Unique |
 | age | INTEGER | Captured at registration and reused for plan generation |
 | passwordHash | TEXT | bcrypt hash |
-| createdAt | TIMESTAMP | |
+| createdAt | TIMESTAMPTZ | |
 
 ### Plan
 
@@ -51,15 +51,15 @@ The long-lived container for one user plan.
 | userId | TEXT | FK -> User.id |
 | title | TEXT? | Display label, usually `currentGrade -> targetGrade` |
 | currentVersionId | TEXT? | FK -> PlanVersion, current active revision |
-| startDate | TIMESTAMP | Calendar anchor for Week 1 Day 1 |
-| createdAt | TIMESTAMP | Creation timestamp |
-| updatedAt | TIMESTAMP | Updated when a new version becomes current |
+| startDate | TIMESTAMPTZ | Calendar anchor for Week 1 Day 1 |
+| createdAt | TIMESTAMPTZ | Creation timestamp |
+| updatedAt | TIMESTAMPTZ | Updated when a new version becomes current |
 
 `startDate` controls which week/day opens by default on the plan page. It can be in the past for development and testing.
 
 ### PlanVersion
 
-Stores one full accepted snapshot of the plan and onboarding profile.
+Stores one full accepted snapshot of the plan and the legacy generator profile inputs.
 
 | Column | Type | Notes |
 |---|---|---|
@@ -70,9 +70,9 @@ Stores one full accepted snapshot of the plan and onboarding profile.
 | changeType | TEXT | e.g. `generated`, `manual_edit`, `ai_reorder`, `ai_difficulty` |
 | changeSummary | TEXT? | Human-readable summary |
 | effectiveFromWeek | INTEGER? | First week affected by the revision |
-| profileSnapshot | JSONB | Onboarding input snapshot |
+| profileSnapshot | JSONB | Legacy generator input snapshot |
 | planSnapshot | JSONB | Full week/day/session/exercise snapshot |
-| createdAt | TIMESTAMP | |
+| createdAt | TIMESTAMPTZ | |
 
 Unique constraint: `(planId, versionNum)`
 
@@ -98,7 +98,7 @@ Stores what the user actually did for one exercise in one plan.
 | durationActual | TEXT? | e.g. `7s`, `20 min` |
 | notes | TEXT? | User-entered notes |
 | completed | BOOLEAN | Marked complete in the UI |
-| loggedAt | TIMESTAMP | Updated on each save |
+| loggedAt | TIMESTAMPTZ | Updated on each save |
 
 Unique constraint: `(userId, planId, exerciseKey)`
 
@@ -124,8 +124,11 @@ JSON copy of the plan-generation inputs:
 
 Notes:
 
-- `age` comes from the registered user record, not the onboarding form.
+- `age` comes from the registered user record, not the onboarding or guided-intake form.
+- guided intake now builds a generic `PlanRequest`, then adapts it to this legacy snapshot shape for the current generator.
+- `PlanRequest` includes fields such as sport, disciplines, goal type, goal description, target date, strength training, and injuries/limitations.
 - `startDate` is stored on `Plan`, not in `profileSnapshot`.
+- Date/time columns use PostgreSQL `TIMESTAMPTZ(3)`. The Docker database timezone is UTC.
 
 ### `planSnapshot`
 

@@ -26,6 +26,14 @@ import {
   type PlanAdjustmentProposal,
   validateAdjustmentProposal,
 } from "@/lib/ai-plan-adjuster";
+import {
+  intakeDraftToPlanInput,
+  parseIntakeDraftJson,
+  partialIntakeDraftSchema,
+  type IntakeMessage,
+  type IntakeResponse,
+} from "@/lib/intake";
+import { continuePlanIntakeWithAiContract } from "@/lib/plan-intake-ai";
 
 export interface PlanAdjustmentResponse {
   error?: string;
@@ -99,6 +107,40 @@ function parsePlanStartDate(formData: FormData) {
   }
 
   return parsed;
+}
+
+function parseDateInput(value: string) {
+  const parsed = new Date(`${value}T00:00:00`);
+  return Number.isNaN(parsed.getTime()) ? new Date() : parsed;
+}
+
+async function createGeneratedPlan(params: {
+  userId: string;
+  loginId?: string;
+  input: PlanInput;
+  startDate: Date;
+}) {
+  const weeks = await generatePlanWithAI(params.input, params.loginId);
+  const profileSnapshot = createProfileSnapshot(params.input);
+  const planSnapshot = buildPlanSnapshot(weeks);
+
+  const plan = await prisma.plan.create({
+    data: {
+      userId: params.userId,
+      title: `${params.input.currentGrade} -> ${params.input.targetGrade}`,
+      startDate: params.startDate,
+    },
+  });
+
+  await createPlanVersion({
+    planId: plan.id,
+    profileSnapshot,
+    planSnapshot,
+    changeType: "generated",
+    changeSummary: "Initial AI-generated plan",
+  });
+
+  redirect(`/plan/${plan.id}`);
 }
 
 async function createPlanVersion(params: {
@@ -423,6 +465,47 @@ export async function createPlan(formData: FormData) {
   });
 
   redirect(`/plan/${plan.id}`);
+}
+
+export async function continuePlanIntake(input: {
+  draft: unknown;
+  userMessage: string;
+  messages: IntakeMessage[];
+}): Promise<IntakeResponse> {
+  const session = await getSession();
+  if (!session.isLoggedIn) {
+    return { draft: {}, ready: false, assistantMessage: "Please sign in again before building a plan." };
+  }
+
+  const draft = partialIntakeDraftSchema.parse(input.draft ?? {});
+  return continuePlanIntakeWithAiContract({
+    draft,
+    userMessage: input.userMessage,
+    messages: input.messages,
+  });
+}
+
+export async function createPlanFromIntake(formData: FormData) {
+  const session = await getSession();
+  if (!session.isLoggedIn) redirect("/login");
+
+  const rawDraft = formData.get("draft");
+  if (typeof rawDraft !== "string") redirect("/intake");
+
+  const user = await prisma.user.findUnique({
+    where: { id: session.userId },
+    select: { age: true },
+  });
+  if (!user) redirect("/login");
+
+  const draft = parseIntakeDraftJson(rawDraft);
+  const input = intakeDraftToPlanInput(draft, user.age);
+  await createGeneratedPlan({
+    userId: session.userId,
+    loginId: session.loginId,
+    input,
+    startDate: parseDateInput(draft.startDate),
+  });
 }
 
 export async function deletePlan(formData: FormData) {

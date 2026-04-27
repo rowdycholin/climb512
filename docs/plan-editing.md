@@ -9,7 +9,7 @@ Since this proposal was written, the app has already moved partway in this direc
 - direct editing is the primary week-adjustment path
 - the pencil icon opens `Edit This Week`
 - the editor has icon-based add / duplicate / delete controls
-- the detailed edit section renders training days only
+- the detailed edit section includes rest days, and adding an exercise converts that day to training
 - AI coaching remains present, but as a secondary prototype
 
 What is still not finished:

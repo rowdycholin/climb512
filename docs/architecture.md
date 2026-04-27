@@ -28,22 +28,24 @@ Next.js 14 App Router              <- Docker service: web
 4. `User.userId` and `User.email` are unique.
 5. Login uses `userId` + password.
 
-### Onboarding And Plan Creation
+### Intake, Onboarding, And Plan Creation
 
-1. User submits onboarding.
-2. `createPlan()` validates auth and loads the registered user's age.
-3. The onboarding form supplies goals, discipline, current/target grade, start date, schedule, and equipment.
-4. `DisciplineLevelFields` switches grade systems:
+1. User starts from `/intake` or `/onboarding`.
+2. `/intake` uses `PlanIntakeChat`, `app/src/lib/intake.ts`, and `app/src/lib/plan-request.ts` to guide the user through a one-question-at-a-time interview and build an editable generic `PlanRequest`.
+3. Manual onboarding captures the older climbing-specific plan input fields directly.
+4. `createPlan()` or `createPlanFromIntake()` validates auth and loads the registered user's age.
+5. Guided intake adapts `PlanRequest` to the legacy `PlanInput`; manual onboarding already submits `PlanInput`.
+6. `DisciplineLevelFields` switches grade systems on the manual form:
    - bouldering -> V-scale
    - sport/trad/alpine -> YDS
    - ice -> WI
-5. `generatePlanWithAI()` requests week JSON from the configured AI backend.
-6. The app builds:
+7. `generatePlanWithAI()` requests week JSON from the configured AI backend.
+8. The app builds:
    - `profileSnapshot`
    - `planSnapshot`
-7. A `Plan` row is created with `startDate`.
-8. A first `PlanVersion` row is created with `changeType = "generated"`.
-9. `Plan.currentVersionId` is updated.
+9. A `Plan` row is created with `startDate`.
+10. A first `PlanVersion` row is created with `changeType = "generated"`.
+11. `Plan.currentVersionId` is updated.
 
 ### Plan Page Load
 
@@ -81,7 +83,8 @@ Next.js 14 App Router              <- Docker service: web
 Current editor behavior:
 
 - day reordering happens in the compact `Day order` list
-- detailed exercise editing is shown only for training days
+- detailed exercise editing includes rest days
+- adding an exercise to a rest day converts it into a training day
 - add / duplicate / delete actions are icon-based
 - AI coaching tools remain separate and secondary
 
@@ -118,7 +121,11 @@ This keeps revision history intact and avoids the complexity of mutating a deep 
   - parsing helpers
   - plan view shaping
 - `app/src/lib/ai-plan-generator.ts`
-  - onboarding -> week generation requests
+  - onboarding and guided-intake -> week generation requests
+- `app/src/lib/plan-request.ts`
+  - generic plan request schema and temporary adapter to legacy `PlanInput`
+- `app/src/lib/intake.ts`
+  - rule-based guided interview state, parsing, and draft validation
 - `app/src/lib/ai-plan-adjuster.ts`
   - constrained AI week-adjustment prototype
 
@@ -128,6 +135,8 @@ This keeps revision history intact and avoids the complexity of mutating a deep 
   - account creation form
 - `DisciplineLevelFields`
   - onboarding discipline selection and dynamic grade dropdowns
+- `PlanIntakeChat`
+  - guided interview UI and editable structured draft review
 - `PlanPageShell`
   - plan summary
   - pencil / coach actions

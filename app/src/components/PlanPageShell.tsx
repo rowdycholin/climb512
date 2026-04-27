@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { PencilLine, Sparkles } from "lucide-react";
+import { Cog, MessageCircle, Wrench } from "lucide-react";
 import PlanWorkspace from "@/components/PlanWorkspace";
 import { Button } from "@/components/ui/button";
 
@@ -83,7 +83,10 @@ export default function PlanPageShell({
               disabled={activeWeekLocked}
               className={editorOpen ? "shadow-sm" : "border-white/80 bg-white/80 backdrop-blur"}
             >
-              <PencilLine className="h-4 w-4" />
+              <span className="relative flex h-4 w-4 items-center justify-center">
+                <Cog className="h-4 w-4" />
+                <Wrench className="absolute -right-1 -top-1 h-2.5 w-2.5" />
+              </span>
             </Button>
             <Button
               type="button"
@@ -95,7 +98,7 @@ export default function PlanPageShell({
               disabled={activeWeekLocked}
               className={coachOpen ? "shadow-sm" : "border-white/80 bg-white/80 backdrop-blur"}
             >
-              <Sparkles className="h-4 w-4" />
+              <MessageCircle className="h-4 w-4" />
             </Button>
           </div>
         </div>

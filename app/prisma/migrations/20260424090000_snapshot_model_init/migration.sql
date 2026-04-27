@@ -6,7 +6,7 @@ CREATE TABLE "User" (
     "email" TEXT NOT NULL,
     "age" INTEGER NOT NULL,
     "passwordHash" TEXT NOT NULL,
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "createdAt" TIMESTAMPTZ(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT "User_pkey" PRIMARY KEY ("id")
 );
 
@@ -15,9 +15,9 @@ CREATE TABLE "Plan" (
     "userId" TEXT NOT NULL,
     "title" TEXT,
     "currentVersionId" TEXT,
-    "startDate" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" TIMESTAMP(3) NOT NULL,
+    "startDate" TIMESTAMPTZ(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "createdAt" TIMESTAMPTZ(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMPTZ(3) NOT NULL,
     CONSTRAINT "Plan_pkey" PRIMARY KEY ("id")
 );
 
@@ -31,7 +31,7 @@ CREATE TABLE "PlanVersion" (
     "effectiveFromWeek" INTEGER,
     "profileSnapshot" JSONB NOT NULL,
     "planSnapshot" JSONB NOT NULL,
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "createdAt" TIMESTAMPTZ(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT "PlanVersion_pkey" PRIMARY KEY ("id")
 );
 
@@ -52,7 +52,7 @@ CREATE TABLE "WorkoutLog" (
     "durationActual" TEXT,
     "notes" TEXT,
     "completed" BOOLEAN NOT NULL DEFAULT false,
-    "loggedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "loggedAt" TIMESTAMPTZ(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT "WorkoutLog_pkey" PRIMARY KEY ("id")
 );
 

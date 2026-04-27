@@ -30,11 +30,13 @@ climb512/
         login/page.tsx
         register/page.tsx
         dashboard/page.tsx
+        intake/page.tsx
         onboarding/page.tsx
         plan/[id]/page.tsx
       components/
         LoginForm.tsx
         RegisterForm.tsx
+        PlanIntakeChat.tsx
         DisciplineLevelFields.tsx
         EquipmentPicker.tsx
         DashboardClient.tsx
@@ -46,8 +48,11 @@ climb512/
         session.ts
         prisma.ts
         plan-types.ts
+        plan-request.ts
+        plan-intake-ai.ts
         plan-snapshot.ts
         plan-access.ts
+        intake.ts
         ai-plan-generator.ts
         ai-plan-adjuster.ts
     prisma/
@@ -69,7 +74,11 @@ climb512/
 - registration is a dedicated `/register` page
 - users have a generated primary key plus unique `userId` and unique `email`
 - registration captures first name, last name, email, user ID, age, and password
-- onboarding captures goals, discipline, grades, start date, schedule, and equipment
+- guided chat intake is available at `/intake`
+- manual onboarding remains available at `/onboarding`
+- manual onboarding captures goals, discipline, grades, start date, schedule, and equipment
+- guided intake builds a generic `PlanRequest` with goals, disciplines, levels, schedule, equipment, strength focus, and injuries/limitations
+- `PlanRequest` is adapted to the legacy `PlanInput` shape until the generator and simulator consume the generic request directly
 - onboarding age was removed; plan generation uses the registered user age
 - grade dropdowns change by discipline:
   - bouldering: V-scale
@@ -81,8 +90,9 @@ climb512/
 - workout completion preserves the currently expanded day after refresh
 - direct week editing is implemented through `PlanEditor`
 - the plan page uses shared hamburger navigation
+- shared navigation uses a vertical icon+label menu: chat bubble for AI chat and wrench for manual setup/editing
 - edit controls appear only inside `Edit This Week`
-- the detailed editor currently shows training days only
+- the detailed editor includes rest days, and adding an exercise to a rest day turns it into a training day
 - AI plan generation is live
 - AI week-adjustment code still exists, but it is experimental and not the primary product direction
 - Docker defaults plan generation to the local `simulator` service
@@ -143,6 +153,7 @@ bash scripts/stop-dev.sh
 cd testing
 npm test
 npx playwright test tests/onboarding.spec.ts
+npx playwright test tests/intake.spec.ts
 npx playwright test tests/plan-start-date.spec.ts
 npx playwright test tests/plan-viewer-progress.spec.ts
 ```
@@ -152,13 +163,17 @@ npx playwright test tests/plan-viewer-progress.spec.ts
 - server mutations live in `app/src/app/actions.ts`
 - ownership-aware loading and log authorization live in `app/src/lib/plan-access.ts`
 - snapshot parsing and shaping live in `app/src/lib/plan-snapshot.ts`
-- onboarding generation requests go through `app/src/lib/ai-plan-generator.ts`
+- generic request schema and legacy adapter live in `app/src/lib/plan-request.ts`
+- guided intake template state and parsing lives in `app/src/lib/intake.ts`
+- onboarding and guided-intake generation requests go through `app/src/lib/ai-plan-generator.ts`
 - the simulator implements a local OpenAI-compatible backend for plan generation only
 - `docker-compose.dev.yml` overlays the base compose file for bind-mounted development
 
 ## AI Notes
 
 - the app uses plain `fetch` to an OpenAI-compatible `/v1/chat/completions` endpoint
+- `/intake` is an AI-style guided intake scaffold today; it uses a simulator-backed `PlanIntakeAiResponse` contract and does not call the remote AI backend yet
+- AI intake responses are validated in `app/src/lib/plan-intake-ai.ts` before the UI receives draft changes
 - in Docker, `ANTHROPIC_BASE_URL` defaults to `http://simulator:8787`
 - outside Docker, `app/.env` may still point to OpenRouter
 - the simulator logging header uses the session login ID and is only sent to simulator-like local base URLs
@@ -168,6 +183,7 @@ npx playwright test tests/plan-viewer-progress.spec.ts
 - `PlanEditor` is the main path for future week changes
 - saving edits creates a new `PlanVersion`
 - logged weeks are protected from structural edits
+- rest days can be edited and can receive new exercises
 - add / duplicate / delete controls are icon-driven inside edit mode
 - the AI adjuster is still present, but it should be treated as a prototype
 

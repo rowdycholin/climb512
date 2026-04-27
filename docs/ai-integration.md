@@ -2,11 +2,13 @@
 
 ## Current status
 
-The stable AI integration today is **plan generation**.
+The stable AI integration today is **plan generation**. The app also has a guided intake screen that produces a generic `PlanRequest` before generation.
 
 File:
 
 - `app/src/lib/ai-plan-generator.ts`
+- `app/src/lib/plan-request.ts`
+- `app/src/lib/intake.ts`
 
 The repository still contains AI week-adjustment prototype code in:
 
@@ -16,7 +18,7 @@ but that path is no longer the main product direction and should be treated as e
 
 ## Plan generation
 
-Input:
+Legacy generator input:
 
 - goals
 - current grade
@@ -28,6 +30,19 @@ Input:
 - discipline
 
 `Plan.startDate` is saved on the `Plan` record for calendar positioning. It is not currently sent as an AI generation input.
+
+## Guided intake
+
+The `/intake` route is the first step toward a generic chat-based plan intake. Today it is intentionally conservative:
+
+- it is a rule-based interview flow, not a remote AI call
+- it asks for sport/discipline, goal, timeline, equipment, strength training, start date, current level, schedule, and injuries/limitations
+- it extracts a generic `PlanRequest` from the user's answers
+- the user can edit the draft before generation
+- it adapts `PlanRequest` to the legacy `PlanInput` shape that the current generator uses
+- it still targets the current climbing plan generator
+
+This keeps the UI and validation path ready for a future model-backed intake while giving the simulator and generator a clear migration target.
 
 Output:
 
@@ -92,7 +107,7 @@ AI output is not written into normalized `Week/Day/Exercise` tables.
 Instead:
 
 - generated plans become `PlanVersion.planSnapshot`
-- onboarding inputs become `PlanVersion.profileSnapshot`
+- manual onboarding inputs and the guided-intake legacy adapter output become `PlanVersion.profileSnapshot`
 - user history stays in `WorkoutLog`
 
 That makes generated plans easier to revise later without destroying historical logs.
