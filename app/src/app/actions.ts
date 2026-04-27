@@ -67,7 +67,7 @@ interface EditedWeekInput {
   days: EditedDayInput[];
 }
 
-function toPlanInput(formData: FormData): PlanInput {
+function toPlanInput(formData: FormData, age: number): PlanInput {
   const goals = formData.getAll("goals") as string[];
   const customGoal = (formData.get("customGoal") as string | null)?.trim();
   const equipment = formData.getAll("equipment") as string[];
@@ -77,7 +77,7 @@ function toPlanInput(formData: FormData): PlanInput {
     goals: customGoal ? [...goals, customGoal] : goals,
     currentGrade: formData.get("currentGrade") as string,
     targetGrade: formData.get("targetGrade") as string,
-    age: parseInt(formData.get("age") as string, 10),
+    age,
     weeksDuration: parseInt(formData.get("weeksDuration") as string, 10),
     daysPerWeek: parseInt(formData.get("daysPerWeek") as string, 10),
     equipment: customEquipment
@@ -85,6 +85,20 @@ function toPlanInput(formData: FormData): PlanInput {
       : equipment,
     discipline: (formData.get("discipline") as string) || "bouldering",
   };
+}
+
+function parsePlanStartDate(formData: FormData) {
+  const value = formData.get("startDate");
+  if (typeof value !== "string" || !value) {
+    return new Date();
+  }
+
+  const parsed = new Date(`${value}T00:00:00`);
+  if (Number.isNaN(parsed.getTime())) {
+    return new Date();
+  }
+
+  return parsed;
 }
 
 async function createPlanVersion(params: {
@@ -300,17 +314,18 @@ function applyEditedWeekToSnapshot(currentSnapshot: PlanSnapshot, editedWeek: Ed
 }
 
 export async function login(_prevState: unknown, formData: FormData) {
-  const username = formData.get("username") as string;
+  const loginId = (formData.get("userId") as string).trim();
   const password = formData.get("password") as string;
 
-  const user = await prisma.user.findUnique({ where: { username } });
+  const user = await prisma.user.findUnique({ where: { userId: loginId } });
   if (!user || !(await bcrypt.compare(password, user.passwordHash))) {
-    return { error: "Invalid username or password" };
+    return { error: "Invalid user ID or password" };
   }
 
   const session = await getSession();
   session.userId = user.id;
-  session.username = user.username;
+  session.loginId = user.userId;
+  session.displayName = `${user.firstName} ${user.lastName}`.trim();
   session.isLoggedIn = true;
   session.bootId = getSessionBootId();
   session.expiresAt = getSessionExpiresAt();
@@ -323,22 +338,44 @@ export async function login(_prevState: unknown, formData: FormData) {
 }
 
 export async function register(_prevState: unknown, formData: FormData) {
-  const username = (formData.get("username") as string).trim();
+  const firstName = (formData.get("firstName") as string).trim();
+  const lastName = (formData.get("lastName") as string).trim();
+  const email = (formData.get("email") as string).trim().toLowerCase();
+  const loginId = (formData.get("userId") as string).trim();
   const password = formData.get("password") as string;
+  const verifyPassword = formData.get("verifyPassword") as string;
+  const age = parseInt(formData.get("age") as string, 10);
 
-  if (!username || !password) return { error: "Username and password are required" };
-  if (username.length < 3) return { error: "Username must be at least 3 characters" };
-  if (password.length < 8) return { error: "Password must be at least 8 characters" };
+  if (!firstName || !lastName || !email || !loginId || !password || !verifyPassword || !Number.isFinite(age)) {
+    return { error: "All fields are required" };
+  }
+  if (loginId.length < 8) return { error: "User ID must be at least 8 characters" };
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return { error: "Enter a valid email address" };
+  if (age < 13 || age > 100) return { error: "Age must be between 13 and 100" };
+  if (password.length < 10) return { error: "Password must be at least 10 characters" };
+  if (!/[a-z]/.test(password)) return { error: "Password must include a lowercase letter" };
+  if (!/[A-Z]/.test(password)) return { error: "Password must include an uppercase letter" };
+  if (!/[0-9]/.test(password)) return { error: "Password must include a number" };
+  if (!/[!@#$%^&*()_\-+=[\]{};':"\\|,.<>/?`~]/.test(password)) {
+    return { error: "Password must include a special character" };
+  }
+  if (password !== verifyPassword) return { error: "Passwords do not match" };
 
-  const existing = await prisma.user.findUnique({ where: { username } });
-  if (existing) return { error: "Username already taken" };
+  const existingLogin = await prisma.user.findUnique({ where: { userId: loginId } });
+  if (existingLogin) return { error: "User ID already taken" };
+
+  const existingEmail = await prisma.user.findUnique({ where: { email } });
+  if (existingEmail) return { error: "Email already registered" };
 
   const passwordHash = await bcrypt.hash(password, 10);
-  const user = await prisma.user.create({ data: { username, passwordHash } });
+  const user = await prisma.user.create({
+    data: { userId: loginId, firstName, lastName, email, age, passwordHash },
+  });
 
   const session = await getSession();
   session.userId = user.id;
-  session.username = user.username;
+  session.loginId = user.userId;
+  session.displayName = `${user.firstName} ${user.lastName}`.trim();
   session.isLoggedIn = true;
   session.bootId = getSessionBootId();
   session.expiresAt = getSessionExpiresAt();
@@ -357,8 +394,15 @@ export async function createPlan(formData: FormData) {
   const session = await getSession();
   if (!session.isLoggedIn) redirect("/login");
 
-  const input = toPlanInput(formData);
-  const weeks = await generatePlanWithAI(input, session.username);
+  const user = await prisma.user.findUnique({
+    where: { id: session.userId },
+    select: { age: true },
+  });
+  if (!user) redirect("/login");
+
+  const input = toPlanInput(formData, user.age);
+  const startDate = parsePlanStartDate(formData);
+  const weeks = await generatePlanWithAI(input, session.loginId);
   const profileSnapshot = createProfileSnapshot(input);
   const planSnapshot = buildPlanSnapshot(weeks);
 
@@ -366,6 +410,7 @@ export async function createPlan(formData: FormData) {
     data: {
       userId: session.userId,
       title: `${input.currentGrade} → ${input.targetGrade}`,
+      startDate,
     },
   });
 

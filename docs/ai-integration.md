@@ -21,11 +21,13 @@ Input:
 - goals
 - current grade
 - target grade
-- age
+- age from the registered user record
 - weeks duration
 - days per week
 - equipment
 - discipline
+
+`Plan.startDate` is saved on the `Plan` record for calendar positioning. It is not currently sent as an AI generation input.
 
 Output:
 
@@ -79,9 +81,9 @@ The app appends `/v1/chat/completions` itself.
 
 ## Privacy note
 
-When the app is pointed at a local simulator-like base URL, it may include the current username in a request header so simulator logs can show who triggered plan generation.
+When the app is pointed at a local simulator-like base URL, it may include the current session login ID in a request header so simulator logs can show who triggered plan generation.
 
-That username header is **not** sent to live provider URLs such as OpenRouter.
+That login header is **not** sent to live provider URLs such as OpenRouter.
 
 ## Storage model impact
 

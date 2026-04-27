@@ -1,23 +1,14 @@
 import { test, expect } from "@playwright/test";
+import { TEST_PASSWORD, createPlanFromOnboarding, registerUser } from "./helpers";
 
 async function login(page: import("@playwright/test").Page) {
-  await page.goto("/login");
-  // Try registering — succeeds on first run, shows error if already exists
-  await page.getByRole("button", { name: "Register" }).click();
-  await page.fill('input[name="username"]', "climber1");
-  await page.fill('input[name="password"]', "climbin512!");
-  await page.click('button[type="submit"]');
-  try {
-    await page.waitForURL(/\/(dashboard|onboarding)/, { timeout: 5000 });
-    return;
-  } catch {
-    // Already registered — sign in instead
-  }
-  await page.goto("/login");
-  await page.fill('input[name="username"]', "climber1");
-  await page.fill('input[name="password"]', "climbin512!");
-  await page.click('button[type="submit"]');
-  await page.waitForURL(/\/(dashboard|onboarding)/);
+  await registerUser(page, "climber1").catch(async () => {
+    await page.goto("/login");
+    await page.fill('input[name="userId"]', "climber1");
+    await page.fill('input[name="password"]', TEST_PASSWORD);
+    await page.click('button[type="submit"]');
+    await page.waitForURL(/\/(dashboard|onboarding)/);
+  });
 }
 
 test.describe("Dashboard", () => {
@@ -35,13 +26,13 @@ test.describe("Dashboard", () => {
   });
 
   test("existing plans link through to plan viewer", async ({ page }) => {
+    const userId = `dashplan-${Date.now()}`;
+    await registerUser(page, userId);
+    await createPlanFromOnboarding(page);
+    await page.goto("/dashboard");
+
     const planLink = page.locator('a[href^="/plan/"]').first();
-    const count = await planLink.count();
-    if (count > 0) {
-      await planLink.click();
-      await expect(page).toHaveURL(/\/plan\//);
-    } else {
-      test.skip();
-    }
+    await planLink.click();
+    await expect(page).toHaveURL(/\/plan\//);
   });
 });

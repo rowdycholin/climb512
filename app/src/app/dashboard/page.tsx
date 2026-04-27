@@ -37,7 +37,7 @@ export default async function DashboardPage() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-100 to-slate-50">
-      <AppHeader eyebrow="Dashboard" title="Climb512" subtitle={`Welcome back, ${session.username}`} />
+      <AppHeader eyebrow="Dashboard" title="Climb512" subtitle={`Welcome back, ${session.displayName || session.loginId}`} />
 
       <main className="mx-auto max-w-2xl p-4 py-8">
         <section className="mb-8 overflow-hidden rounded-[1.6rem] border border-white/70 bg-[radial-gradient(circle_at_top_left,_rgba(14,165,233,0.16),_transparent_32%),linear-gradient(145deg,_rgba(255,255,255,0.98),_rgba(240,249,255,0.92)_48%,_rgba(255,251,235,0.92))] p-6 shadow-[0_24px_60px_rgba(15,23,42,0.10)]">

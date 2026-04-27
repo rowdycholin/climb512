@@ -15,7 +15,7 @@ export default async function globalTeardown(_config: FullConfig) {
       "psql",
       "postgresql://climber:climber512@postgres:5432/climbapp",
       "-c",
-      "DELETE FROM \"User\" WHERE username = 'climber1' OR username LIKE 'pw-%';",
+      "DELETE FROM \"User\" WHERE \"userId\" = 'climber1' OR \"userId\" LIKE 'pw-%' OR \"userId\" LIKE 'dashplan-%' OR \"userId\" LIKE 'onboard-%' OR \"userId\" LIKE 'progress-%' OR \"userId\" LIKE 'startdate-%';",
     ],
     {
       cwd: repoRoot,

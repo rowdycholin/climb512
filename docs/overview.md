@@ -1,6 +1,6 @@
 # Application Overview
 
-## What it does
+## What It Does
 
 Climb512 generates personalized climbing plans, stores them as versioned snapshots, and lets users log what they actually performed.
 
@@ -9,24 +9,28 @@ Users can:
 - register or sign in
 - create multiple plans
 - generate a plan from onboarding inputs
+- choose a plan start date, including dates in the past for testing
+- open plans to the current calendar week/day based on that start date
 - log workouts by week and day
 - edit future weeks directly
-- move around the authenticated screens from a shared menu
+- move around authenticated screens from a shared menu
 - preserve history when plans change later
 
-## Core flow
+## Core Flow
 
 ```text
-Register / Login -> Dashboard or Onboarding -> Generate plan -> View week -> Log workouts -> Edit future weeks -> Save new version
+Register -> Login -> Dashboard or Onboarding -> Generate plan -> View current week/day -> Log workouts -> Edit future weeks -> Save new version
 ```
 
-## Current product direction
+## Current Product Direction
 
 The current backend is designed around revision-safe plans:
 
+- users have a generated primary key plus unique user ID and email
 - plans are versioned
 - logs stay attached to the version they came from
 - future edits create new `PlanVersion` rows instead of mutating history
+- calendar position comes from `Plan.startDate`, not completion state
 
 The preferred UX direction is:
 
@@ -42,7 +46,7 @@ Current editing behavior:
 - detailed editing currently renders training days only
 - add / duplicate / delete actions are icon-based inside the editor
 
-## Technology stack
+## Technology Stack
 
 | Layer | Technology |
 |---|---|
@@ -56,8 +60,10 @@ Current editing behavior:
 | Test stack | Playwright |
 | Containers | Docker Compose |
 
-## Important operational note
+## Important Operational Notes
 
-In Docker, the app currently uses the local simulator service for plan generation by default. That keeps normal testing and demos off the paid provider path.
+In Docker, the app uses the local simulator service for plan generation by default. That keeps normal testing and demos off the paid provider path.
 
-Sessions are also boot-scoped and currently expire after 30 minutes.
+For local development, `docker-compose.dev.yml` bind-mounts `./app` into the web container and runs `next dev`.
+
+Sessions are boot-scoped and currently expire after 30 minutes.

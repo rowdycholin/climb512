@@ -1,23 +1,8 @@
 import { test, expect } from "@playwright/test";
+import { registerUser } from "./helpers";
 
 async function login(page: import("@playwright/test").Page) {
-  await page.goto("/login");
-  // Try registering — succeeds on first run, shows error if already exists
-  await page.getByRole("button", { name: "Register" }).click();
-  await page.fill('input[name="username"]', "climber1");
-  await page.fill('input[name="password"]', "climbin512!");
-  await page.click('button[type="submit"]');
-  try {
-    await page.waitForURL(/\/(dashboard|onboarding)/, { timeout: 5000 });
-  } catch {
-    // Already registered — sign in instead
-    await page.goto("/login");
-    await page.fill('input[name="username"]', "climber1");
-    await page.fill('input[name="password"]', "climbin512!");
-    await page.click('button[type="submit"]');
-    await page.waitForURL(/\/(dashboard|onboarding)/);
-  }
-  // Always land on onboarding for these tests
+  await registerUser(page, `onboard-${Date.now()}`);
   await page.goto("/onboarding");
 }
 
@@ -35,31 +20,31 @@ test.describe("Onboarding form", () => {
     await expect(page.getByRole("button", { name: /Generate My Training Plan/i })).toBeVisible();
   });
 
-  test("requires at least a grade and age before submitting", async ({ page }) => {
+  test("requires grades before submitting", async ({ page }) => {
     await page.click('button:has-text("Generate My Training Plan")');
-    // Native required validation prevents submit — URL should stay on onboarding
     await expect(page).toHaveURL(/\/onboarding/);
   });
 
-  test("generates a plan end-to-end", async ({ page }) => {
-    // Goals — shadcn Checkbox hides the real input; click the wrapping label
-    await page.locator('label:has(input[name="goals"][value="send-project"])').click();
+  test("changes grade systems by discipline", async ({ page }) => {
+    await expect(page.locator('select[name="currentGrade"] option[value="V4"]')).toHaveCount(1);
+    await expect(page.locator('select[name="currentGrade"] option[value="5.10a"]')).toHaveCount(0);
 
-    // Grades
+    await page.check('input[name="discipline"][value="sport"]');
+    await expect(page.locator('select[name="currentGrade"] option[value="5.10a"]')).toHaveCount(1);
+    await expect(page.locator('select[name="currentGrade"] option[value="V4"]')).toHaveCount(0);
+
+    await page.check('input[name="discipline"][value="ice"]');
+    await expect(page.locator('select[name="currentGrade"] option[value="WI3+"]')).toHaveCount(1);
+    await expect(page.locator('select[name="currentGrade"] option[value="5.10a"]')).toHaveCount(0);
+  });
+
+  test("generates a plan end-to-end", async ({ page }) => {
+    await page.locator('label:has(input[name="goals"][value="send-project"])').click();
+    await page.check('input[name="discipline"][value="bouldering"]');
     await page.selectOption('select[name="currentGrade"]', "V4");
     await page.selectOption('select[name="targetGrade"]', "V6");
-
-    // Age
-    await page.fill('input[name="age"]', "28");
-
-    // Schedule — minimum plan to stay within OpenRouter token budget
     await page.selectOption('select[name="weeksDuration"]', "4");
     await page.selectOption('select[name="daysPerWeek"]', "2");
-
-    // Discipline
-    await page.check('input[name="discipline"][value="bouldering"]');
-
-    // Submit — AI call can take a while
     await page.click('button:has-text("Generate My Training Plan")');
     await expect(page).toHaveURL(/\/plan\//, { timeout: 90_000 });
     await expect(page.getByRole("heading", { name: /Week 1/i })).toBeVisible({ timeout: 10_000 });

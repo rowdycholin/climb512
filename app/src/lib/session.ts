@@ -3,7 +3,8 @@ import { cookies, headers } from "next/headers";
 
 export interface SessionData {
   userId: string;
-  username: string;
+  loginId: string;
+  displayName: string;
   isLoggedIn: boolean;
   bootId?: string;
   expiresAt?: number;
@@ -61,7 +62,8 @@ export async function getSession(): Promise<IronSession<SessionData>> {
 
   if (session.isLoggedIn && (session.bootId !== SESSION_BOOT_ID || isExpired)) {
     session.userId = "";
-    session.username = "";
+    session.loginId = "";
+    session.displayName = "";
     session.isLoggedIn = false;
     session.bootId = undefined;
     session.expiresAt = undefined;

@@ -24,6 +24,14 @@ Startup order:
 
 `web` will not start until `migrate` exits successfully.
 
+For local development, use the dev overlay instead:
+
+```bash
+bash scripts/start-dev.sh --build
+```
+
+That starts the same backing services but bind-mounts `./app` and runs Next dev mode. Do not treat the dev overlay as the production deployment shape.
+
 ## Migration behavior
 
 The migration container:
@@ -40,6 +48,8 @@ The current application schema depends on:
 - `Plan`
 - `PlanVersion`
 - `WorkoutLog`
+
+`Plan.startDate` anchors the calendar week/day opened by the plan page.
 
 ## Logs
 
@@ -104,6 +114,14 @@ Use this when the schema changed incompatibly or you want a clean demo DB:
 docker compose down -v
 docker compose up --build -d
 ```
+
+### Development reset
+
+```bash
+bash scripts/start-dev.sh --fresh --build
+```
+
+This removes Postgres data plus the dev `node_modules` and `.next` volumes.
 
 ## Production notes
 

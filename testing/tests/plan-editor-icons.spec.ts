@@ -1,25 +1,10 @@
 import { expect, test } from "@playwright/test";
+import { createPlanFromOnboarding, registerUser } from "./helpers";
 
 async function registerAndCreatePlan(page: import("@playwright/test").Page) {
-  const username = `pw-icons-${Date.now()}`;
-
-  await page.goto("/login");
-  await page.getByRole("button", { name: "Register" }).click();
-  await page.fill('input[name="username"]', username);
-  await page.fill('input[name="password"]', "climbin512!");
-  await page.click('button[type="submit"]');
-  await page.waitForURL(/\/(dashboard|onboarding)/, { timeout: 10_000 });
-  await page.goto("/onboarding");
-
-  await page.locator('label:has(input[name="goals"][value="send-project"])').click();
-  await page.selectOption('select[name="currentGrade"]', "V4");
-  await page.selectOption('select[name="targetGrade"]', "V6");
-  await page.fill('input[name="age"]', "28");
-  await page.selectOption('select[name="weeksDuration"]', "4");
-  await page.selectOption('select[name="daysPerWeek"]', "2");
-  await page.check('input[name="discipline"][value="bouldering"]');
-  await page.click('button:has-text("Generate My Training Plan")');
-  await page.waitForURL(/\/plan\//, { timeout: 30_000 });
+  const userId = `pw-icons-${Date.now()}`;
+  await registerUser(page, userId);
+  await createPlanFromOnboarding(page);
 }
 
 test("plan editor icon actions are visible and working", async ({ page }) => {

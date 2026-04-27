@@ -15,7 +15,7 @@ export default async function PlanPage({ params }: { params: { id: string } }) {
   const profile = parseProfileSnapshot(plan.currentVersion.profileSnapshot);
   const weeks = plan.planView.weeks;
 
-  const daysSinceStart = Math.floor((Date.now() - plan.createdAt.getTime()) / (1000 * 60 * 60 * 24));
+  const daysSinceStart = Math.floor((Date.now() - plan.startDate.getTime()) / (1000 * 60 * 60 * 24));
   const currentWeekIndex = Math.max(0, Math.min(Math.floor(daysSinceStart / 7), weeks.length - 1));
   const currentDayIndex = ((daysSinceStart % 7) + 7) % 7;
 

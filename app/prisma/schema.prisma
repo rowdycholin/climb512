@@ -8,7 +8,11 @@ datasource db {
 
 model User {
   id           String       @id @default(cuid())
-  username     String       @unique
+  userId       String       @unique
+  firstName    String
+  lastName     String
+  email        String       @unique
+  age          Int
   passwordHash String
   createdAt    DateTime     @default(now())
   plans        Plan[]
@@ -23,7 +27,8 @@ model Plan {
   currentVersionId String?       @unique
   currentVersion   PlanVersion?  @relation("CurrentPlanVersion", fields: [currentVersionId], references: [id], onDelete: SetNull, onUpdate: Cascade)
   versions         PlanVersion[] @relation("PlanVersions")
-  workoutLogs      WorkoutLog[]
+  workoutLogs      WorkoutLog[] 
+  startDate        DateTime      @default(now())
   createdAt        DateTime      @default(now())
   updatedAt        DateTime      @updatedAt
 

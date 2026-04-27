@@ -105,10 +105,10 @@ docker compose logs -f simulator
 Example line:
 
 ```text
-[simulator] generated plan week user=climber1 week=1/4 daysPerWeek=2 discipline=bouldering grades=V4->V6 scenario=baseline seed=demo-seed mode=none
+[simulator] generated plan week user=testuser1 week=1/4 daysPerWeek=2 discipline=bouldering grades=V4->V6 scenario=baseline seed=demo-seed mode=none
 ```
 
-The username header is only sent when the app is talking to a simulator-like local backend, not to a live provider.
+The login ID header is only sent when the app is talking to a simulator-like local backend, not to a live provider.
 
 ## Current generator behavior
 
@@ -118,6 +118,7 @@ The simulator uses a rule-based generator:
 - theme comes from week number and phase
 - exercise templates come from discipline
 - equipment can swap in specific exercise variants
+- grade, age, and goals are parsed and included in the prompt, but the rule-based simulator only uses them lightly today
 - seeded randomness adds controlled variation
 
 This keeps plans believable enough for UI testing without pretending to be a real model.

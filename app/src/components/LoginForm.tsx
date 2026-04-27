@@ -1,8 +1,8 @@
 "use client";
 
-import { useState } from "react";
 import { useFormState, useFormStatus } from "react-dom";
-import { login, register } from "@/app/actions";
+import Link from "next/link";
+import { login } from "@/app/actions";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -24,8 +24,8 @@ function LoginFields({ error }: { error?: string }) {
   return (
     <>
       <div className="space-y-2">
-        <Label htmlFor="username">Username</Label>
-        <Input id="username" name="username" placeholder="username" required autoComplete="username" />
+        <Label htmlFor="userId">User ID</Label>
+        <Input id="userId" name="userId" placeholder="user ID or email" required autoComplete="username" />
       </div>
       <div className="space-y-2">
         <Label htmlFor="password">Password</Label>
@@ -36,65 +36,30 @@ function LoginFields({ error }: { error?: string }) {
   );
 }
 
-function RegisterFields({ error }: { error?: string }) {
-  return (
-    <>
-      <div className="space-y-2">
-        <Label htmlFor="username">Username</Label>
-        <Input id="username" name="username" placeholder="username (min 3 chars)" required autoComplete="username" />
-      </div>
-      <div className="space-y-2">
-        <Label htmlFor="password">Password</Label>
-        <Input id="password" name="password" type="password" placeholder="min 8 characters" required autoComplete="new-password" />
-      </div>
-      {error && <p className="text-sm text-red-500">{error}</p>}
-    </>
-  );
-}
-
 export default function LoginForm() {
-  const [mode, setMode] = useState<"login" | "register">("login");
   const [loginState, loginAction] = useFormState(login, null);
-  const [registerState, registerAction] = useFormState(register, null);
 
   return (
     <Card className="w-full max-w-md border-white/70 bg-white/90 shadow-[0_24px_80px_rgba(15,23,42,0.14)] backdrop-blur">
       <CardHeader className="text-center">
-        <div className="mx-auto mb-4 flex h-14 min-w-[5.6rem] items-center justify-center rounded-2xl border border-sky-200/80 bg-[linear-gradient(135deg,_#082f49,_#0f766e_55%,_#f59e0b)] px-4 text-sm font-bold tracking-[0.18em] text-white shadow-[0_16px_40px_rgba(8,47,73,0.24)]">
-          c512
+        <div className="mx-auto mb-4 flex h-14 min-w-[5.6rem] flex-col items-center justify-center rounded-2xl border border-sky-200/80 bg-[linear-gradient(135deg,_#082f49,_#0f766e_55%,_#f59e0b)] px-4 text-[0.72rem] font-bold uppercase leading-none tracking-[0.16em] text-white shadow-[0_16px_40px_rgba(8,47,73,0.24)]">
+          <span>climb</span>
+          <span className="mt-1 text-sm tracking-[0.2em]">512</span>
         </div>
         <CardTitle className="text-3xl font-semibold text-slate-950">Climb512</CardTitle>
         <CardDescription>Sharpen your next block with a plan that feels coached, not generic.</CardDescription>
       </CardHeader>
       <CardContent>
-        <div className="mb-6 flex rounded-xl bg-slate-100 p-1.5">
-          <button
-            type="button"
-            onClick={() => setMode("login")}
-            className={`flex-1 rounded-lg py-2 text-sm font-medium transition-colors ${mode === "login" ? "bg-white text-slate-900 shadow-sm" : "text-slate-500 hover:text-slate-900"}`}
-          >
-            Sign In
-          </button>
-          <button
-            type="button"
-            onClick={() => setMode("register")}
-            className={`flex-1 rounded-lg py-2 text-sm font-medium transition-colors ${mode === "register" ? "bg-white text-slate-900 shadow-sm" : "text-slate-500 hover:text-slate-900"}`}
-          >
+        <form action={loginAction} className="space-y-4">
+          <LoginFields error={loginState?.error ?? undefined} />
+          <SubmitButton label="Sign In" pendingLabel="Signing in..." />
+        </form>
+        <div className="mt-5 border-t border-slate-200 pt-5 text-center text-sm text-slate-600">
+          New to Climb512?{" "}
+          <Link href="/register" className="font-medium text-slate-950 underline-offset-4 hover:underline">
             Register
-          </button>
+          </Link>
         </div>
-
-        {mode === "login" ? (
-          <form action={loginAction} className="space-y-4">
-            <LoginFields error={loginState?.error ?? undefined} />
-            <SubmitButton label="Sign In" pendingLabel="Signing in..." />
-          </form>
-        ) : (
-          <form action={registerAction} className="space-y-4">
-            <RegisterFields error={registerState?.error ?? undefined} />
-            <SubmitButton label="Create Account" pendingLabel="Creating account..." />
-          </form>
-        )}
       </CardContent>
     </Card>
   );

@@ -1,6 +1,6 @@
 # Architecture
 
-## System diagram
+## System Diagram
 
 ```text
 Browser
@@ -18,50 +18,65 @@ Next.js 14 App Router              <- Docker service: web
             \- live provider when explicitly configured
 ```
 
-## Core request flows
+## Core Request Flows
 
-### Plan page load
+### Registration And Login
 
-1. Browser requests `/plan/[id]`
-2. Server reads the session cookie
-3. If unauthenticated, redirect to `/login`
-4. `findOwnedPlanWithLogs()` loads the user's `Plan`, current `PlanVersion`, and `WorkoutLog` rows
-5. `planSnapshot` is parsed and merged with logs into the plan view model
-6. `PlanPageShell` renders summary actions, the shared menu, and `PlanWorkspace`
-7. `PlanWorkspace` renders the editor, AI adjuster prototype, and viewer
+1. New users open `/register`.
+2. `register()` validates first name, last name, email, user ID, age, password, and password confirmation.
+3. `User.id` is system generated.
+4. `User.userId` and `User.email` are unique.
+5. Login uses `userId` + password.
 
-### Plan creation
+### Onboarding And Plan Creation
 
-1. User submits onboarding
-2. `createPlan()` validates auth and converts form data to `PlanInput`
-3. `generatePlanWithAI()` requests week JSON from the configured AI backend
-4. The app builds:
+1. User submits onboarding.
+2. `createPlan()` validates auth and loads the registered user's age.
+3. The onboarding form supplies goals, discipline, current/target grade, start date, schedule, and equipment.
+4. `DisciplineLevelFields` switches grade systems:
+   - bouldering -> V-scale
+   - sport/trad/alpine -> YDS
+   - ice -> WI
+5. `generatePlanWithAI()` requests week JSON from the configured AI backend.
+6. The app builds:
    - `profileSnapshot`
    - `planSnapshot`
-5. A `Plan` row is created
-6. A first `PlanVersion` row is created with `changeType = "generated"`
-7. `Plan.currentVersionId` is updated
+7. A `Plan` row is created with `startDate`.
+8. A first `PlanVersion` row is created with `changeType = "generated"`.
+9. `Plan.currentVersionId` is updated.
 
-### Workout logging
+### Plan Page Load
 
-1. User logs or completes an exercise
-2. `logExercise()` receives `planId` and snapshot `exerciseKey`
-3. `upsertExerciseLogForUser()` verifies the exercise belongs to the authenticated user's current plan
-4. A `WorkoutLog` row is created or updated using `(userId, planId, exerciseKey)`
+1. Browser requests `/plan/[id]`.
+2. Server reads the session cookie.
+3. If unauthenticated, redirect to `/login`.
+4. `findOwnedPlanWithLogs()` loads the user's `Plan`, current `PlanVersion`, and `WorkoutLog` rows.
+5. `planSnapshot` is parsed and merged with logs into the plan view model.
+6. Current week/day is calculated from `Plan.startDate`.
+7. `PlanPageShell` renders summary actions, the shared menu, and `PlanWorkspace`.
+8. `PlanWorkspace` renders the editor, AI adjuster prototype, and viewer.
+
+### Workout Logging
+
+1. User logs or completes an exercise.
+2. `logExercise()` receives `planId` and snapshot `exerciseKey`.
+3. `upsertExerciseLogForUser()` verifies the exercise belongs to the authenticated user's current plan.
+4. A `WorkoutLog` row is created or updated using `(userId, planId, exerciseKey)`.
 5. The log stores:
    - `planVersionId`
    - week/day/session/exercise keys
    - `prescribedSnapshot`
    - actual performance fields
+6. The viewer preserves the currently expanded day after refresh.
 
-### Manual plan editing
+### Manual Plan Editing
 
-1. User opens `Edit This Week` from the pencil icon in the plan summary
-2. The client edits the current week in local state
-3. `saveEditedWeek()` validates the edited week payload
-4. Logged weeks are rejected to preserve history
-5. A new `PlanVersion` is created with `changeType = "manual_edit"`
-6. `Plan.currentVersionId` advances to the new version
+1. User opens `Edit This Week` from the pencil icon in the plan summary.
+2. The client edits the current week in local state.
+3. `saveEditedWeek()` validates the edited week payload.
+4. Logged weeks are rejected to preserve history.
+5. A new `PlanVersion` is created with `changeType = "manual_edit"`.
+6. `Plan.currentVersionId` advances to the new version.
 
 Current editor behavior:
 
@@ -70,11 +85,12 @@ Current editor behavior:
 - add / duplicate / delete actions are icon-based
 - AI coaching tools remain separate and secondary
 
-## Data model strategy
+## Data Model Strategy
 
 The app intentionally stores plans as versioned JSON documents:
 
-- `Plan` is the stable parent
+- `User` is the account record
+- `Plan` is the stable parent and owns calendar `startDate`
 - `PlanVersion` stores:
   - `profileSnapshot` JSON
   - `planSnapshot` JSON
@@ -82,7 +98,7 @@ The app intentionally stores plans as versioned JSON documents:
 
 This keeps revision history intact and avoids the complexity of mutating a deep relational week/day/exercise tree in place.
 
-## Main code boundaries
+## Main Code Boundaries
 
 ### Server
 
@@ -108,6 +124,10 @@ This keeps revision history intact and avoids the complexity of mutating a deep 
 
 ### Client
 
+- `RegisterForm`
+  - account creation form
+- `DisciplineLevelFields`
+  - onboarding discipline selection and dynamic grade dropdowns
 - `PlanPageShell`
   - plan summary
   - pencil / coach actions
@@ -123,9 +143,10 @@ This keeps revision history intact and avoids the complexity of mutating a deep 
 - `DashboardClient`
   - multi-select plan deletion
 
-## Operational notes
+## Operational Notes
 
 - sessions are cookie-based, boot-scoped, and currently expire after 30 minutes
 - the `migrate` service must succeed before `web` starts
 - migrations are raw SQL files tracked in `_app_migrations`
 - Docker defaults the app to the local simulator for plan generation
+- `docker-compose.dev.yml` overlays the base compose file for local bind-mounted development

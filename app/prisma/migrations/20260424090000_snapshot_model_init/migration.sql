@@ -1,6 +1,10 @@
 CREATE TABLE "User" (
     "id" TEXT NOT NULL,
-    "username" TEXT NOT NULL,
+    "userId" TEXT NOT NULL,
+    "firstName" TEXT NOT NULL,
+    "lastName" TEXT NOT NULL,
+    "email" TEXT NOT NULL,
+    "age" INTEGER NOT NULL,
     "passwordHash" TEXT NOT NULL,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT "User_pkey" PRIMARY KEY ("id")
@@ -11,6 +15,7 @@ CREATE TABLE "Plan" (
     "userId" TEXT NOT NULL,
     "title" TEXT,
     "currentVersionId" TEXT,
+    "startDate" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
     CONSTRAINT "Plan_pkey" PRIMARY KEY ("id")
@@ -51,7 +56,8 @@ CREATE TABLE "WorkoutLog" (
     CONSTRAINT "WorkoutLog_pkey" PRIMARY KEY ("id")
 );
 
-CREATE UNIQUE INDEX "User_username_key" ON "User"("username");
+CREATE UNIQUE INDEX "User_userId_key" ON "User"("userId");
+CREATE UNIQUE INDEX "User_email_key" ON "User"("email");
 CREATE UNIQUE INDEX "Plan_currentVersionId_key" ON "Plan"("currentVersionId");
 CREATE UNIQUE INDEX "PlanVersion_planId_versionNum_key" ON "PlanVersion"("planId", "versionNum");
 CREATE UNIQUE INDEX "WorkoutLog_userId_planId_exerciseKey_key" ON "WorkoutLog"("userId", "planId", "exerciseKey");

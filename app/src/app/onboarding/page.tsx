@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { getSession } from "@/lib/session";
 import { createPlan } from "@/app/actions";
 import AppHeader from "@/components/AppHeader";
+import DisciplineLevelFields from "@/components/DisciplineLevelFields";
 import EquipmentPicker from "@/components/EquipmentPicker";
 import GeneratePlanButton from "@/components/GeneratePlanButton";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -18,11 +19,10 @@ const GOALS = [
   { value: "injury-prevention", label: "Injury prevention and longevity" },
 ];
 
-const GRADES = ["V0", "V1", "V2", "V3", "V4", "V5", "V6", "V7", "V8", "V9", "V10+"];
-
 export default async function OnboardingPage() {
   const session = await getSession();
   if (!session.isLoggedIn) redirect("/login");
+  const today = new Date().toISOString().slice(0, 10);
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-100 to-slate-50">
@@ -62,53 +62,17 @@ export default async function OnboardingPage() {
             </CardContent>
           </Card>
 
-          <Card>
-            <CardHeader>
-              <CardTitle>Your Level</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="currentGrade">Current Grade (V-scale)</Label>
-                  <select
-                    name="currentGrade"
-                    id="currentGrade"
-                    required
-                    className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                  >
-                    <option value="">Select...</option>
-                    {GRADES.map((grade) => (
-                      <option key={grade} value={grade}>{grade}</option>
-                    ))}
-                  </select>
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="targetGrade">Target Grade</Label>
-                  <select
-                    name="targetGrade"
-                    id="targetGrade"
-                    required
-                    className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                  >
-                    <option value="">Select...</option>
-                    {GRADES.map((grade) => (
-                      <option key={grade} value={grade}>{grade}</option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="age">Your Age</Label>
-                <Input id="age" name="age" type="number" min="10" max="80" placeholder="e.g. 28" required className="max-w-[120px]" />
-              </div>
-            </CardContent>
-          </Card>
+          <DisciplineLevelFields />
 
           <Card>
             <CardHeader>
               <CardTitle>Training Schedule</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="startDate">Start Date</Label>
+                <Input id="startDate" name="startDate" type="date" required defaultValue={today} className="max-w-[180px]" />
+              </div>
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label htmlFor="weeksDuration">Plan Length (weeks)</Label>
@@ -139,33 +103,6 @@ export default async function OnboardingPage() {
                   </select>
                 </div>
               </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle>Climbing Discipline</CardTitle>
-              <CardDescription>What type of climbing do you primarily train for?</CardDescription>
-            </CardHeader>
-            <CardContent className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-              {[
-                { value: "bouldering", label: "Bouldering", desc: "Short powerful problems, V-scale" },
-                { value: "sport", label: "Sport Climbing", desc: "Roped routes, endurance and redpointing" },
-                { value: "trad", label: "Trad Climbing", desc: "Gear-protected routes and crack technique" },
-                { value: "ice", label: "Ice Climbing", desc: "Tool swings, front-pointing, mixed" },
-                { value: "alpine", label: "Alpine", desc: "Multi-pitch, altitude, endurance" },
-              ].map((discipline) => (
-                <label
-                  key={discipline.value}
-                  className="flex items-start gap-3 rounded-lg border border-slate-200 p-3 transition-colors hover:bg-slate-50 has-[:checked]:border-primary has-[:checked]:bg-accent"
-                >
-                  <input type="radio" name="discipline" value={discipline.value} required className="mt-0.5 accent-primary" />
-                  <div>
-                    <div className="text-sm font-medium">{discipline.label}</div>
-                    <div className="text-xs text-muted-foreground">{discipline.desc}</div>
-                  </div>
-                </label>
-              ))}
             </CardContent>
           </Card>
 

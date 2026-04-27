@@ -1,6 +1,6 @@
 # Security Notes
 
-Date: 2026-04-25
+Date: 2026-04-26
 
 ## Ownership rules
 
@@ -12,7 +12,7 @@ Date: 2026-04-25
 
 ## Current enforcement
 
-Shared ownership logic lives in [app/src/lib/plan-access.ts](/abs/path/c:/Users/beatt/projects/cursor/climb512/app/src/lib/plan-access.ts).
+Shared ownership logic lives in `app/src/lib/plan-access.ts`.
 
 Key controls:
 
@@ -36,19 +36,22 @@ That keeps unauthorized users from forging writes against another user's plan da
 
 ## Simulator privacy rule
 
-When the app is pointed at the local simulator, it may send the username in a request header so the simulator logs can show who triggered plan generation.
+When the app is pointed at the local simulator, it may send the session login ID in a request header so the simulator logs can show who triggered plan generation.
 
-That username header is not sent to live provider URLs.
+That login header is not sent to live provider URLs.
 
 ## Current gaps
 
-- the older security Playwright spec was tied to deleted tables and has been removed
-- security regression coverage should be rebuilt around the snapshot/version model
 - the AI week-adjustment prototype is still present and should be treated carefully until that feature is redesigned
+
+## Current regression coverage
+
+- user A cannot open user B's `/plan/[id]`
+- plan logging verifies ownership and snapshot exercise membership before writing
+- logged weeks are locked against manual structural edits
 
 ## Recommended follow-up tests
 
-- user A cannot open user B's `/plan/[id]`
 - user A cannot submit `logExercise` for user B's `planId` + `exerciseKey`
 - user A cannot save manual edits against user B's plan
 - user A cannot apply AI prototype adjustments to user B's plan

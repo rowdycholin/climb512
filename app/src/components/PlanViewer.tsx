@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { logExercise } from "@/app/actions";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
@@ -68,6 +68,10 @@ function ExerciseRow({ planId, exercise }: { planId: string; exercise: Exercise 
   const [pending, startTransition] = useTransition();
   const router = useRouter();
 
+  useEffect(() => {
+    setCompleted(log?.completed ?? false);
+  }, [exercise.id, log?.completed]);
+
   function createBaseFormData() {
     const formData = new FormData();
     formData.set("planId", planId);
@@ -118,6 +122,7 @@ function ExerciseRow({ planId, exercise }: { planId: string; exercise: Exercise 
           type="button"
           onClick={toggleComplete}
           disabled={pending}
+          aria-label={`${completed ? "Mark incomplete" : "Mark complete"}: ${exercise.name}`}
           className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded border-2 transition-colors disabled:opacity-60 ${
             completed ? "border-green-500 bg-green-500" : "border-slate-300 hover:border-green-400"
           }`}
@@ -340,7 +345,6 @@ function DayCard({
             <span className={`text-xs font-semibold ${isHighlighted ? "text-blue-600" : "text-slate-500"}`}>
               {day.dayName}
             </span>
-            {isHighlighted && <span className="block text-[10px] font-medium text-blue-500">Today</span>}
           </div>
           <div className="min-w-0 flex-1">
             <span className="text-sm font-semibold text-slate-700">{day.focus}</span>
@@ -369,21 +373,15 @@ function WeekCard({ planId, week, initialDayIndex }: { planId: string; week: Wee
   const trainingDays = week.days.filter((day) => !day.isRest).length;
   const allExercises = week.days.flatMap((day) => day.sessions.flatMap((session) => session.exercises));
   const completedCount = allExercises.filter((exercise) => exercise.logs[0]?.completed).length;
-  const initialOpenValues = useMemo(
-    () =>
-      week.days
-        .filter((_, index) => index === initialDayIndex)
-        .map((day) => day.id),
-    [initialDayIndex, week.days],
-  );
+  const initialDayId = week.days[initialDayIndex]?.id ?? null;
 
-  const [openDayIds, setOpenDayIds] = useState<string[]>(initialOpenValues);
-  const [highlightedDayId, setHighlightedDayId] = useState<string | null>(initialOpenValues[0] ?? null);
+  const [openDayIds, setOpenDayIds] = useState<string[]>(() => (initialDayId ? [initialDayId] : []));
+  const [highlightedDayId, setHighlightedDayId] = useState<string | null>(initialDayId);
 
   useEffect(() => {
-    setOpenDayIds(initialOpenValues);
-    setHighlightedDayId(initialOpenValues[0] ?? null);
-  }, [initialOpenValues]);
+    setOpenDayIds(initialDayId ? [initialDayId] : []);
+    setHighlightedDayId(initialDayId);
+  }, [initialDayId, week.id]);
 
   return (
     <div>

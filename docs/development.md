@@ -5,8 +5,9 @@
 - Node.js 20+
 - npm 10+
 - Docker Desktop
+- Bash for the `scripts/*.sh` helpers, or use the `.bat` scripts on Windows
 
-## Local setup
+## Local Setup
 
 ```bash
 cd app
@@ -16,7 +17,7 @@ npx prisma generate
 
 ## Environment
 
-`app/.env` is used for non-Docker local app runs and still contains the live-provider defaults, for example:
+`app/.env` is used for non-Docker local app runs and may contain live-provider defaults, for example:
 
 ```bash
 DATABASE_URL="postgresql://climber:climber512@localhost:5432/climbapp"
@@ -29,9 +30,9 @@ ANTHROPIC_MAX_TOKENS="5000"
 
 In Docker, `docker-compose.yml` overrides the AI base URL so the app talks to the local simulator by default.
 
-## Running the app
+## Running The App
 
-### Docker-first workflow
+### Production-Style Docker
 
 ```bash
 docker compose up --build -d
@@ -44,14 +45,39 @@ Services:
 - app: `http://localhost:8080`
 - simulator: `http://localhost:8787`
 
-Useful simulator checks:
+### Development Docker
+
+Use this when actively editing app code:
 
 ```bash
-curl http://localhost:8787/health
-curl http://localhost:8787/config
+bash scripts/start-dev.sh --build
 ```
 
-### Next.js dev server
+Windows alternative:
+
+```bat
+scripts\start-dev.bat --build
+```
+
+The dev override:
+
+- uses `docker-compose.yml` plus `docker-compose.dev.yml`
+- bind-mounts `./app` into `/app`
+- keeps `/app/node_modules` in the `web_node_modules` Docker volume
+- keeps `/app/.next` in the `web_next_cache` Docker volume
+- runs `npm run dev -- --hostname 0.0.0.0 --port 8080`
+
+Useful dev commands:
+
+```bash
+bash scripts/stop-dev.sh
+bash scripts/start-dev.sh --fresh
+docker compose -f docker-compose.yml -f docker-compose.dev.yml logs web -f
+```
+
+`--fresh` removes Postgres data plus the dev dependency/cache volumes.
+
+### Next.js Dev Server Outside Docker
 
 If you want the app outside Docker, start PostgreSQL separately and then:
 
@@ -60,7 +86,7 @@ cd app
 npm run dev
 ```
 
-Note: if you run the app outside Docker and keep `app/.env` unchanged, plan generation will go to the live provider, not the simulator.
+Note: if you run the app outside Docker and keep `app/.env` unchanged, plan generation may go to the live provider, not the simulator.
 
 ## Migrations
 
@@ -73,8 +99,7 @@ Workflow:
    `app/prisma/migrations/YYYYMMDDHHMMSS_name/migration.sql`
 3. Regenerate Prisma:
    `cd app && npx prisma generate`
-4. Rebuild Docker:
-   `docker compose up --build -d`
+4. Rebuild production-style Docker or restart dev web as needed
 
 The `migrate` service:
 
@@ -83,6 +108,14 @@ The `migrate` service:
 - applies each `migration.sql` exactly once
 - fails fast on SQL errors
 
+Apply migrations to the dev stack:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.dev.yml run --rm migrate
+docker compose -f docker-compose.yml -f docker-compose.dev.yml exec -T web npx prisma generate
+docker compose -f docker-compose.yml -f docker-compose.dev.yml restart web
+```
+
 If you need a clean DB:
 
 ```bash
@@ -90,17 +123,24 @@ docker compose down -v
 docker compose up --build -d
 ```
 
-## Current schema model
+or in dev mode:
+
+```bash
+bash scripts/start-dev.sh --fresh --build
+```
+
+## Current Schema Model
 
 The app stores plans as snapshots, not relational `Week/Day/Exercise` rows.
 
-- `Plan` is the top-level record
+- `User` stores account profile data and login identity
+- `Plan` is the top-level record and stores `startDate`
 - `PlanVersion` stores `profileSnapshot` and `planSnapshot` JSON
 - `WorkoutLog` stores performed work against snapshot exercise keys
 
 That means most plan-shape changes now happen in snapshot helpers rather than nested relational writes.
 
-## Core commands
+## Core Commands
 
 ```bash
 cd app
@@ -112,13 +152,20 @@ npm run lint
 
 `npm run lint` may still require repository-level cleanup before it becomes a dependable automation check. `npm run build` is the more reliable verification command today.
 
-## Common issues
+## Common Issues
 
 ### Prisma client types are stale
 
 ```bash
 cd app
 npx prisma generate
+```
+
+In dev Docker:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.dev.yml exec -T web npx prisma generate
+docker compose -f docker-compose.yml -f docker-compose.dev.yml restart web
 ```
 
 ### Docker migration fails on startup
@@ -132,6 +179,16 @@ Typical causes:
 - SQL syntax error in a migration
 - a migration folder exists without a valid `migration.sql`
 - the DB volume is carrying an incompatible old schema
+
+### Source changes are not visible
+
+If using base `docker-compose.yml`, source files are copied into the image at build time. Rebuild with:
+
+```bash
+docker compose up --build -d
+```
+
+If using `scripts/start-dev.sh`, `./app` is bind-mounted and changes should flow into Next dev without rebuilding.
 
 ### Plan generation stays on `/onboarding`
 
@@ -147,6 +204,7 @@ Typical causes:
 - simulator config not matching expectations
 - malformed JSON from the current AI backend
 - DB write failure after generation
+- stale Prisma client after a schema change
 
 ### Old session survives longer than expected
 
@@ -158,6 +216,7 @@ The first places to inspect are:
 
 - `app/src/lib/plan-snapshot.ts`
 - `app/src/lib/plan-access.ts`
+- `app/src/components/PlanViewer.tsx`
 - `app/src/components/PlanEditor.tsx`
 
 ## Tests
@@ -166,19 +225,27 @@ Playwright tests live in `testing/`.
 
 ```bash
 cd testing
-npx playwright test tests/auth.spec.ts tests/dashboard.spec.ts
-npx playwright test tests/onboarding.spec.ts --grep "generates a plan end-to-end"
+npm test
+npx playwright test tests/onboarding.spec.ts
+npx playwright test tests/plan-start-date.spec.ts
+npx playwright test tests/plan-viewer-progress.spec.ts
 npx playwright test tests/plan-editor-icons.spec.ts
+npx playwright test tests/security.spec.ts
 ```
 
-Notes:
+Current focused regressions include:
 
-- the current suite covers auth, dashboard, and onboarding
-- `plan-editor-icons.spec.ts` is the focused regression check for edit-mode add / duplicate / delete controls
-- global teardown removes the shared `climber1` test user after a run
-- security regression coverage should be rebuilt around `Plan`, `PlanVersion`, and `WorkoutLog`
+- auth and registration
+- dashboard plan links and deletion surface
+- onboarding grade-system switching
+- plan start date opening the correct calendar day
+- preserving an expanded non-Monday day after marking an exercise complete
+- plan editor icon actions
+- cross-user plan access denial
 
-## Current editing behavior
+Global teardown removes generated test users with prefixes such as `pw-*`, `dashplan-*`, `onboard-*`, `progress-*`, and `startdate-*`.
+
+## Current Editing Behavior
 
 - edit controls are visible only inside `Edit This Week`
 - the detailed edit cards currently render training days only
