@@ -32,8 +32,25 @@ test("plan editor icon actions are visible and working", async ({ page }) => {
   const customExerciseInput = page.locator('input[value="Custom exercise"]').last();
   await expect(customExerciseInput).toBeVisible();
 
+  const notesInput = page.getByPlaceholder("Notes").last();
+  await notesInput.fill("easy custom notes");
+  await expect(notesInput).toHaveValue("easy custom notes");
+
   const duplicateCountAfterAdd = await page.getByRole("button", { name: /^Duplicate / }).count();
   await page.getByRole("button", { name: "Delete Custom exercise" }).last().click();
   await expect(page.getByRole("button", { name: /^Duplicate / })).toHaveCount(duplicateCountAfterAdd - 1);
   await expect(page.locator('input[value="Custom exercise"]')).toHaveCount(0);
+});
+
+test("plan editor can add an exercise to a rest day", async ({ page }) => {
+  await registerAndCreatePlan(page);
+
+  await page.getByRole("button", { name: /Open plan editor/i }).click();
+  await expect(page.getByText("Edit This Week")).toBeVisible();
+
+  await expect(page.getByText("1. Monday").nth(1)).toBeVisible();
+  await expect(page.getByText("Rest day").first()).toBeVisible();
+
+  await page.getByRole("button", { name: "Add exercise to Monday" }).click();
+  await expect(page.locator('input[value="Custom exercise"]')).toBeVisible();
 });

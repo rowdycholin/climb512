@@ -119,6 +119,20 @@ function newExerciseId(sessionId: string) {
   return `${sessionId}-custom-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
 }
 
+function newSessionId(dayId: string) {
+  return `${dayId}-custom-session-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+}
+
+function createDefaultSession(dayId: string, dayName: string): EditableSession {
+  return {
+    id: newSessionId(dayId),
+    name: `${dayName} Session`,
+    description: "Custom training session",
+    duration: 45,
+    exercises: [],
+  };
+}
+
 function SwipeSurface({
   children,
   className,
@@ -408,13 +422,20 @@ export default function PlanEditor({
     updateDraft((current) => {
       const sourceSession = current.days[dayIndex].sessions[sessionIndex];
       const [exercise] = sourceSession.exercises.splice(exerciseIndex, 1);
-      const targetDay = current.days.find((day) => day.id === targetDayId && !day.isRest);
-      const targetSession = targetDay?.sessions[0];
-      if (!exercise || !targetSession) {
+      const targetDayIndex = current.days.findIndex((day) => day.id === targetDayId);
+      const targetDay = current.days[targetDayIndex];
+      if (!exercise || !targetDay) {
         if (exercise) sourceSession.exercises.splice(exerciseIndex, 0, exercise);
         return current;
       }
 
+      if (targetDay.sessions.length === 0) {
+        targetDay.sessions.push(createDefaultSession(targetDay.id, DAY_NAMES[targetDayIndex]));
+      }
+
+      targetDay.isRest = false;
+      targetDay.focus = targetDay.focus === "Rest" ? "Training" : targetDay.focus;
+      const targetSession = targetDay.sessions[0];
       targetSession.exercises.push(exercise);
       return current;
     });
@@ -423,6 +444,12 @@ export default function PlanEditor({
   function addCustomExercise(dayIndex: number) {
     updateDraft((current) => {
       const day = current.days[dayIndex];
+      if (day.sessions.length === 0) {
+        day.sessions.push(createDefaultSession(day.id, DAY_NAMES[dayIndex]));
+      }
+
+      day.isRest = false;
+      day.focus = day.focus === "Rest" ? "Training" : day.focus;
       const session = day.sessions[0];
       if (!session) return current;
       session.exercises.push({
@@ -446,7 +473,7 @@ export default function PlanEditor({
     value: string,
   ) {
     updateDraft((current) => {
-      current.days[dayIndex].sessions[sessionIndex].exercises[exerciseIndex][field] = value.trim() || null;
+      current.days[dayIndex].sessions[sessionIndex].exercises[exerciseIndex][field] = value === "" ? null : value;
       return current;
     });
   }
@@ -496,13 +523,9 @@ export default function PlanEditor({
     exerciseIndex: number,
     direction: -1 | 1,
   ) {
-    const trainingDayIndexes = draft.days
-      .map((day, index) => (!day.isRest ? index : -1))
-      .filter((index) => index >= 0);
-    const currentTrainingIndex = trainingDayIndexes.indexOf(dayIndex);
-    const targetTrainingIndex = trainingDayIndexes[currentTrainingIndex + direction];
-    if (targetTrainingIndex === undefined) return;
-    moveExercise(dayIndex, sessionIndex, exerciseIndex, draft.days[targetTrainingIndex].id);
+    const targetDay = draft.days[dayIndex + direction];
+    if (!targetDay) return;
+    moveExercise(dayIndex, sessionIndex, exerciseIndex, targetDay.id);
   }
 
   if (!isEditing) {
@@ -596,7 +619,6 @@ export default function PlanEditor({
               </div>
               {draft.days
                 .map((day, dayIndex) => ({ day, dayIndex }))
-                .filter(({ day }) => !day.isRest)
                 .map(({ day, dayIndex }) => (
                 <div
                   key={day.id}
@@ -607,6 +629,20 @@ export default function PlanEditor({
                         <p className="text-sm font-semibold text-slate-800">{dayIndex + 1}. {DAY_NAMES[dayIndex]}</p>
                         <p className="text-xs text-slate-500">{day.isRest ? "Rest day" : day.focus}</p>
                       </div>
+                      {day.sessions.length === 0 && (
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          onClick={() => addCustomExercise(dayIndex)}
+                          aria-label={`Add exercise to ${DAY_NAMES[dayIndex]}`}
+                          title="Add exercise"
+                          className="gap-1.5 rounded-full border-sky-200 bg-sky-50 text-sky-700 shadow-sm transition hover:border-sky-300 hover:bg-sky-100 hover:text-sky-800"
+                        >
+                          <CirclePlus className="h-4 w-4" />
+                          <span className="text-[11px] font-semibold uppercase tracking-[0.12em]">Add</span>
+                        </Button>
+                      )}
                     </div>
 
                     <div className="mt-3 space-y-3">
@@ -622,7 +658,7 @@ export default function PlanEditor({
                               size="sm"
                               variant="outline"
                               onClick={() => addCustomExercise(dayIndex)}
-                              aria-label={`Add exercise to ${session.name}`}
+                              aria-label={`Add exercise to ${DAY_NAMES[dayIndex]}`}
                               title="Add exercise"
                               className="gap-1.5 rounded-full border-sky-200 bg-sky-50 text-sky-700 shadow-sm transition hover:border-sky-300 hover:bg-sky-100 hover:text-sky-800"
                             >
@@ -635,15 +671,15 @@ export default function PlanEditor({
                             {session.exercises.map((exercise, exerciseIndex) => (
                               <SwipeSurface
                                 key={exercise.id}
-                                rightHint={draft.days.slice(0, dayIndex).some((item) => !item.isRest) ? "Prev day" : ""}
-                                leftHint={draft.days.slice(dayIndex + 1).some((item) => !item.isRest) ? "Next day" : ""}
+                                rightHint={dayIndex > 0 ? "Prev day" : ""}
+                                leftHint={dayIndex < draft.days.length - 1 ? "Next day" : ""}
                                 onSwipeRight={
-                                  draft.days.slice(0, dayIndex).some((item) => !item.isRest)
+                                  dayIndex > 0
                                     ? () => moveExerciseToAdjacentTrainingDay(dayIndex, sessionIndex, exerciseIndex, -1)
                                     : undefined
                                 }
                                 onSwipeLeft={
-                                  draft.days.slice(dayIndex + 1).some((item) => !item.isRest)
+                                  dayIndex < draft.days.length - 1
                                     ? () => moveExerciseToAdjacentTrainingDay(dayIndex, sessionIndex, exerciseIndex, 1)
                                     : undefined
                                 }
