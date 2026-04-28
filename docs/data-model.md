@@ -10,6 +10,7 @@ The app uses a versioned plan model:
 User
   -> Plan
      |- startDate
+     |- completedAt/completionReason/completionNotes
      |- currentVersionId -> PlanVersion
      |- PlanVersion (1:many)
      -> WorkoutLog (1:many)
@@ -52,14 +53,17 @@ The long-lived container for one user plan.
 | title | TEXT? | Display label, usually `currentGrade -> targetGrade` |
 | currentVersionId | TEXT? | FK -> PlanVersion, current active revision |
 | startDate | TIMESTAMPTZ | Calendar anchor for Week 1 Day 1 |
+| completedAt | TIMESTAMPTZ? | User-declared plan completion timestamp |
+| completionReason | TEXT? | Reason selected when marking complete |
+| completionNotes | TEXT? | Optional completion notes for future reference |
 | createdAt | TIMESTAMPTZ | Creation timestamp |
 | updatedAt | TIMESTAMPTZ | Updated when a new version becomes current |
 
-`startDate` controls which week/day opens by default on the plan page. It can be in the past for development and testing.
+`startDate` controls which week/day opens by default on the plan page. It can be in the past for development and testing. `completedAt` is set only when the user explicitly marks a plan complete; plans can also appear complete when the calendar passes the final plan day.
 
 ### PlanVersion
 
-Stores one full accepted snapshot of the plan and the legacy generator profile inputs.
+Stores one full accepted snapshot of the plan and the generation/profile inputs used to create or revise it.
 
 | Column | Type | Notes |
 |---|---|---|
@@ -67,10 +71,11 @@ Stores one full accepted snapshot of the plan and the legacy generator profile i
 | planId | TEXT | FK -> Plan |
 | versionNum | INTEGER | Monotonic within a plan |
 | basedOnVersionId | TEXT? | FK -> PlanVersion, parent revision |
-| changeType | TEXT | e.g. `generated`, `manual_edit`, `ai_reorder`, `ai_difficulty` |
+| changeType | TEXT | e.g. `generated`, `manual_edit`, `manual_add_exercise`, `ai_future_adjustment` |
 | changeSummary | TEXT? | Human-readable summary |
 | effectiveFromWeek | INTEGER? | First week affected by the revision |
-| profileSnapshot | JSONB | Legacy generator input snapshot |
+| effectiveFromDay | INTEGER? | Absolute plan day where a day-level adjustment begins |
+| profileSnapshot | JSONB | Generation/profile context, including guided-intake `planRequest` when available |
 | planSnapshot | JSONB | Full week/day/session/exercise snapshot |
 | createdAt | TIMESTAMPTZ | |
 
@@ -125,7 +130,8 @@ JSON copy of the plan-generation inputs:
 Notes:
 
 - `age` comes from the registered user record, not the onboarding or guided-intake form.
-- guided intake now builds a generic `PlanRequest`, then adapts it to this legacy snapshot shape for the current generator.
+- guided intake now builds a generic `PlanRequest` and stores that request in `profileSnapshot.planRequest`.
+- manual onboarding still stores the legacy input shape for compatibility.
 - `PlanRequest` includes fields such as sport, disciplines, goal type, goal description, target date, strength training, and injuries/limitations.
 - `startDate` is stored on `Plan`, not in `profileSnapshot`.
 - Date/time columns use PostgreSQL `TIMESTAMPTZ(3)`. The Docker database timezone is UTC.
@@ -201,6 +207,8 @@ This means a user can:
 - save a Week 4+ edit or accept a future AI-driven revision
 - continue on Version 2
 - still review their old Week 1-3 prescribed work and logged performance later
+
+Day-level future adjustments use `PlanVersion.effectiveFromDay`, where day 1 is Week 1 Day 1 and day 8 is Week 2 Day 1. The app validates that logged historical days are not changed by an adjusted version.
 
 ## Key Design Rule
 

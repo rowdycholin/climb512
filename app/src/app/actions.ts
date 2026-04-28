@@ -3,13 +3,16 @@
 import bcrypt from "bcryptjs";
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
+import { getPostLoginPath } from "@/lib/post-login-route";
 import { getSession, getSessionBootId, getSessionExpiresAt } from "@/lib/session";
 import {
   buildPlanSnapshot,
   createProfileSnapshot,
+  type ExerciseSnapshot,
   parsePlanSnapshot,
   parseProfileSnapshot,
   toStoredJson,
+  type DaySnapshot,
   type PlanSnapshot,
   type ProfileSnapshot,
 } from "@/lib/plan-snapshot";
@@ -35,6 +38,14 @@ import {
   type IntakeResponse,
 } from "@/lib/intake";
 import { continuePlanIntakeWithAiContract } from "@/lib/plan-intake-ai";
+import {
+  buildPlanAdjustmentRequest,
+  findNextUnloggedPlanDay,
+  planDayFromWeekDay,
+  validateLockedHistoryUnchanged,
+  type PlanAdjustmentReason,
+  type WorkoutLogDayMarker,
+} from "@/lib/plan-adjustment-request";
 
 export interface PlanAdjustmentResponse {
   error?: string;
@@ -43,6 +54,13 @@ export interface PlanAdjustmentResponse {
   changes?: string[];
   weekKey?: string;
   mode?: "reorder" | "difficulty";
+}
+
+export interface FuturePlanAdjustmentResponse {
+  error?: string;
+  ok?: true;
+  summary?: string;
+  effectiveFrom?: string;
 }
 
 interface EditedExerciseInput {
@@ -154,8 +172,18 @@ async function createPlanVersion(params: {
   changeSummary?: string | null;
   basedOnVersionId?: string | null;
   effectiveFromWeek?: number | null;
+  effectiveFromDay?: number | null;
 }) {
-  const { planId, profileSnapshot, planSnapshot, changeType, changeSummary, basedOnVersionId, effectiveFromWeek } = params;
+  const {
+    planId,
+    profileSnapshot,
+    planSnapshot,
+    changeType,
+    changeSummary,
+    basedOnVersionId,
+    effectiveFromWeek,
+    effectiveFromDay,
+  } = params;
 
   const latest = await prisma.planVersion.findFirst({
     where: { planId },
@@ -171,6 +199,7 @@ async function createPlanVersion(params: {
       changeType,
       changeSummary: changeSummary ?? null,
       effectiveFromWeek: effectiveFromWeek ?? null,
+      effectiveFromDay: effectiveFromDay ?? null,
       profileSnapshot: toStoredJson(profileSnapshot),
       planSnapshot: toStoredJson(planSnapshot),
     },
@@ -358,6 +387,204 @@ function applyEditedWeekToSnapshot(currentSnapshot: PlanSnapshot, editedWeek: Ed
   return nextSnapshot;
 }
 
+function applyAdditiveEditedWeekToSnapshot(currentSnapshot: PlanSnapshot, editedWeek: EditedWeekInput) {
+  const nextSnapshot = parsePlanSnapshot(JSON.parse(JSON.stringify(currentSnapshot)));
+  const weekIndex = nextSnapshot.weeks.findIndex((week) => week.key === editedWeek.id);
+  if (weekIndex === -1) {
+    throw new Error("Week not found");
+  }
+
+  const originalWeek = nextSnapshot.weeks[weekIndex];
+  if (editedWeek.theme !== originalWeek.theme) {
+    throw new Error("Logged weeks only allow adding new exercises");
+  }
+
+  const editedById = new Map(editedWeek.days.map((day) => [day.id, day]));
+  for (const originalDay of originalWeek.days) {
+    const editedDay = editedById.get(originalDay.key);
+    if (!editedDay) throw new Error("Edited week changed the day structure");
+    const originalSessionIds = new Set(originalDay.sessions.map((session) => session.key));
+    const addedSessions = editedDay.sessions.filter((session) => !originalSessionIds.has(session.id));
+    const isRestDayBecomingTraining = originalDay.isRest && !editedDay.isRest && addedSessions.length > 0;
+
+    if (
+      (!isRestDayBecomingTraining && editedDay.focus !== originalDay.focus) ||
+      (!isRestDayBecomingTraining && editedDay.isRest !== originalDay.isRest)
+    ) {
+      throw new Error("Logged weeks only allow adding new exercises");
+    }
+
+    const editedSessionsById = new Map(editedDay.sessions.map((session) => [session.id, session]));
+    for (const originalSession of originalDay.sessions) {
+      const editedSession = editedSessionsById.get(originalSession.key);
+      if (!editedSession) throw new Error("Logged weeks cannot remove sessions");
+      if (
+        editedSession.name !== originalSession.name ||
+        editedSession.description !== originalSession.description ||
+        editedSession.duration !== originalSession.duration
+      ) {
+        throw new Error("Logged weeks only allow adding new exercises");
+      }
+
+      const editedExercisesById = new Map(editedSession.exercises.map((exercise) => [exercise.id, exercise]));
+      for (const originalExercise of originalSession.exercises) {
+        const editedExercise = editedExercisesById.get(originalExercise.key);
+        if (!editedExercise) throw new Error("Logged weeks cannot remove exercises");
+        if (
+          editedExercise.name !== originalExercise.name ||
+          editedExercise.sets !== originalExercise.sets ||
+          editedExercise.reps !== originalExercise.reps ||
+          editedExercise.duration !== originalExercise.duration ||
+          editedExercise.rest !== originalExercise.rest ||
+          editedExercise.notes !== originalExercise.notes
+        ) {
+          throw new Error("Logged weeks cannot change existing exercises");
+        }
+      }
+
+      const originalExerciseIds = new Set(originalSession.exercises.map((exercise) => exercise.key));
+      const additions = editedSession.exercises.filter((exercise) => !originalExerciseIds.has(exercise.id));
+      originalSession.exercises.push(
+        ...additions.map((exercise) => ({
+          key: exercise.id,
+          name: exercise.name,
+          sets: exercise.sets,
+          reps: exercise.reps,
+          duration: exercise.duration,
+          rest: exercise.rest,
+          notes: exercise.notes,
+        })),
+      );
+    }
+
+    if (addedSessions.length > 0) {
+      if (!originalDay.isRest) {
+        throw new Error("Logged training days can only add exercises to existing sessions");
+      }
+
+      originalDay.isRest = false;
+      originalDay.focus = "Training";
+      originalDay.sessions.push(
+        ...addedSessions.map((session) => ({
+          key: session.id,
+          name: session.name,
+          description: session.description,
+          duration: session.duration,
+          exercises: session.exercises.map((exercise) => ({
+            key: exercise.id,
+            name: exercise.name,
+            sets: exercise.sets,
+            reps: exercise.reps,
+            duration: exercise.duration,
+            rest: exercise.rest,
+            notes: exercise.notes,
+          })),
+        })),
+      );
+    }
+  }
+
+  return nextSnapshot;
+}
+
+function parseAdjustmentReason(value: FormDataEntryValue | null): PlanAdjustmentReason {
+  const allowed: PlanAdjustmentReason[] = [
+    "too_hard",
+    "too_easy",
+    "missed_time",
+    "injury",
+    "travel",
+    "new_goal",
+    "schedule_change",
+    "other",
+  ];
+  return typeof value === "string" && allowed.includes(value as PlanAdjustmentReason)
+    ? (value as PlanAdjustmentReason)
+    : "other";
+}
+
+function numberText(value: string | null, direction: "easier" | "harder") {
+  if (!value) return value;
+  const match = value.match(/^(\d+)(.*)$/);
+  if (!match) return value;
+  const current = parseInt(match[1], 10);
+  if (!Number.isFinite(current)) return value;
+  const next = direction === "easier" ? Math.max(1, current - 1) : current + 1;
+  return `${next}${match[2]}`;
+}
+
+function durationText(value: string | null, direction: "easier" | "harder") {
+  if (!value) return value;
+  const match = value.match(/^(\d+)(.*)$/);
+  if (!match) return value;
+  const current = parseInt(match[1], 10);
+  if (!Number.isFinite(current)) return value;
+  const delta = direction === "easier" ? -5 : 5;
+  return `${Math.max(1, current + delta)}${match[2]}`;
+}
+
+function adjustedExercise(exercise: ExerciseSnapshot, reason: PlanAdjustmentReason, feedback: string) {
+  const feedbackText = feedback.toLowerCase();
+  const easier = reason === "too_hard" || reason === "injury" || reason === "travel" || reason === "missed_time" || feedbackText.includes("easy");
+  const harder = reason === "too_easy" || feedbackText.includes("harder") || feedbackText.includes("more");
+  const direction = harder && !easier ? "harder" : "easier";
+
+  return {
+    ...exercise,
+    sets: numberText(exercise.sets, direction),
+    reps: direction === "easier" ? numberText(exercise.reps, "easier") : exercise.reps,
+    duration: durationText(exercise.duration, direction),
+    notes: direction === "easier"
+      ? "Adjusted easier; keep effort controlled"
+      : "Adjusted harder; stop before form breaks",
+  };
+}
+
+function adjustedDay(day: DaySnapshot, reason: PlanAdjustmentReason, feedback: string): DaySnapshot {
+  if (day.isRest || day.sessions.length === 0) return day;
+
+  return {
+    ...day,
+    focus: reason === "injury" ? "Modified Training" : day.focus,
+    sessions: day.sessions.map((session) => ({
+      ...session,
+      duration: reason === "too_easy" ? session.duration + 5 : Math.max(20, session.duration - 5),
+      description: reason === "too_easy"
+        ? "Adjusted upward for a stronger training stimulus."
+        : "Adjusted to protect recovery and consistency.",
+      exercises: session.exercises.map((exercise) => adjustedExercise(exercise, reason, feedback)),
+    })),
+  };
+}
+
+function buildAdjustedFutureSnapshot(
+  currentSnapshot: PlanSnapshot,
+  effectiveFromPlanDay: number,
+  reason: PlanAdjustmentReason,
+  feedback: string,
+) {
+  const nextSnapshot = parsePlanSnapshot(JSON.parse(JSON.stringify(currentSnapshot)));
+
+  nextSnapshot.weeks = nextSnapshot.weeks.map((week) => ({
+    ...week,
+    theme: week.days.some((day) => planDayFromWeekDay(week.weekNum, day.dayNum) >= effectiveFromPlanDay)
+      ? `${week.theme} (Adjusted)`
+      : week.theme,
+    days: week.days.map((day) => {
+      const planDay = planDayFromWeekDay(week.weekNum, day.dayNum);
+      if (planDay < effectiveFromPlanDay) return day;
+      return adjustedDay(day, reason, feedback);
+    }),
+  }));
+
+  validateLockedHistoryUnchanged(currentSnapshot, nextSnapshot, effectiveFromPlanDay);
+  return nextSnapshot;
+}
+
+function formatEffectiveFrom(effectiveFrom: { weekNum: number; dayNum: number; date: string }) {
+  return `Week ${effectiveFrom.weekNum}, Day ${effectiveFrom.dayNum} (${effectiveFrom.date})`;
+}
+
 export async function login(_prevState: unknown, formData: FormData) {
   const loginId = (formData.get("userId") as string).trim();
   const password = formData.get("password") as string;
@@ -376,7 +603,7 @@ export async function login(_prevState: unknown, formData: FormData) {
   session.expiresAt = getSessionExpiresAt();
   await session.save();
 
-  redirect("/intake");
+  redirect(await getPostLoginPath(user.id));
 }
 
 export async function register(_prevState: unknown, formData: FormData) {
@@ -423,7 +650,7 @@ export async function register(_prevState: unknown, formData: FormData) {
   session.expiresAt = getSessionExpiresAt();
   await session.save();
 
-  redirect("/intake");
+  redirect(await getPostLoginPath(user.id));
 }
 
 export async function logout() {
@@ -537,6 +764,70 @@ export async function deletePlans(formData: FormData) {
   redirect("/dashboard");
 }
 
+const completionReasons = new Set([
+  "finished",
+  "goal_completed",
+  "stopped_early",
+  "replaced_by_new_plan",
+  "other",
+]);
+
+export async function completePlan(formData: FormData) {
+  const session = await getSession();
+  if (!session.isLoggedIn) redirect("/login");
+
+  const planId = formData.get("planId");
+  const reasonRaw = formData.get("completionReason");
+  const notesRaw = formData.get("completionNotes");
+
+  if (typeof planId !== "string") redirect("/dashboard");
+
+  const plan = await prisma.plan.findFirst({
+    where: { id: planId, userId: session.userId },
+    select: { id: true },
+  });
+  if (!plan) redirect("/dashboard");
+
+  const reason = typeof reasonRaw === "string" && completionReasons.has(reasonRaw) ? reasonRaw : "finished";
+  const notes = typeof notesRaw === "string" && notesRaw.trim() ? notesRaw.trim().slice(0, 2000) : null;
+
+  await prisma.plan.update({
+    where: { id: plan.id },
+    data: {
+      completedAt: new Date(),
+      completionReason: reason,
+      completionNotes: notes,
+    },
+  });
+
+  redirect(`/plan/${plan.id}`);
+}
+
+export async function reopenPlan(formData: FormData) {
+  const session = await getSession();
+  if (!session.isLoggedIn) redirect("/login");
+
+  const planId = formData.get("planId");
+  if (typeof planId !== "string") redirect("/dashboard");
+
+  const plan = await prisma.plan.findFirst({
+    where: { id: planId, userId: session.userId },
+    select: { id: true },
+  });
+  if (!plan) redirect("/dashboard");
+
+  await prisma.plan.update({
+    where: { id: plan.id },
+    data: {
+      completedAt: null,
+      completionReason: null,
+      completionNotes: null,
+    },
+  });
+
+  redirect(`/plan/${plan.id}`);
+}
+
 export async function logExercise(formData: FormData) {
   const session = await getSession();
   if (!session.isLoggedIn) return { error: "Not authenticated" };
@@ -561,6 +852,86 @@ export async function logExercise(formData: FormData) {
     notes,
     completed,
   });
+}
+
+export async function adjustFuturePlan(formData: FormData): Promise<FuturePlanAdjustmentResponse> {
+  const session = await getSession();
+  if (!session.isLoggedIn) return { error: "Please sign in again" };
+
+  const planId = formData.get("planId");
+  const feedback = (formData.get("feedback") as string | null)?.trim() ?? "";
+  const reason = parseAdjustmentReason(formData.get("reason"));
+
+  if (typeof planId !== "string") return { error: "Missing plan" };
+  if (!feedback) return { error: "Tell the coach what needs to change first" };
+
+  const plan = await findOwnedPlanWithLogs(planId, session.userId);
+  if (!plan) return { error: "Plan not found" };
+
+  const currentSnapshot = plan.currentVersion.planSnapshot;
+  const profileSnapshot = parseProfileSnapshot(plan.currentVersion.profileSnapshot);
+  const logs: WorkoutLogDayMarker[] = plan.workoutLogs.map((log) => ({
+    weekNum: log.weekNum,
+    dayNum: log.dayNum,
+    sessionKey: log.sessionKey,
+    exerciseKey: log.exerciseKey,
+    exerciseName: log.exerciseName,
+    completed: log.completed,
+  }));
+
+  const effectiveFrom = findNextUnloggedPlanDay({
+    planStartDate: plan.startDate,
+    currentDate: new Date(),
+    snapshot: currentSnapshot,
+    logs,
+  });
+
+  if (!effectiveFrom) {
+    return { error: "There are no unlogged days left to adjust in this plan" };
+  }
+
+  const adjustmentRequest = buildPlanAdjustmentRequest({
+    reason,
+    userFeedback: feedback,
+    effectiveFrom,
+    planStartDate: plan.startDate,
+    currentVersion: {
+      id: plan.currentVersion.id,
+      versionNum: plan.currentVersion.versionNum,
+      profileSnapshot,
+    },
+    logs,
+  });
+
+  try {
+    const nextSnapshot = buildAdjustedFutureSnapshot(
+      currentSnapshot,
+      adjustmentRequest.effectiveFrom.planDay,
+      adjustmentRequest.reason,
+      adjustmentRequest.userFeedback,
+    );
+    const effectiveLabel = formatEffectiveFrom(adjustmentRequest.effectiveFrom);
+    const summary = `Adjusted future plan from ${effectiveLabel}`;
+
+    await createPlanVersion({
+      planId,
+      profileSnapshot,
+      planSnapshot: nextSnapshot,
+      changeType: "ai_future_adjustment",
+      changeSummary: summary,
+      basedOnVersionId: plan.currentVersion.id,
+      effectiveFromWeek: adjustmentRequest.effectiveFrom.weekNum,
+      effectiveFromDay: adjustmentRequest.effectiveFrom.planDay,
+    });
+
+    return {
+      ok: true,
+      summary,
+      effectiveFrom: effectiveLabel,
+    };
+  } catch (error) {
+    return { error: (error as Error).message };
+  }
 }
 
 export async function suggestPlanAdjustment(formData: FormData): Promise<PlanAdjustmentResponse> {
@@ -717,20 +1088,18 @@ export async function saveEditedWeek(formData: FormData): Promise<{ error?: stri
     select: { id: true },
   });
 
-  if (existingLog) {
-    return { error: "This week already has workout logs, so it can no longer be edited safely" };
-  }
-
   try {
     const currentSnapshot = parsePlanSnapshot(plan.currentVersion.planSnapshot);
-    const nextSnapshot = applyEditedWeekToSnapshot(currentSnapshot, editedWeek);
+    const nextSnapshot = existingLog
+      ? applyAdditiveEditedWeekToSnapshot(currentSnapshot, editedWeek)
+      : applyEditedWeekToSnapshot(currentSnapshot, editedWeek);
 
     await createPlanVersion({
       planId,
       profileSnapshot: parseProfileSnapshot(plan.currentVersion.profileSnapshot),
       planSnapshot: nextSnapshot,
-      changeType: "manual_edit",
-      changeSummary: `Manual edit for Week ${weekNum}`,
+      changeType: existingLog ? "manual_add_exercise" : "manual_edit",
+      changeSummary: existingLog ? `Added exercise to logged Week ${weekNum}` : `Manual edit for Week ${weekNum}`,
       basedOnVersionId: plan.currentVersion.id,
       effectiveFromWeek: weekNum,
     });

@@ -25,9 +25,16 @@ function parsePrompt(prompt) {
       return {
         weekNum: weekMatch ? parseInt(weekMatch[1], 10) : 1,
         weeksDuration: request.blockLengthWeeks ?? (weekMatch ? parseInt(weekMatch[2], 10) : 4),
+        sport,
         discipline,
         currentGrade: request.currentLevel ?? "general fitness",
         targetGrade: request.targetLevel ?? request.targetDate ?? "improved fitness",
+        goalType: request.goalType ?? "ongoing",
+        goalDescription: request.goalDescription ?? "general training",
+        targetDate: request.targetDate ?? null,
+        trainingFocus: Array.isArray(request.trainingFocus) ? request.trainingFocus.map((item) => String(item).toLowerCase()) : [],
+        strengthTraining: request.strengthTraining ?? { include: false, focusAreas: [] },
+        constraints: request.constraints ?? { injuries: [], limitations: [], avoidExercises: [] },
         age: ageMatch ? parseInt(ageMatch[1], 10) : 28,
         goals: [request.goalDescription ?? "general training"],
         equipment: Array.isArray(request.equipment) ? request.equipment.map((item) => String(item).toLowerCase()) : [],
@@ -48,9 +55,16 @@ function parsePrompt(prompt) {
   return {
     weekNum: weekMatch ? parseInt(weekMatch[1], 10) : 1,
     weeksDuration: weekMatch ? parseInt(weekMatch[2], 10) : (planMatch ? parseInt(planMatch[1], 10) : 4),
+    sport: disciplineMatch ? disciplineMatch[1].trim().toLowerCase() : "climbing",
     discipline: disciplineMatch ? disciplineMatch[1].trim().toLowerCase() : "bouldering",
     currentGrade: currentGradeMatch ? currentGradeMatch[1].trim() : "V4",
     targetGrade: currentGradeMatch ? currentGradeMatch[2].trim() : "V6",
+    goalType: "event",
+    goalDescription: ageGoalsMatch ? ageGoalsMatch[2].trim() : "send project",
+    targetDate: null,
+    trainingFocus: [],
+    strengthTraining: { include: false, focusAreas: [] },
+    constraints: { injuries: [], limitations: [], avoidExercises: [] },
     age: ageGoalsMatch ? parseInt(ageGoalsMatch[1], 10) : 28,
     goals: ageGoalsMatch ? ageGoalsMatch[2].split(",").map((goal) => goal.trim()).filter(Boolean) : ["send-project"],
     equipment: equipmentMatch ? equipmentMatch[1].split(",").map((item) => item.trim().toLowerCase()).filter(Boolean) : [],
@@ -103,14 +117,22 @@ function shuffleList(items, rng) {
   return next;
 }
 
-function getPhaseTheme(weekNum, weeksDuration) {
+function getPhaseTheme(input) {
+  const { weekNum, weeksDuration, goalType, targetDate } = input;
   if (weekNum % 4 === 0) return "Deload & Movement";
 
   const progress = weekNum / Math.max(weeksDuration, 1);
-  if (progress < 0.3) return "Foundation & Control";
-  if (progress < 0.6) return "Strength Build";
-  if (progress < 0.85) return "Power Focus";
-  return "Peak & Specificity";
+  if (goalType === "event" || targetDate) {
+    if (progress < 0.3) return "Event Base & Skill";
+    if (progress < 0.6) return "Event Build";
+    if (progress < 0.85) return "Event Specific Prep";
+    return "Event Peak & Taper";
+  }
+
+  if (progress < 0.3) return "Ongoing Foundation";
+  if (progress < 0.6) return "Ongoing Strength Build";
+  if (progress < 0.85) return "Ongoing Capacity";
+  return "Ongoing Consolidation";
 }
 
 function applyScenarioOverrides(input, scenario) {
@@ -137,8 +159,51 @@ function applyScenarioOverrides(input, scenario) {
   }
 }
 
-function addEquipmentTweaks(exercises, equipment) {
-  const equipmentText = equipment.join(" ");
+function constraintText(input) {
+  return [
+    ...(input.constraints?.injuries ?? []),
+    ...(input.constraints?.limitations ?? []),
+    ...(input.constraints?.avoidExercises ?? [])
+  ].join(" ").toLowerCase();
+}
+
+function shouldAvoidExercise(exercise, input) {
+  const text = constraintText(input);
+  const name = exercise.name.toLowerCase();
+
+  if (!text) return false;
+  if (text.includes("max hang") && (name.includes("hangboard") || name.includes("crimp"))) return true;
+  if (text.includes("pulley") && (name.includes("hangboard") || name.includes("crimp"))) return true;
+  if (text.includes("shin") && (name.includes("stride") || name.includes("tempo") || name.includes("interval"))) return true;
+  if (text.includes("knee") && (name.includes("lunge") || name.includes("split squat"))) return true;
+  if (text.includes("shoulder") && (name.includes("press") || name.includes("pull-up") || name.includes("campus"))) return true;
+
+  return (input.constraints?.avoidExercises ?? []).some((avoid) => {
+    const avoidText = String(avoid).toLowerCase();
+    return avoidText && name.includes(avoidText);
+  });
+}
+
+function replacementExercise(input) {
+  const text = constraintText(input);
+  if (text.includes("shin")) {
+    return { name: "Low-impact Aerobic Work", duration: "25 min", rest: "none", notes: "Bike or brisk walk" };
+  }
+  if (text.includes("pulley") || text.includes("max hang")) {
+    return { name: "Open-hand Technique Drills", sets: "3", duration: "5 min", rest: "1 min", notes: "Easy grips, no crimping" };
+  }
+  if (text.includes("shoulder")) {
+    return { name: "Scapular Control Drill", sets: "3", reps: "10", rest: "60 sec", notes: "Pain-free range only" };
+  }
+  if (text.includes("knee")) {
+    return { name: "Hip Bridge", sets: "3", reps: "12", rest: "60 sec", notes: "Pain-free hip drive" };
+  }
+
+  return { name: "Mobility Reset", duration: "10 min", rest: "none", notes: "Stay easy, pain-free" };
+}
+
+function addEquipmentTweaks(exercises, input) {
+  const equipmentText = input.equipment.join(" ");
 
   return exercises.map((exercise) => {
     if (equipmentText.includes("hangboard") && exercise.name === "Wall Crimp Holds") {
@@ -171,11 +236,29 @@ function addEquipmentTweaks(exercises, equipment) {
     }
 
     return exercise;
-  });
+  }).map((exercise) => shouldAvoidExercise(exercise, input) ? replacementExercise(input) : exercise);
 }
 
-function buildTrainingDay(template, dayNum, equipment, rng) {
-  const exercises = addEquipmentTweaks(template.exercises.slice(0, 4), equipment);
+function strengthAccessory(input) {
+  const focusAreas = input.strengthTraining?.focusAreas ?? [];
+  const focusText = focusAreas.join(" ").toLowerCase();
+
+  if (input.discipline === "running") {
+    return { name: "Runner Strength Circuit", sets: "2", reps: "8 each", rest: "60 sec", notes: "Hips, calves, trunk" };
+  }
+
+  if (focusText.includes("core")) {
+    return { name: "Core Strength Circuit", sets: "3", reps: "8 each", rest: "60 sec", notes: "Brace, move with control" };
+  }
+
+  return { name: "Strength Accessory Circuit", sets: "3", reps: "8", rest: "90 sec", notes: "Moderate load, clean form" };
+}
+
+function buildTrainingDay(template, dayNum, input, rng) {
+  let exercises = addEquipmentTweaks(template.exercises.slice(0, 4), input);
+  if (input.strengthTraining?.include && input.discipline !== "strength_training") {
+    exercises = [...exercises.slice(0, 3), strengthAccessory(input)];
+  }
   const durationJitter = Math.floor(rng() * 2) * 5;
 
   return {
@@ -222,12 +305,12 @@ function generateWeekFromPrompt(prompt, options = {}) {
 
     const trainingIndex = Array.from(trainingDays).indexOf(dayNum);
     const template = templates[(trainingIndex + weekOffset) % templates.length];
-    return buildTrainingDay(template, dayNum, input.equipment, rng);
+    return buildTrainingDay(template, dayNum, input, rng);
   });
 
   return {
     weekNum: input.weekNum,
-    theme: getPhaseTheme(input.weekNum, input.weeksDuration),
+    theme: getPhaseTheme(input),
     days
   };
 }

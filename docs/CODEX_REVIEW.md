@@ -90,4 +90,4 @@ Remaining recommendation:
 - continue rebuilding security E2E coverage around `Plan`, `PlanVersion`, and `WorkoutLog`
 - clean up remaining documentation drift when product direction changes
 - continue moving the plan-editing experience toward direct editing first
-- treat the current AI week-adjustment prototype as experimental until the redesign lands
+- replace the deterministic future-plan adjustment rewrite step with the real AI provider when that contract is ready

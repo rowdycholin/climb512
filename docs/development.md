@@ -136,8 +136,13 @@ The app stores plans as snapshots, not relational `Week/Day/Exercise` rows.
 - `User` stores account profile data and login identity
 - `Plan` is the top-level record and stores `startDate`
 - `PlanVersion` stores `profileSnapshot` and `planSnapshot` JSON
+- `PlanVersion.effectiveFromDay` stores the absolute plan day where an adjusted version begins; day 1 is week 1 day 1
+- plan progress and complete status are derived from `Plan.startDate` plus snapshot week count, not stored as separate columns
+- explicit user completion is stored on `Plan.completedAt`, `completionReason`, and `completionNotes`; this overrides the calendar-derived active state in the UI
 - guided intake builds `PlanRequest` first and sends that structured request to generation; manual onboarding still uses the legacy generator input
+- the simulator consumes `PlanRequest` fields for sport-specific templates, event vs ongoing themes, strength support, and basic injury/avoid-exercise substitutions
 - `WorkoutLog` stores performed work against snapshot exercise keys
+- logged-week manual edits may append custom exercises while preserving existing prescribed exercise keys for prior logs
 - Date/time columns use PostgreSQL `TIMESTAMPTZ(3)` and the Docker database runs in UTC.
 
 That means most plan-shape changes now happen in snapshot helpers rather than nested relational writes.
@@ -243,11 +248,14 @@ Current focused regressions include:
 - guided intake interview, draft creation, and plan generation
 - onboarding grade-system switching
 - plan start date opening the correct calendar day
+- explicit plan completion and reopening behavior
 - preserving an expanded non-Monday day after marking an exercise complete
 - plan editor icon actions
+- additive custom exercises on logged days
+- future plan adjustment from today or the next unlogged day
 - cross-user plan access denial
 
-Global teardown removes generated test users with prefixes such as `pw-*`, `dashplan-*`, `onboard-*`, `progress-*`, `startdate-*`, and `intake-*`.
+Global teardown removes generated test users with prefixes such as `pw-*`, `dashplan-*`, `onboard-*`, `progress-*`, `startdate-*`, `intake-*`, and `adjust-*`.
 
 ## Current Editing Behavior
 
@@ -255,3 +263,5 @@ Global teardown removes generated test users with prefixes such as `pw-*`, `dash
 - detailed edit cards include rest days, and adding an exercise converts the day to training
 - day reordering still lives in the compact `Day order` list
 - cross-day moves currently rely on swipe gestures rather than a dropdown
+- logged weeks protect existing work, but users can add custom exercises and log those additions
+- `Adjust Plan` is for broader future-plan changes and starts from the next unlogged day

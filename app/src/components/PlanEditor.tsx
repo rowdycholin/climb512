@@ -123,6 +123,10 @@ function newSessionId(dayId: string) {
   return `${dayId}-custom-session-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
 }
 
+function isCustomExerciseId(id: string) {
+  return id.includes("-custom-");
+}
+
 function createDefaultSession(dayId: string, dayName: string): EditableSession {
   return {
     id: newSessionId(dayId),
@@ -537,9 +541,11 @@ export default function PlanEditor({
       <CardHeader>
         <div className="flex items-start justify-between gap-3">
           <div>
-            <CardTitle className="text-slate-800">Edit This Week</CardTitle>
+            <CardTitle className="text-slate-800">{hasLogs ? "Add To This Week" : "Edit This Week"}</CardTitle>
             <CardDescription>
-              Reorder days, drop exercises, move work around, and save a new version without going back to AI.
+              {hasLogs
+                ? "Existing logged work stays protected. Add extra exercises when you want more to track."
+                : "Reorder days, drop exercises, move work around, and save a new version without going back to AI."}
             </CardDescription>
           </div>
           <Button type="button" variant="outline" onClick={() => setEditing(false)} disabled={pending}>
@@ -548,19 +554,21 @@ export default function PlanEditor({
         </div>
       </CardHeader>
       <CardContent className="space-y-4">
-        {hasLogs ? (
+        {hasLogs && (
           <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
-            This week already has workout logs, so direct edits are locked to protect history.
+            This week already has workout logs. Existing days and exercises are read-only, but new custom exercises can be added and logged.
           </div>
-        ) : (
+        )}
           <>
-            <div className="space-y-2">
-              <Label htmlFor="week-theme">Week theme</Label>
-              <Input id="week-theme" value={draft.theme} onChange={(event) => updateTheme(event.target.value)} />
-            </div>
+            {!hasLogs && (
+              <div className="space-y-2">
+                <Label htmlFor="week-theme">Week theme</Label>
+                <Input id="week-theme" value={draft.theme} onChange={(event) => updateTheme(event.target.value)} />
+              </div>
+            )}
 
             <div className="space-y-3">
-              {activeDragDayId && dragIndicatorY !== null && (
+              {!hasLogs && activeDragDayId && dragIndicatorY !== null && (
                 <div
                   className="pointer-events-none fixed right-5 z-50 flex items-center gap-2 rounded-full bg-slate-900 px-3 py-2 text-xs font-medium text-white shadow-lg"
                   style={{ top: Math.max(16, dragIndicatorY - 18) }}
@@ -569,7 +577,8 @@ export default function PlanEditor({
                   Move day
                 </div>
               )}
-              <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+              {!hasLogs && (
+                <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
                 <div className="mb-3 flex items-center justify-between gap-3">
                   <div>
                     <p className="text-sm font-semibold text-slate-800">Day order</p>
@@ -617,6 +626,7 @@ export default function PlanEditor({
                   ))}
                 </div>
               </div>
+              )}
               {draft.days
                 .map((day, dayIndex) => ({ day, dayIndex }))
                 .map(({ day, dayIndex }) => (
@@ -669,17 +679,20 @@ export default function PlanEditor({
 
                           <div className="space-y-3">
                             {session.exercises.map((exercise, exerciseIndex) => (
+                              (() => {
+                                const canEditExercise = !hasLogs || isCustomExerciseId(exercise.id);
+                                return (
                               <SwipeSurface
                                 key={exercise.id}
                                 rightHint={dayIndex > 0 ? "Prev day" : ""}
                                 leftHint={dayIndex < draft.days.length - 1 ? "Next day" : ""}
                                 onSwipeRight={
-                                  dayIndex > 0
+                                  !hasLogs && dayIndex > 0
                                     ? () => moveExerciseToAdjacentTrainingDay(dayIndex, sessionIndex, exerciseIndex, -1)
                                     : undefined
                                 }
                                 onSwipeLeft={
-                                  dayIndex < draft.days.length - 1
+                                  !hasLogs && dayIndex < draft.days.length - 1
                                     ? () => moveExerciseToAdjacentTrainingDay(dayIndex, sessionIndex, exerciseIndex, 1)
                                     : undefined
                                 }
@@ -691,10 +704,12 @@ export default function PlanEditor({
                                         <Input
                                           value={exercise.name}
                                           onChange={(event) => updateExerciseName(dayIndex, sessionIndex, exerciseIndex, event.target.value)}
+                                          disabled={!canEditExercise}
                                           className="bg-white"
                                         />
                                       </div>
-                                      <div className="flex items-center gap-1 pb-px">
+                                      {canEditExercise && (
+                                        <div className="flex items-center gap-1 pb-px">
                                         <Button
                                           type="button"
                                           size="icon"
@@ -718,8 +733,12 @@ export default function PlanEditor({
                                           <Trash2 className="h-4 w-4" />
                                         </Button>
                                       </div>
+                                      )}
                                     </div>
-                                    <p className="mt-1 text-[11px] text-slate-400">Swipe to move between training days.</p>
+                                    {!hasLogs && <p className="mt-1 text-[11px] text-slate-400">Swipe to move between training days.</p>}
+                                    {hasLogs && !canEditExercise && (
+                                      <p className="mt-1 text-[11px] text-slate-400">Protected because this week has logs.</p>
+                                    )}
                                   </div>
 
                                   <div className="grid grid-cols-2 gap-2">
@@ -727,24 +746,28 @@ export default function PlanEditor({
                                       value={exercise.sets ?? ""}
                                       onChange={(event) => updateExerciseField(dayIndex, sessionIndex, exerciseIndex, "sets", event.target.value)}
                                       placeholder="Sets"
+                                      disabled={!canEditExercise}
                                       className="bg-white"
                                     />
                                     <Input
                                       value={exercise.reps ?? ""}
                                       onChange={(event) => updateExerciseField(dayIndex, sessionIndex, exerciseIndex, "reps", event.target.value)}
                                       placeholder="Reps"
+                                      disabled={!canEditExercise}
                                       className="bg-white"
                                     />
                                     <Input
                                       value={exercise.duration ?? ""}
                                       onChange={(event) => updateExerciseField(dayIndex, sessionIndex, exerciseIndex, "duration", event.target.value)}
                                       placeholder="Duration"
+                                      disabled={!canEditExercise}
                                       className="bg-white"
                                     />
                                     <Input
                                       value={exercise.rest ?? ""}
                                       onChange={(event) => updateExerciseField(dayIndex, sessionIndex, exerciseIndex, "rest", event.target.value)}
                                       placeholder="Rest"
+                                      disabled={!canEditExercise}
                                       className="bg-white"
                                     />
                                     <div className="col-span-2">
@@ -752,12 +775,15 @@ export default function PlanEditor({
                                         value={exercise.notes ?? ""}
                                         onChange={(event) => updateExerciseField(dayIndex, sessionIndex, exerciseIndex, "notes", event.target.value)}
                                         placeholder="Notes"
+                                        disabled={!canEditExercise}
                                         className="bg-white"
                                       />
                                     </div>
                                   </div>
                                 </div>
                               </SwipeSurface>
+                                );
+                              })()
                             ))}
                           </div>
                         </div>
@@ -775,14 +801,13 @@ export default function PlanEditor({
 
             <div className="flex flex-wrap gap-2">
               <Button type="button" onClick={handleSave} disabled={pending}>
-                {pending ? "Saving..." : "Save week"}
+                {pending ? "Saving..." : hasLogs ? "Save additions" : "Save week"}
               </Button>
               <Button type="button" variant="outline" onClick={discardChanges} disabled={pending}>
                 Discard
               </Button>
             </div>
           </>
-        )}
       </CardContent>
     </Card>
   );

@@ -1,12 +1,19 @@
 import { redirect } from "next/navigation";
 import { getSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
-import { parseProfileSnapshot } from "@/lib/plan-snapshot";
+import { getPlanCalendarStatus } from "@/lib/plan-calendar";
+import { parsePlanSnapshot, parseProfileSnapshot } from "@/lib/plan-snapshot";
 import AppHeader from "@/components/AppHeader";
 import DashboardClient from "@/components/DashboardClient";
 import { Card, CardContent } from "@/components/ui/card";
 
 const dateFormatter = new Intl.DateTimeFormat("en-US", { timeZone: "UTC" });
+const completionDateFormatter = new Intl.DateTimeFormat("en-US", {
+  month: "short",
+  day: "numeric",
+  year: "numeric",
+  timeZone: "UTC",
+});
 
 export default async function DashboardPage() {
   const session = await getSession();
@@ -22,11 +29,23 @@ export default async function DashboardPage() {
     .filter((plan) => plan.currentVersion)
     .map((plan) => {
       const profile = parseProfileSnapshot(plan.currentVersion!.profileSnapshot);
+      const snapshot = parsePlanSnapshot(plan.currentVersion!.planSnapshot);
+      const calendar = getPlanCalendarStatus({
+        startDate: plan.startDate,
+        totalWeeks: snapshot.weeks.length || profile.weeksDuration,
+      });
       return {
         id: plan.id,
         title: plan.title ?? `${profile.currentGrade} to ${profile.targetGrade}`,
         createdAt: plan.createdAt,
         createdAtLabel: dateFormatter.format(plan.createdAt),
+        startDateLabel: calendar.startDateLabel,
+        currentPlanDay: calendar.currentPlanDay,
+        totalPlanDays: calendar.totalPlanDays,
+        isComplete: Boolean(plan.completedAt) || calendar.isComplete,
+        isUserCompleted: Boolean(plan.completedAt),
+        completedAtLabel: plan.completedAt ? completionDateFormatter.format(plan.completedAt) : null,
+        isBeforeStart: calendar.isBeforeStart,
         profile: {
           currentGrade: profile.currentGrade,
           targetGrade: profile.targetGrade,

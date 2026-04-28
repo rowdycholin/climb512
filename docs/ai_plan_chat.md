@@ -86,7 +86,7 @@ Recommended flow:
 ```text
 AI chat
   -> validated PlanRequest JSON
-  -> user review/edit checkpoint
+  -> hidden structured draft submission once required fields are ready
   -> plan generation
   -> generated WeekData JSON
   -> plan version snapshot
@@ -131,9 +131,9 @@ It should represent:
 
 This avoids baking climbing-only concepts like `currentGrade` and `targetGrade` into the generic intake.
 
-### Keep `PlanInput` As A Temporary Adapter
+### Keep `PlanInput` As A Compatibility Adapter
 
-The current generator and simulator still expect legacy fields:
+Manual onboarding and some compatibility snapshots still use legacy fields:
 
 - goals
 - current grade
@@ -144,19 +144,19 @@ The current generator and simulator still expect legacy fields:
 - equipment
 - discipline
 
-For now:
+Current transition shape:
 
 ```text
-Manual onboarding -> legacy PlanInput -> current generator/simulator
+Manual onboarding -> legacy PlanInput -> generator compatibility path
 ```
 
-Later:
+The guided-intake path now follows the target shape:
 
 ```text
 Guided intake -> PlanRequest -> generic generator/simulator
 ```
 
-Current guided-intake generation already follows the later shape. The legacy adapter remains for manual onboarding and compatibility snapshots.
+The legacy adapter remains for manual onboarding and compatibility snapshots.
 
 ### Start With Climbing Plus Weight Training
 
@@ -205,11 +205,11 @@ Recommended rules:
 - Existing `WorkoutLog` rows should never be deleted or rewritten during adjustment.
 - My Plans should show one plan, with the current version active.
 
-Recommended schema addition later:
+Implemented schema addition:
 
 - `PlanVersion.effectiveFromDay Int?`
 
-The app already has `effectiveFromWeek`; day-level adjustment needs day-level metadata. A later version may add more precise exercise-level metadata, but day-level is enough for the next implementation.
+The app also has `effectiveFromWeek`; day-level adjustment now uses absolute plan-day metadata. A later version may add more precise exercise-level metadata, but day-level is enough for the current implementation.
 
 ## Simulator Direction
 
@@ -232,7 +232,7 @@ This keeps the simulator useful for local development and Playwright tests witho
 - [x] Include injuries, limitations, and avoid-exercise fields.
 - [x] Create adapter from `PlanRequest` to legacy `PlanInput`.
 - [x] Update guided intake to build `PlanRequest`.
-- [x] Update guided intake review panel to show generic fields.
+- [x] Keep the guided intake UI chat-driven while maintaining a validated structured draft behind the scenes.
 - [x] Add Playwright regression for guided intake.
 - [x] Update docs and `CLAUDE.md`.
 
@@ -254,7 +254,7 @@ Recommended work:
 - [x] Add Zod validation for AI responses.
 - [x] Update the simulator/local intake path to return the same response contract.
 - [x] Make the app reject invalid AI output without mutating the draft.
-- [x] Keep the final `PlanRequest` visible to the user before generation.
+- [x] Keep the final `PlanRequest` available to the generation action before generation.
 - [x] Add retry/error handling when AI output fails validation.
 - [x] Document the system prompt and JSON contract.
 - [ ] Plug the real AI provider into the same interface after the simulator-backed contract is tested.
@@ -312,7 +312,7 @@ Validation before moving on:
 
 ## Phase 4: Plan Generator Consumes `PlanRequest`
 
-Status: in progress.
+Status: complete.
 
 Goal: stop making the generator and simulator depend on legacy climbing-shaped `PlanInput`.
 
@@ -323,7 +323,7 @@ Recommended work:
 - [x] Update simulator request handling to consume `PlanRequest` directly.
 - [x] Keep a fallback path for legacy `PlanInput` during the transition.
 - [x] Store the original `PlanRequest` in the generated version snapshot.
-- [ ] Generate different plans for:
+- [x] Generate different plans for:
   - climbing-only plans
   - climbing plus strength plans
   - ongoing goals with no target date
@@ -338,42 +338,53 @@ This avoids a schema migration and fits the current snapshot model.
 
 Validation before moving on:
 
-- [ ] Generated plans reflect injuries and strength-training requests.
-- [ ] Generated plans differ between event and ongoing goals.
-- [ ] Existing plan viewer still works with generated snapshots.
+- [x] Generated plans reflect injuries and strength-training requests.
+- [x] Generated plans differ between event and ongoing goals.
+- [x] Existing plan viewer still works with generated snapshots.
 - [x] Manual onboarding still generates a plan.
 - [x] Full Playwright suite passes.
 
 ## Phase 5: Plan Adjustment Request
 
-Goal: define the JSON contract for mid-plan changes before adding the real AI adjustment chat.
+Status: complete.
+
+Goal: define the JSON contract for mid-plan changes before adding the user-facing adjustment flow.
 
 Recommended work:
 
-- [ ] Define `PlanAdjustmentRequest`.
-- [ ] Include reason for change, such as too hard, too easy, missed time, injury, travel, or new goal.
-- [ ] Include desired effective date or let the app calculate the next unlogged day.
-- [ ] Include locked context:
+- [x] Define `PlanAdjustmentRequest`.
+- [x] Include reason for change, such as too hard, too easy, missed time, injury, travel, or new goal.
+- [x] Include desired effective date or let the app calculate the next unlogged day.
+- [x] Include locked context:
   - completed days
   - logged exercises
   - current plan version
   - original `PlanRequest`
   - user feedback
-- [ ] Add a helper that finds the next current unlogged day.
-- [ ] Add a helper that splits the plan into locked historical days and adjustable future days.
-- [ ] Add validation that adjusted output does not alter locked historical days.
-- [ ] Add `PlanVersion.effectiveFromDay Int?`.
+- [x] Add a helper that finds the next current unlogged day.
+- [x] Add a helper that splits the plan into locked historical days and adjustable future days.
+- [x] Add validation that adjusted output does not alter locked historical days.
+- [x] Add `PlanVersion.effectiveFromDay Int?`.
+
+Implemented in `app/src/lib/plan-adjustment-request.ts`. `effectiveFromDay` is an absolute plan-day number, where day 1 is week 1 day 1 and day 8 is week 2 day 1.
 
 Validation before moving on:
 
-- [ ] Unit tests for next-unlogged-day calculation.
-- [ ] Unit tests for locked-history validation.
-- [ ] Migration applies cleanly on a fresh database.
-- [ ] Existing plan completion tests still pass.
+- [x] Unit tests for next-unlogged-day calculation.
+- [x] Unit tests for locked-history validation.
+- [x] Migration applies cleanly on a fresh database.
+- [x] Existing plan completion tests still pass.
 
 ## Phase 6: AI-Assisted Plan Adjustment
 
+Status: complete for the first day-level adjustment flow. The current implementation uses deterministic adjustment rules behind the `PlanAdjustmentRequest` contract; a later iteration can replace that generator step with the real AI provider without changing the request/validation boundary.
+
 Goal: allow the user to chat about a plan change and create a new version from the next unlogged day forward.
+
+Product direction: Phase 6 has two plan-change paths.
+
+- Manual day edits are for precise changes to a specific day. They remain available even after a day has logs, but logged work is protected and only additive custom exercises can be saved.
+- AI plan adjustments are for broader future-plan changes such as too hard, too easy, missed time, injury, travel, schedule changes, or a new goal. These should start from the next unlogged day and preserve locked history.
 
 Recommended flow:
 
@@ -389,27 +400,31 @@ User says the plan is too hard/easy or needs to change
 
 Recommended work:
 
-- [ ] Add an adjustment entry point from the plan detail page.
-- [ ] Add adjustment chat UI.
-- [ ] Pass the AI only the context it needs:
+- [x] Add an adjustment entry point from the plan detail page.
+- [x] Keep manual day editing available for specific-day changes.
+- [x] Allow additive manual exercises on logged weeks while preserving existing logged exercises.
+- [x] Replace the old week-only coach prototype with the day-level `PlanAdjustmentRequest` flow.
+- [x] Add adjustment chat UI.
+- [x] Pass the adjustment flow only the context it needs:
   - original plan request
   - current version summary
   - locked past summary
   - adjustable future plan
   - recent workout logs
   - user feedback
-- [ ] Save adjusted output as a new `PlanVersion`.
-- [ ] Keep My Plans showing one plan.
-- [ ] Show previous logs normally after adjustment.
-- [ ] Add a visible indication that the plan was adjusted.
+- [x] Save adjusted output as a new `PlanVersion`.
+- [x] Keep My Plans showing one plan.
+- [x] Show previous logs normally after adjustment.
+- [x] Add a visible indication that the plan was adjusted.
 
 Validation before moving on:
 
-- [ ] Playwright test for making a plan easier from today when today is unlogged.
-- [ ] Playwright test for making a plan easier from the next day when today has logs.
-- [ ] Playwright test that old logs remain visible after adjustment.
-- [ ] Playwright test that My Plans still shows one plan.
-- [ ] Full Playwright suite passes.
+- [x] Playwright test for adding and logging a manual extra exercise after a day has logs.
+- [x] Playwright test for making a plan easier from today when today is unlogged.
+- [x] Playwright test for making a plan easier from the next day when today has logs.
+- [x] Playwright test that old logs remain visible after adjustment.
+- [x] Playwright test that My Plans still shows one plan.
+- [x] Full Playwright suite passes.
 
 ## Phase 7: Add More Sports
 

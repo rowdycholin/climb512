@@ -10,9 +10,9 @@ It currently supports **plan generation only**.
 
 Out of scope for now:
 
-- AI reorder adjustments
-- AI difficulty adjustments
-- future conversational coaching flows
+- future-plan adjustment generation
+- remote AI intake responses
+- conversational coaching flows
 
 ## Why it exists
 
@@ -105,7 +105,7 @@ docker compose logs -f simulator
 Example line:
 
 ```text
-[simulator] generated plan week user=testuser1 week=1/4 daysPerWeek=2 discipline=bouldering grades=V4->V6 scenario=baseline seed=demo-seed mode=none
+[simulator] generated plan user=testuser1 weeks=4 daysPerWeek=2 sport=climbing goalType=event discipline=bouldering scenario=baseline seed=demo-seed mode=none
 ```
 
 The login ID header is only sent when the app is talking to a simulator-like local backend, not to a live provider.
@@ -115,10 +115,12 @@ The login ID header is only sent when the app is talking to a simulator-like loc
 The simulator uses a rule-based generator:
 
 - training day pattern comes from `daysPerWeek`
-- theme comes from week number and phase
-- exercise templates come from discipline
+- theme comes from week number, phase, and event vs ongoing goal type
+- exercise templates come from sport and discipline
+- strength-training requests add support sessions/exercises
+- injuries, limitations, and exercises to avoid can substitute safer exercise variants
 - equipment can swap in specific exercise variants
-- grade, age, and goals are parsed and included in the prompt, but the rule-based simulator only uses them lightly today
+- grade, age, and goals are included in the generated plan shape but are still used lightly
 - seeded randomness adds controlled variation
 
 This keeps plans believable enough for UI testing without pretending to be a real model.
@@ -136,6 +138,7 @@ This keeps plans believable enough for UI testing without pretending to be a rea
 The next reasonable simulator improvements would be:
 
 - more scenarios
+- an adjustment simulator that consumes `PlanAdjustmentRequest`
 - fixture-backed regression cases
 - stronger log visibility and request introspection
 - explicit scenario overrides from tests

@@ -29,6 +29,9 @@ model Plan {
   versions         PlanVersion[] @relation("PlanVersions")
   workoutLogs      WorkoutLog[] 
   startDate        DateTime      @default(now()) @db.Timestamptz(3)
+  completedAt      DateTime?     @db.Timestamptz(3)
+  completionReason String?
+  completionNotes  String?
   createdAt        DateTime      @default(now()) @db.Timestamptz(3)
   updatedAt        DateTime      @updatedAt @db.Timestamptz(3)
 
@@ -46,6 +49,7 @@ model PlanVersion {
   changeType      String
   changeSummary   String?
   effectiveFromWeek Int?
+  effectiveFromDay  Int?
   profileSnapshot Json
   planSnapshot    Json
   createdAt       DateTime      @default(now()) @db.Timestamptz(3)

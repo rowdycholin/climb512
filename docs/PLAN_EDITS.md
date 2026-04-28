@@ -9,6 +9,8 @@ Parts of this proposal are still future-facing, but the current editor has alrea
 - the detailed editor section includes rest days, and adding an exercise converts that day to training
 - add / duplicate / delete are icon actions
 - the old `move to another training day` dropdown has been removed
+- logged weeks now allow additive custom exercises while preserving existing logged work
+- broader plan changes now live in `Adjust Plan`, which creates a future `PlanVersion` from the next unlogged day forward
 
 The main unresolved proposal in this document is still valid:
 

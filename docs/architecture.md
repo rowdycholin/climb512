@@ -27,14 +27,18 @@ Next.js 14 App Router              <- Docker service: web
 3. `User.id` is system generated.
 4. `User.userId` and `User.email` are unique.
 5. Login uses `userId` + password.
+6. After login, `getPostLoginPath()` routes users by plan state:
+   - active plan with `currentVersionId` -> `/plan/[id]`
+   - no plans -> `/intake`
+   - plans without an active current version -> `/dashboard`
 
 ### Intake, Onboarding, And Plan Creation
 
 1. User starts from `/intake` or `/onboarding`.
-2. `/intake` uses `PlanIntakeChat`, `app/src/lib/intake.ts`, and `app/src/lib/plan-request.ts` to guide the user through a one-question-at-a-time interview and build a reviewed generic `PlanRequest`.
+2. `/intake` uses `PlanIntakeChat`, `app/src/lib/intake.ts`, and `app/src/lib/plan-request.ts` to guide the user through a one-question-at-a-time interview and build a generic `PlanRequest` behind the scenes.
 3. Manual onboarding captures the older climbing-specific plan input fields directly.
 4. `createPlan()` or `createPlanFromIntake()` validates auth and loads the registered user's age.
-5. Guided intake adapts `PlanRequest` to the legacy `PlanInput`; manual onboarding already submits `PlanInput`.
+5. Guided intake sends the structured `PlanRequest` to generation; manual onboarding still submits the legacy `PlanInput`.
 6. `DisciplineLevelFields` switches grade systems on the manual form:
    - bouldering -> V-scale
    - sport/trad/alpine -> YDS
@@ -55,8 +59,10 @@ Next.js 14 App Router              <- Docker service: web
 4. `findOwnedPlanWithLogs()` loads the user's `Plan`, current `PlanVersion`, and `WorkoutLog` rows.
 5. `planSnapshot` is parsed and merged with logs into the plan view model.
 6. Current week/day is calculated from `Plan.startDate`.
-7. `PlanPageShell` renders summary actions, the shared menu, and `PlanWorkspace`.
-8. `PlanWorkspace` renders the editor, AI adjuster prototype, and viewer.
+7. Day X of total plan days and completed status are derived from `Plan.startDate` and snapshot week count.
+8. If the user explicitly marks the plan complete, `Plan.completedAt` and optional completion notes are used for completion messaging.
+9. `PlanPageShell` renders summary actions, the shared menu, completion messaging, and `PlanWorkspace`.
+10. `PlanWorkspace` renders the editor, future-plan adjuster, and viewer.
 
 ### Workout Logging
 
@@ -76,9 +82,10 @@ Next.js 14 App Router              <- Docker service: web
 1. User opens `Edit This Week` from the pencil icon in the plan summary.
 2. The client edits the current week in local state.
 3. `saveEditedWeek()` validates the edited week payload.
-4. Logged weeks are rejected to preserve history.
-5. A new `PlanVersion` is created with `changeType = "manual_edit"`.
-6. `Plan.currentVersionId` advances to the new version.
+4. Destructive structural edits to logged weeks are rejected to preserve history.
+5. Logged weeks allow additive custom exercises only; existing logged days, sessions, and exercises are preserved.
+6. A new `PlanVersion` is created with `changeType = "manual_edit"` or `manual_add_exercise`.
+7. `Plan.currentVersionId` advances to the new version.
 
 Current editor behavior:
 
@@ -86,7 +93,24 @@ Current editor behavior:
 - detailed exercise editing includes rest days
 - adding an exercise to a rest day converts it into a training day
 - add / duplicate / delete actions are icon-based
-- AI coaching tools remain separate and secondary
+- broad future-plan adjustments remain separate from precise manual day edits
+
+### Future Plan Adjustment
+
+1. User opens `Adjust Plan` from the plan summary.
+2. `PlanAdjuster` collects a reason and freeform feedback.
+3. `adjustFuturePlan()` loads the owned plan, current version, and workout logs.
+4. The app builds a `PlanAdjustmentRequest` with:
+   - original plan request/profile context
+   - locked logged-day markers
+   - current plan snapshot
+   - user feedback
+5. The next unlogged plan day is calculated.
+6. Future days are rewritten from that effective day forward, while locked history is validated as unchanged.
+7. A new `PlanVersion` is created with `changeType = "ai_future_adjustment"`, `effectiveFromWeek`, and `effectiveFromDay`.
+8. `Plan.currentVersionId` advances, and old logs remain tied to their original version.
+
+The first implementation uses deterministic adjustment rules behind the day-level request/validation contract. A real AI provider can later replace that rewrite step without changing the persistence boundary.
 
 ## Data Model Strategy
 
@@ -94,6 +118,7 @@ The app intentionally stores plans as versioned JSON documents:
 
 - `User` is the account record
 - `Plan` is the stable parent and owns calendar `startDate`
+- `Plan.completedAt`, `completionReason`, and `completionNotes` store user-declared completion
 - `PlanVersion` stores:
   - `profileSnapshot` JSON
   - `planSnapshot` JSON
@@ -111,7 +136,8 @@ This keeps revision history intact and avoids the complexity of mutating a deep 
   - plan deletion
   - workout logging
   - manual week save
-  - AI adjustment prototype actions
+  - day-level future plan adjustment
+  - legacy week-adjustment prototype actions kept for now
 - `app/src/lib/plan-access.ts`
   - ownership-aware plan loading
   - snapshot exercise lookup
@@ -120,14 +146,20 @@ This keeps revision history intact and avoids the complexity of mutating a deep 
   - snapshot types
   - parsing helpers
   - plan view shaping
+- `app/src/lib/plan-calendar.ts`
+  - start-date progress and completed-plan calculations
+- `app/src/lib/plan-adjustment-request.ts`
+  - day-level adjustment request shaping, next-unlogged-day calculation, and locked-history validation
+- `app/src/lib/post-login-route.ts`
+  - post-login landing route selection
 - `app/src/lib/ai-plan-generator.ts`
   - onboarding and guided-intake -> week generation requests
 - `app/src/lib/plan-request.ts`
-  - generic plan request schema and temporary adapter to legacy `PlanInput`
+  - generic plan request schema and compatibility adapter to legacy `PlanInput`
 - `app/src/lib/intake.ts`
   - rule-based guided interview state, parsing, and draft validation
 - `app/src/lib/ai-plan-adjuster.ts`
-  - constrained AI week-adjustment prototype
+  - legacy constrained week-adjustment prototype
 
 ### Client
 
@@ -136,7 +168,7 @@ This keeps revision history intact and avoids the complexity of mutating a deep 
 - `DisciplineLevelFields`
   - onboarding discipline selection and dynamic grade dropdowns
 - `PlanIntakeChat`
-  - guided interview UI and editable structured draft review
+  - guided interview UI with hidden structured draft submission
 - `PlanPageShell`
   - plan summary
   - pencil / coach actions
@@ -144,9 +176,9 @@ This keeps revision history intact and avoids the complexity of mutating a deep 
 - `PlanWorkspace`
   - coordinates selected week across editor, adjuster, and viewer
 - `PlanEditor`
-  - direct editing for future weeks
+  - direct editing for the selected week, including additive exercises on logged weeks
 - `PlanAdjuster`
-  - AI week-adjustment prototype
+  - broader future-plan adjustments from the next unlogged day forward
 - `PlanViewer`
   - week tabs, day accordions, workout logging
 - `DashboardClient`

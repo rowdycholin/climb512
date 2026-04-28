@@ -1,35 +1,16 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { MessageCircle } from "lucide-react";
-import { suggestPlanAdjustment, applyPlanAdjustment } from "@/app/actions";
+import { adjustFuturePlan } from "@/app/actions";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 
-interface ExerciseLog {
-  completed: boolean;
-}
-
-interface Exercise {
-  logs: ExerciseLog[];
-}
-
-interface DaySession {
-  exercises: Exercise[];
-}
-
-interface Day {
-  sessions: DaySession[];
-}
-
 interface Week {
-  id: string;
   weekNum: number;
-  theme: string;
-  days: Day[];
 }
 
 interface PlanAdjusterProps {
@@ -39,41 +20,60 @@ interface PlanAdjusterProps {
   onOpenChange?: (open: boolean) => void;
 }
 
-const STARTER_PROMPTS = {
-  reorder: [
-    "Move the hardest session to Saturday and keep recovery balanced.",
-    "Shift intense sessions away from back-to-back weekdays.",
+const STARTER_PROMPTS: Record<string, string[]> = {
+  too_hard: [
+    "Make the rest of this plan easier. I am not recovering well.",
+    "Reduce intensity and volume from the next unlogged day forward.",
   ],
-  difficulty: [
-    "Make this week easier because I'm feeling run down.",
-    "Make this week a little harder without increasing injury risk.",
+  too_easy: [
+    "Make the rest of this plan a little harder without increasing injury risk.",
+    "Add a bit more challenge to future training days.",
+  ],
+  missed_time: [
+    "I missed several sessions and need the future plan reset gently.",
+    "Help me resume after missed time without cramming workouts.",
+  ],
+  injury: [
+    "I have a small tweak and need future sessions modified conservatively.",
+    "Reduce risky work and make the rest of the plan more recovery-friendly.",
+  ],
+  travel: [
+    "I will be traveling and need simpler future sessions.",
+    "Adjust future training for limited equipment and inconsistent schedule.",
+  ],
+  new_goal: [
+    "My goal changed. Adjust future days toward the new priority.",
+    "Shift the rest of the plan toward my new objective.",
+  ],
+  schedule_change: [
+    "My schedule changed and future training needs to be more manageable.",
+    "Make the remaining plan fit a less predictable week.",
+  ],
+  other: [
+    "Adjust the remaining plan based on this feedback.",
+    "Update future days while preserving everything I already logged.",
   ],
 };
 
+const reasonLabels = [
+  ["too_hard", "Too hard"],
+  ["too_easy", "Too easy"],
+  ["missed_time", "Missed time"],
+  ["injury", "Injury or limitation"],
+  ["travel", "Travel"],
+  ["new_goal", "New goal"],
+  ["schedule_change", "Schedule change"],
+  ["other", "Other"],
+] as const;
+
 export default function PlanAdjuster({ planId, week, isOpen, onOpenChange }: PlanAdjusterProps) {
   const [internalOpen, setInternalOpen] = useState(false);
-  const [mode, setMode] = useState<"reorder" | "difficulty">("reorder");
-  const [request, setRequest] = useState("");
+  const [reason, setReason] = useState<(typeof reasonLabels)[number][0]>("too_hard");
+  const [feedback, setFeedback] = useState("");
   const [error, setError] = useState<string | null>(null);
-  const [proposal, setProposal] = useState<{
-    mode: "reorder" | "difficulty";
-    summary: string;
-    changes: string[];
-    proposal: string;
-  } | null>(null);
-  const [isSuggesting, startSuggesting] = useTransition();
-  const [isApplying, startApplying] = useTransition();
+  const [result, setResult] = useState<{ summary: string; effectiveFrom: string } | null>(null);
+  const [pending, startTransition] = useTransition();
   const router = useRouter();
-
-  const hasLogs = useMemo(
-    () =>
-      week.days.some((day) =>
-        day.sessions.some((session) =>
-          session.exercises.some((exercise) => exercise.logs.length > 0),
-        ),
-      ),
-    [week.days],
-  );
 
   const open = isOpen ?? internalOpen;
 
@@ -88,56 +88,31 @@ export default function PlanAdjuster({ planId, week, isOpen, onOpenChange }: Pla
   }
 
   function loadPrompt(prompt: string) {
-    setRequest(prompt);
+    setFeedback(prompt);
     setError(null);
+    setResult(null);
   }
 
-  function handleSuggest() {
+  function handleSubmit() {
     setError(null);
-    setProposal(null);
+    setResult(null);
 
     const formData = new FormData();
     formData.set("planId", planId);
-    formData.set("weekId", week.id);
-    formData.set("mode", mode);
-    formData.set("request", request);
+    formData.set("reason", reason);
+    formData.set("feedback", feedback);
 
-    startSuggesting(async () => {
-      const result = await suggestPlanAdjustment(formData);
-      if (result.error || !result.proposal || !result.summary || !result.changes || !result.mode) {
-        setError(result.error ?? "No adjustment proposal was returned");
+    startTransition(async () => {
+      const response = await adjustFuturePlan(formData);
+      if (response.error || !response.summary || !response.effectiveFrom) {
+        setError(response.error ?? "The plan could not be adjusted");
         return;
       }
 
-      setProposal({
-        mode: result.mode,
-        summary: result.summary,
-        changes: result.changes,
-        proposal: result.proposal,
+      setResult({
+        summary: response.summary,
+        effectiveFrom: response.effectiveFrom,
       });
-    });
-  }
-
-  function handleApply() {
-    if (!proposal) return;
-    setError(null);
-
-    const formData = new FormData();
-    formData.set("planId", planId);
-    formData.set("weekId", week.id);
-    formData.set("proposal", proposal.proposal);
-    formData.set("mode", proposal.mode);
-
-    startApplying(async () => {
-      const result = await applyPlanAdjustment(formData);
-      if (result.error) {
-        setError(result.error);
-        return;
-      }
-
-      setProposal(null);
-      setRequest("");
-      setOpen(false);
       router.refresh();
     });
   }
@@ -151,78 +126,70 @@ export default function PlanAdjuster({ planId, week, isOpen, onOpenChange }: Pla
       <CardHeader>
         <div className="flex items-start justify-between gap-3">
           <div>
-            <CardTitle className="flex items-center gap-2 text-slate-800">
+            <CardTitle role="heading" aria-level={3} className="flex items-center gap-2 text-slate-800">
               <MessageCircle className="h-4 w-4" />
-              Ask The Coach
+              Adjust Future Plan
             </CardTitle>
             <CardDescription>
-              Use AI when you want guidance or a suggested rewrite for Week {week.weekNum}.
+              Describe what changed. Logged days stay protected, and updates start from the next unlogged day.
             </CardDescription>
           </div>
-          <Button type="button" variant="outline" onClick={() => setOpen(false)} disabled={isSuggesting || isApplying}>
+          <Button type="button" variant="outline" onClick={() => setOpen(false)} disabled={pending}>
             Close
           </Button>
         </div>
       </CardHeader>
       <CardContent className="space-y-4">
-        {hasLogs ? (
-          <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
-            This week already has workout logs, so adjustments are locked to avoid mismatching your progress history.
-          </div>
-        ) : (
-          <>
-            <div className="space-y-2">
-              <Label htmlFor="adjust-mode">Adjustment type</Label>
-              <select
-                id="adjust-mode"
-                value={mode}
-                onChange={(event) => {
-                  setMode(event.target.value as "reorder" | "difficulty");
-                  setProposal(null);
-                  setError(null);
-                }}
-                className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        <div className="space-y-2">
+          <Label htmlFor="adjust-reason">Reason</Label>
+          <select
+            id="adjust-reason"
+            value={reason}
+            onChange={(event) => {
+              setReason(event.target.value as typeof reason);
+              setError(null);
+              setResult(null);
+            }}
+            className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            {reasonLabels.map(([value, label]) => (
+              <option key={value} value={value}>{label}</option>
+            ))}
+          </select>
+        </div>
+
+        <div className="space-y-2">
+          <Label htmlFor="adjust-feedback">What should change?</Label>
+          <Textarea
+            id="adjust-feedback"
+            value={feedback}
+            onChange={(event) => {
+              setFeedback(event.target.value);
+              setResult(null);
+            }}
+            placeholder="Example: Make the remaining plan easier because my fingers feel tired."
+            className="min-h-24"
+          />
+          <div className="flex flex-wrap gap-2">
+            {STARTER_PROMPTS[reason].map((prompt) => (
+              <button
+                key={prompt}
+                type="button"
+                onClick={() => loadPrompt(prompt)}
+                className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs text-slate-600 transition-colors hover:border-slate-300 hover:bg-slate-100 hover:text-slate-700"
               >
-                <option value="reorder">Reorder workouts</option>
-                <option value="difficulty">Reduce or increase difficulty</option>
-              </select>
-            </div>
+                {prompt}
+              </button>
+            ))}
+          </div>
+        </div>
 
-            <div className="space-y-2">
-              <Label htmlFor="adjust-request">What would you like to change?</Label>
-              <Textarea
-                id="adjust-request"
-                value={request}
-                onChange={(event) => setRequest(event.target.value)}
-                placeholder={
-                  mode === "reorder"
-                    ? "Example: Move the hardest session to Saturday and spread recovery days out."
-                    : "Example: Make this week easier because my fingers feel tired."
-                }
-                className="min-h-24"
-              />
-              <div className="flex flex-wrap gap-2">
-                {STARTER_PROMPTS[mode].map((prompt) => (
-                  <button
-                    key={prompt}
-                    type="button"
-                    onClick={() => loadPrompt(prompt)}
-                    className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs text-slate-600 transition-colors hover:border-slate-300 hover:bg-slate-100 hover:text-slate-700"
-                  >
-                    {prompt}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <div className="flex items-center gap-3">
-              <Button type="button" onClick={handleSuggest} disabled={isSuggesting || isApplying}>
-                {isSuggesting ? "Drafting..." : "Draft adjustment"}
-              </Button>
-              <p className="text-xs text-slate-500">Nothing changes until you confirm.</p>
-            </div>
-          </>
-        )}
+        <div className="flex flex-wrap items-center gap-3">
+          <Button type="button" onClick={handleSubmit} disabled={pending}>
+            {pending ? "Adjusting..." : "Adjust future plan"}
+          </Button>
+          <p className="text-xs text-slate-500">Current view: Week {week.weekNum}</p>
+        </div>
 
         {error && (
           <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
@@ -230,28 +197,10 @@ export default function PlanAdjuster({ planId, week, isOpen, onOpenChange }: Pla
           </div>
         )}
 
-        {proposal && (
-          <div className="rounded-xl border border-blue-200 bg-blue-50/70 p-4">
-            <p className="text-sm font-semibold text-slate-800">AI proposal</p>
-            <p className="mt-1 text-sm text-slate-600">{proposal.summary}</p>
-            <ul className="mt-3 space-y-1 text-sm text-slate-700">
-              {proposal.changes.map((change) => (
-                <li key={change}>- {change}</li>
-              ))}
-            </ul>
-            <div className="mt-4 flex items-center gap-2">
-              <Button type="button" onClick={handleApply} disabled={isApplying || isSuggesting}>
-                {isApplying ? "Applying..." : "Apply this adjustment"}
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => setProposal(null)}
-                disabled={isApplying}
-              >
-                Keep current week
-              </Button>
-            </div>
+        {result && (
+          <div className="rounded-xl border border-emerald-200 bg-emerald-50/70 p-4 text-sm text-emerald-800">
+            <p className="font-semibold">{result.summary}</p>
+            <p className="mt-1">Changes begin at {result.effectiveFrom}. Previous logs remain attached to the older version.</p>
           </div>
         )}
       </CardContent>

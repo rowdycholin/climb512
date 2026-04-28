@@ -23,8 +23,12 @@ This file tracks known cleanup, risk, and follow-up items that are not blocking 
 - [ ] Wire the real AI provider into the existing `PlanIntakeAiResponse` contract.
 - [ ] Ensure sport templates act as minimum required checklists, while the AI can ask additional one-question-at-a-time follow-ups when useful.
 - [x] Store the original `PlanRequest` in a durable plan/version snapshot once generation consumes `PlanRequest` directly.
+- [x] Make the simulator use `PlanRequest` fields for event vs ongoing themes, strength support, and injury/avoid-exercise substitutions.
 
 ## Plan Adjustment
 
-- [ ] Add day-level adjustment metadata such as `PlanVersion.effectiveFromDay`.
-- [ ] Add the future plan adjustment flow that preserves logged workouts and adjusts from the next current unlogged day forward.
+- [x] Add day-level adjustment metadata such as `PlanVersion.effectiveFromDay`.
+- [x] Define the first `PlanAdjustmentRequest` contract and day-level locked-history helpers.
+- [x] Keep manual day editing available for additive extra exercises on logged days.
+- [x] Add the future plan adjustment flow that preserves logged workouts and adjusts from the next current unlogged day forward.
+- [ ] Replace the deterministic future-plan adjustment rules with the real AI provider once the provider contract is ready.

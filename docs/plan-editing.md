@@ -10,7 +10,8 @@ Since this proposal was written, the app has already moved partway in this direc
 - the pencil icon opens `Edit This Week`
 - the editor has icon-based add / duplicate / delete controls
 - the detailed edit section includes rest days, and adding an exercise converts that day to training
-- AI coaching remains present, but as a secondary prototype
+- logged weeks protect existing work but allow additive custom exercises
+- the chat icon opens `Adjust Plan` for broader future-plan changes from the next unlogged day forward
 
 What is still not finished:
 
@@ -27,7 +28,7 @@ Move the app from:
 to:
 
 - `edit the week directly`
-- `ask AI for help only when needed`
+- `adjust the future plan when the broader training direction needs to change`
 
 The new snapshot-based plan storage makes this much easier because a week can now be treated as a structured document instead of a deep relational tree.
 
@@ -67,16 +68,16 @@ For routine edits, users should be able to:
 - convert a day to rest
 - swap a rest day with a workout day
 
-### AI assistance
+### AI-assisted future adjustment
 
-AI should become optional coaching support:
+AI-style adjustment should be optional support for broader plan changes:
 
-- `Rebalance this week after my edits`
-- `Suggest a replacement for this exercise`
-- `Make the rest of this week easier`
-- `Explain why this session is here`
+- `Make the rest of this plan easier`
+- `Adjust future training after missed time`
+- `Change the rest of the plan for travel`
+- `Shift future work around a new goal`
 
-That makes AI a helper instead of the only editing path.
+That makes direct editing the precise tool and plan adjustment the broader coaching tool.
 
 ## 2. Mobile-first interaction model
 
@@ -84,7 +85,7 @@ Full nested drag-and-drop is possible, but on mobile it often feels fiddly.
 
 Recommended mobile pattern:
 
-- tap `Edit week`
+- tap `Edit Day`
 - show drag handles where drag is useful
 - prefer bottom-sheet actions for move / delete / replace
 - use swipe actions on exercises for quick remove or move
@@ -154,17 +155,18 @@ Desktop should still preserve tap/click alternatives so drag is an enhancement, 
 
 ## Edit mode entry
 
-On the plan page, replace the current adjuster-first emphasis with:
+On the plan page, the current summary actions are:
 
-- primary button: `Edit week`
-- secondary button: `Ask coach`
+- `Edit Day` for precise manual edits
+- `Adjust Plan` for broader future changes
+- `Complete` / `Reopen` for plan completion state
 
 Status:
 
 - implemented via icon actions in the plan summary
 - still worth refining, but no longer adjuster-first
 
-When `Edit week` is active:
+When `Edit Day` is active:
 
 - the week viewer becomes editable
 - drag handles and quick actions appear
@@ -233,7 +235,7 @@ This is much simpler than the old relational model.
 
 ## Suggested server actions
 
-These would complement or eventually replace the current AI-only adjuster flow.
+These would complement the current `saveEditedWeek(...)` flow if editing becomes more granular.
 
 - `saveEditedWeek(planId, weekKey, weekDraft)`
 - `moveExercise(planId, weekKey, exerciseKey, destination)`
@@ -248,9 +250,10 @@ The actual implementation can still collapse some of these into one `saveEditedW
 
 To protect history:
 
-- weeks with existing logs should not allow structural edits by default
-- small note-level edits could be allowed later if needed
-- if future weeks are edited, prior weeks remain visible through older `PlanVersion` rows
+- weeks with existing logs should not allow destructive structural edits by default
+- logged weeks may accept additive custom exercises that can be tracked normally
+- future-plan adjustments should start from the next unlogged day
+- prior weeks remain visible through older `PlanVersion` rows and existing `WorkoutLog` rows
 
 This keeps history trustworthy.
 
@@ -310,7 +313,7 @@ Recommendation:
 
 ## Phase 1
 
-- `Edit week` mode
+- `Edit Day` mode
 - move day
 - reorder exercises within session
 - move exercise to another day
@@ -328,10 +331,10 @@ Recommendation:
 
 ## Phase 3
 
-- `Ask coach` side panel
-- AI suggestions layered on top of manual edits
-- `Rebalance after my edits`
-- replacement suggestions
+- richer `Adjust Plan` side panel
+- real AI provider behind the `PlanAdjustmentRequest` contract
+- comparison view between the previous and adjusted future plan
+- replacement suggestions for specific exercises
 
 ## Recommendation
 

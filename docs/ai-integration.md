@@ -4,21 +4,23 @@
 
 The stable AI integration today is **plan generation**. The app also has a guided intake screen that produces a generic `PlanRequest` before generation.
 
-File:
+Files:
 
 - `app/src/lib/ai-plan-generator.ts`
 - `app/src/lib/plan-request.ts`
 - `app/src/lib/intake.ts`
+- `app/src/lib/plan-adjustment-request.ts`
 
-The repository still contains AI week-adjustment prototype code in:
+The plan page also has a day-level future adjustment flow in:
 
-- `app/src/lib/ai-plan-adjuster.ts`
+- `app/src/components/PlanAdjuster.tsx`
+- `app/src/app/actions.ts` (`adjustFuturePlan`)
 
-but that path is no longer the main product direction and should be treated as experimental.
+That adjustment flow uses deterministic rewriting today, but it is shaped around `PlanAdjustmentRequest` so a real AI adjustment provider can be plugged in later. The older constrained week-adjustment helper in `app/src/lib/ai-plan-adjuster.ts` still exists as legacy prototype code.
 
 ## Plan generation
 
-Legacy generator input:
+Manual onboarding still uses the legacy generator input:
 
 - goals
 - current grade
@@ -29,7 +31,9 @@ Legacy generator input:
 - equipment
 - discipline
 
-`Plan.startDate` is saved on the `Plan` record for calendar positioning. It is not currently sent as an AI generation input.
+Guided intake generation sends the structured `PlanRequest` directly to the generator and stores the original request in `PlanVersion.profileSnapshot.planRequest`.
+
+`Plan.startDate` is saved on the `Plan` record for calendar positioning. It is included in the structured request for guided intake but the durable calendar anchor remains the `Plan.startDate` column.
 
 ## Guided intake
 
@@ -38,9 +42,9 @@ The `/intake` route is the first step toward a generic chat-based plan intake. T
 - it is a rule-based interview flow, not a remote AI call
 - it asks for sport/discipline, goal, timeline, equipment, strength training, start date, current level, schedule, and injuries/limitations
 - it extracts a generic `PlanRequest` from the user's answers
-- the user can edit the draft before generation
-- it adapts `PlanRequest` to the legacy `PlanInput` shape that the current generator uses
-- it still targets the current climbing plan generator
+- the structured draft stays hidden from the UI and is submitted once required fields are ready
+- it sends `PlanRequest` to the generator
+- the simulator consumes `PlanRequest` fields for sport selection, event vs ongoing goals, strength support, and injury/avoid-exercise substitutions
 
 This keeps the UI and validation path ready for a future model-backed intake while giving the simulator and generator a clear migration target.
 
@@ -56,6 +60,19 @@ That raw result is converted into:
 - `planSnapshot`
 
 and persisted as a new `PlanVersion`.
+
+## Plan adjustment
+
+Future-plan adjustment starts from the plan page's `Adjust Plan` panel:
+
+1. the user selects a change reason and describes what should change
+2. the app calculates the next unlogged plan day
+3. locked historical days and recent logs are summarized in a `PlanAdjustmentRequest`
+4. the future portion of the plan is rewritten
+5. locked history is validated as unchanged
+6. the adjusted snapshot is saved as a new `PlanVersion`
+
+The current rewrite step is deterministic. The intended AI integration point is the same request/response boundary, not a direct mutation of stored logs or old versions.
 
 ## Response handling
 
@@ -107,7 +124,8 @@ AI output is not written into normalized `Week/Day/Exercise` tables.
 Instead:
 
 - generated plans become `PlanVersion.planSnapshot`
-- manual onboarding inputs and the guided-intake legacy adapter output become `PlanVersion.profileSnapshot`
+- manual onboarding inputs and guided-intake `PlanRequest` context become `PlanVersion.profileSnapshot`
+- future adjustments become new `PlanVersion` rows with `changeType = "ai_future_adjustment"` and `effectiveFromDay`
 - user history stays in `WorkoutLog`
 
 That makes generated plans easier to revise later without destroying historical logs.

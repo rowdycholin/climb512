@@ -50,6 +50,8 @@ The current application schema depends on:
 - `WorkoutLog`
 
 `Plan.startDate` anchors the calendar week/day opened by the plan page.
+`Plan.completedAt`, `completionReason`, and `completionNotes` store explicit user completion.
+`PlanVersion.effectiveFromDay` stores the absolute plan day where a future adjustment begins.
 
 ## Logs
 
