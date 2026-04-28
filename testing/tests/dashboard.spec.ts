@@ -7,7 +7,7 @@ async function login(page: import("@playwright/test").Page) {
     await page.fill('input[name="userId"]', "climber1");
     await page.fill('input[name="password"]', TEST_PASSWORD);
     await page.click('button[type="submit"]');
-    await page.waitForURL(/\/(dashboard|onboarding)/);
+    await page.waitForURL(/\/intake/);
   });
 }
 

@@ -20,8 +20,8 @@ The goal is to move carefully:
 - [x] Guided intake includes event goals and ongoing goals.
 - [x] Guided intake includes injuries, limitations, and exercises to avoid.
 - [x] Guided intake includes weight training as part of a climbing-support plan.
-- [x] Guided intake adapts `PlanRequest` to the legacy `PlanInput` format.
-- [x] The existing generator and simulator still receive the legacy climbing-shaped `PlanInput`.
+- [x] Guided intake sends `PlanRequest` directly to the plan generator.
+- [x] Manual onboarding still uses the legacy climbing-shaped `PlanInput`.
 - [x] Playwright regression exists for guided intake and plan generation.
 - [x] Manual onboarding still exists, but the product direction is to replace it with AI intake.
 
@@ -29,6 +29,7 @@ Current important files:
 
 - `app/src/lib/plan-request.ts`
 - `app/src/lib/plan-intake-ai.ts`
+- `app/src/lib/intake-templates.ts`
 - `app/src/lib/intake.ts`
 - `app/src/components/PlanIntakeChat.tsx`
 - `app/src/lib/ai-plan-generator.ts`
@@ -71,6 +72,10 @@ The AI should respond with one of two structured states:
 The app validates the draft with Zod before accepting it. Invalid AI output should not mutate the saved draft.
 
 The current implementation uses a simulator-backed version of this contract. The local guided intake still produces the draft deterministically, but the server action now validates that output as an AI-style response before returning it to the UI. The real AI provider should plug into this same interface later.
+
+The guided interview now chooses an intake template. The supported profiles are `climbing_strength`, `running`, and `strength_training`; unknown sports use a generic fallback template so the app does not need one-off parser branches for every new sport.
+
+The guided intake screen no longer shows an editable manual draft form or a visible Plan Draft panel. It submits the structured draft behind the scenes once enough information has been collected.
 
 ### Separate Intake From Plan Generation
 
@@ -142,7 +147,7 @@ The current generator and simulator still expect legacy fields:
 For now:
 
 ```text
-Guided intake -> PlanRequest -> legacy PlanInput adapter -> current generator/simulator
+Manual onboarding -> legacy PlanInput -> current generator/simulator
 ```
 
 Later:
@@ -150,6 +155,8 @@ Later:
 ```text
 Guided intake -> PlanRequest -> generic generator/simulator
 ```
+
+Current guided-intake generation already follows the later shape. The legacy adapter remains for manual onboarding and compatibility snapshots.
 
 ### Start With Climbing Plus Weight Training
 
@@ -263,22 +270,25 @@ Validation before moving on:
 
 ## Phase 3: Template-Guided Interview
 
+Status: complete.
+
 Goal: keep the AI chat guided without creating one-off sport parsers.
 
 Recommended work:
 
-- [ ] Move the current climbing plus strength interview into a template registry.
-- [ ] Define a reusable `IntakeTemplate` type.
-- [ ] Each template should declare:
+- [x] Move the current climbing plus strength interview into a template registry.
+- [x] Define a reusable `IntakeTemplate` type.
+- [x] Each template should declare:
   - sport/profile ID
   - guiding questions
   - required `PlanRequest` fields
   - optional follow-up fields
   - validation hints
   - generation hints
-- [ ] Keep the first template as `climbing_strength`.
-- [ ] Add a generic fallback template for unknown sports.
-- [ ] Avoid adding scattered `if sport === ...` logic across the app.
+- [x] Keep the first template as `climbing_strength`.
+- [x] Add running and strength-training templates with sport-specific prompts.
+- [x] Add a generic fallback template for unknown sports.
+- [x] Avoid adding scattered `if sport === ...` logic across the app.
 
 Possible template shape:
 
@@ -294,22 +304,25 @@ interface IntakeTemplate {
 
 Validation before moving on:
 
-- [ ] Existing intake test still passes.
-- [ ] Add unit tests for choosing the correct template.
-- [ ] Add unit tests for required-field progression.
-- [ ] Run full Playwright suite.
+- [x] Existing intake test still passes.
+- [x] Add regression coverage for choosing climbing, running, strength-training, and generic fallback templates.
+- [x] Add unit tests for choosing the correct template.
+- [x] Add unit tests for required-field progression.
+- [x] Run full Playwright suite.
 
 ## Phase 4: Plan Generator Consumes `PlanRequest`
+
+Status: in progress.
 
 Goal: stop making the generator and simulator depend on legacy climbing-shaped `PlanInput`.
 
 Recommended work:
 
-- [ ] Add a generator function that accepts `PlanRequest`.
-- [ ] Update `ai-plan-generator.ts` to include structured `PlanRequest` JSON in the prompt.
-- [ ] Update simulator request handling to consume `PlanRequest` directly.
-- [ ] Keep a fallback path for legacy `PlanInput` during the transition.
-- [ ] Store the original `PlanRequest` in the generated version snapshot.
+- [x] Add a generator function that accepts `PlanRequest`.
+- [x] Update `ai-plan-generator.ts` to include structured `PlanRequest` JSON in the prompt.
+- [x] Update simulator request handling to consume `PlanRequest` directly.
+- [x] Keep a fallback path for legacy `PlanInput` during the transition.
+- [x] Store the original `PlanRequest` in the generated version snapshot.
 - [ ] Generate different plans for:
   - climbing-only plans
   - climbing plus strength plans
@@ -319,7 +332,7 @@ Recommended work:
 
 Recommended first storage step:
 
-- store `planRequest` inside `PlanVersion.profileSnapshot`
+- [x] store `planRequest` inside `PlanVersion.profileSnapshot`
 
 This avoids a schema migration and fits the current snapshot model.
 
@@ -328,8 +341,8 @@ Validation before moving on:
 - [ ] Generated plans reflect injuries and strength-training requests.
 - [ ] Generated plans differ between event and ongoing goals.
 - [ ] Existing plan viewer still works with generated snapshots.
-- [ ] Manual onboarding still generates a plan.
-- [ ] Full Playwright suite passes.
+- [x] Manual onboarding still generates a plan.
+- [x] Full Playwright suite passes.
 
 ## Phase 5: Plan Adjustment Request
 

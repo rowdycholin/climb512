@@ -7,6 +7,7 @@ import {
   type PlanRequest,
 } from "./plan-request";
 import type { PlanInput } from "./plan-types";
+import { getIntakeTemplate, selectIntakeTemplate } from "./intake-templates";
 
 const intakeStepSchema = z.enum([
   "sport",
@@ -24,6 +25,7 @@ const intakeStepSchema = z.enum([
 
 export const intakeDraftSchema = partialPlanRequestSchema.extend({
   intakeStep: intakeStepSchema.optional(),
+  intakeTemplateId: z.string().optional(),
 });
 
 export const partialIntakeDraftSchema = intakeDraftSchema.partial();
@@ -43,73 +45,9 @@ export interface IntakeResponse {
   assistantMessage: string;
 }
 
-interface IntakeQuestion {
-  step: IntakeStep;
-  prompt: string;
-  isComplete: (draft: PartialIntakeDraft) => boolean;
-}
-
 const DEFAULT_START_DATE = () => new Date().toISOString().slice(0, 10);
 const CLIMBING_DISCIPLINES = ["bouldering", "sport", "trad", "ice", "alpine"] as const;
 const STRENGTH_TERMS = ["strength", "weights", "weight training", "lifting", "stronger", "gym"];
-
-const CLIMBING_STRENGTH_TEMPLATE: IntakeQuestion[] = [
-  {
-    step: "sport",
-    prompt: "For what sport or discipline would you like to create a training plan?",
-    isComplete: (draft) => Boolean(draft.sport),
-  },
-  {
-    step: "goal",
-    prompt: "Is there anything specific you want to train for, like strength, power endurance, a trip, or a goal route?",
-    isComplete: (draft) => Boolean(draft.goalDescription),
-  },
-  {
-    step: "timeline",
-    prompt: "Is there a specific date or deadline, or is this an ongoing training goal?",
-    isComplete: (draft) => draft.goalType === "ongoing" || Boolean(draft.targetDate),
-  },
-  {
-    step: "blockLength",
-    prompt: "How long should this training block be? 4, 8, 12, or 16 weeks is a good starting point.",
-    isComplete: (draft) => Boolean(draft.blockLengthWeeks),
-  },
-  {
-    step: "equipment",
-    prompt: "What equipment do you have access to?",
-    isComplete: (draft) => (draft.equipment?.length ?? 0) > 0,
-  },
-  {
-    step: "strength",
-    prompt: "Do you want weight training included with the climbing plan? If yes, what should it focus on?",
-    isComplete: (draft) => draft.strengthTraining?.include !== undefined,
-  },
-  {
-    step: "start",
-    prompt: "Ok, I can work with that. When would you like to start?",
-    isComplete: (draft) => Boolean(draft.startDate),
-  },
-  {
-    step: "level",
-    prompt: "What is your current comfortable climbing level, and is there a target level if you have one?",
-    isComplete: (draft) => Boolean(draft.currentLevel),
-  },
-  {
-    step: "schedule",
-    prompt: "How many days per week can you realistically train?",
-    isComplete: (draft) => Boolean(draft.daysPerWeek),
-  },
-  {
-    step: "injuries",
-    prompt: "Any injuries, limitations, or exercises we should avoid while building the plan?",
-    isComplete: (draft) => Boolean(draft.constraints),
-  },
-  {
-    step: "review",
-    prompt: "I have enough to draft the plan. Review the structured details, tweak anything you want, then generate it.",
-    isComplete: () => true,
-  },
-];
 
 function unique(values: string[]) {
   return Array.from(new Set(values.map((value) => value.trim()).filter(Boolean)));
@@ -184,8 +122,13 @@ function normalizeSport(text: string) {
   return text.trim().toLowerCase();
 }
 
+function activeTemplate(draft: PartialIntakeDraft) {
+  return draft.intakeTemplateId ? getIntakeTemplate(draft.intakeTemplateId) : selectIntakeTemplate(draft.sport);
+}
+
 function activeQuestion(draft: PartialIntakeDraft) {
-  return CLIMBING_STRENGTH_TEMPLATE.find((question) => !question.isComplete(draft)) ?? CLIMBING_STRENGTH_TEMPLATE.at(-1)!;
+  const template = activeTemplate(draft);
+  return template.questions.find((question) => !question.isComplete(draft)) ?? template.questions.at(-1)!;
 }
 
 function nextStep(draft: PartialIntakeDraft) {
@@ -312,6 +255,7 @@ export function createInitialIntakeDraft(): PartialIntakeDraft {
     equipment: [],
     trainingFocus: [],
     intakeStep: "sport",
+    intakeTemplateId: selectIntakeTemplate().id,
   };
 }
 
@@ -326,6 +270,7 @@ export function continueIntakeDraft(params: {
   applyGenericExtraction(next, text);
   applyStepAnswer(next, currentStep, text);
 
+  next.intakeTemplateId = selectIntakeTemplate(next.sport).id;
   next.intakeStep = nextStep(next);
   const parsed = partialIntakeDraftSchema.parse(next);
 

@@ -170,6 +170,75 @@ const DISCIPLINE_TEMPLATES = {
         ]
       }
     ]
+  },
+  running: {
+    focuses: [
+      {
+        focus: "Easy Endurance",
+        sessionName: "Base Run",
+        description: "Build aerobic volume at a conversational pace.",
+        exercises: [
+          { name: "Dynamic Warm-up", duration: "8 min", notes: "Leg swings, skips, easy jog" },
+          { name: "Easy Run", duration: "30 min", rest: "none", notes: "Conversational pace, relaxed shoulders" },
+          { name: "Stride Finish", sets: "4", duration: "20 sec", rest: "60 sec", notes: "Smooth fast, never sprint" }
+        ]
+      },
+      {
+        focus: "Tempo Control",
+        sessionName: "Threshold Session",
+        description: "Improve sustained running strength.",
+        exercises: [
+          { name: "Easy Jog", duration: "10 min", notes: "Start gentle, build warmth" },
+          { name: "Tempo Intervals", sets: "3", duration: "6 min", rest: "2 min", notes: "Strong but controlled effort" },
+          { name: "Cooldown Walk", duration: "8 min", notes: "Let breathing settle fully" }
+        ]
+      },
+      {
+        focus: "Run Strength",
+        sessionName: "Strength Support",
+        description: "Build durability for steady running.",
+        exercises: [
+          { name: "Step-ups", sets: "3", reps: "10 each", rest: "60 sec", notes: "Drive through full foot" },
+          { name: "Single-leg RDL", sets: "3", reps: "8 each", rest: "60 sec", notes: "Hips square, slow control" },
+          { name: "Calf Raises", sets: "3", reps: "15", rest: "45 sec", notes: "Full range, steady tempo" }
+        ]
+      }
+    ]
+  },
+  strength_training: {
+    focuses: [
+      {
+        focus: "Full Body Strength",
+        sessionName: "Strength Session",
+        description: "Train major movement patterns with controlled effort.",
+        exercises: [
+          { name: "Goblet Squat", sets: "4", reps: "6", rest: "2 min", notes: "Brace, sit between hips" },
+          { name: "Dumbbell Press", sets: "3", reps: "8", rest: "90 sec", notes: "Ribs down, press smoothly" },
+          { name: "Row Variation", sets: "3", reps: "10", rest: "90 sec", notes: "Pull elbows toward hips" },
+          { name: "Dead Bug", sets: "3", reps: "8 each", rest: "45 sec", notes: "Slow, keep back quiet" }
+        ]
+      },
+      {
+        focus: "Lower Body Strength",
+        sessionName: "Lower Session",
+        description: "Build leg and hip strength safely.",
+        exercises: [
+          { name: "Squat Pattern", sets: "4", reps: "5", rest: "2 min", notes: "Stable knees, steady descent" },
+          { name: "Hip Hinge", sets: "4", reps: "6", rest: "2 min", notes: "Hips back, neutral spine" },
+          { name: "Split Squat", sets: "3", reps: "8 each", rest: "90 sec", notes: "Control balance, tall posture" }
+        ]
+      },
+      {
+        focus: "Upper Body Strength",
+        sessionName: "Upper Session",
+        description: "Build pressing, pulling, and trunk strength.",
+        exercises: [
+          { name: "Push-up Progression", sets: "4", reps: "8", rest: "90 sec", notes: "Rigid plank, full control" },
+          { name: "Pull Variation", sets: "4", reps: "6", rest: "2 min", notes: "Shoulders packed, no swing" },
+          { name: "Loaded Carry", sets: "4", duration: "40 sec", rest: "90 sec", notes: "Tall posture, quiet steps" }
+        ]
+      }
+    ]
   }
 };
 

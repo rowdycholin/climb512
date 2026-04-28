@@ -8,7 +8,7 @@ test.beforeAll(async ({ browser }) => {
     await page.fill('input[name="userId"]', "climber1");
     await page.fill('input[name="password"]', TEST_PASSWORD);
     await page.click('button[type="submit"]');
-    await page.waitForURL(/\/(dashboard|onboarding)/);
+    await page.waitForURL(/\/intake/);
   });
   await page.close();
 });
@@ -34,12 +34,12 @@ test.describe("Authentication", () => {
     await expect(page.getByText(/invalid user id or password/i)).toBeVisible();
   });
 
-  test("logs in with valid credentials and lands on dashboard or onboarding", async ({ page }) => {
+  test("logs in with valid credentials and lands on guided intake", async ({ page }) => {
     await page.goto("/login");
     await page.fill('input[name="userId"]', "climber1");
     await page.fill('input[name="password"]', TEST_PASSWORD);
     await page.click('button[type="submit"]');
-    await expect(page).toHaveURL(/\/(dashboard|onboarding)/);
+    await expect(page).toHaveURL(/\/intake/);
   });
 
   test("logout redirects to /login", async ({ page }) => {
@@ -47,7 +47,7 @@ test.describe("Authentication", () => {
     await page.fill('input[name="userId"]', "climber1");
     await page.fill('input[name="password"]', TEST_PASSWORD);
     await page.click('button[type="submit"]');
-    await page.waitForURL(/\/(dashboard|onboarding)/);
+    await page.waitForURL(/\/intake/);
     await page.getByRole("button", { name: /Open menu/i }).click();
     await page.getByRole("button", { name: "Logout" }).click();
     await expect(page).toHaveURL(/\/login/);

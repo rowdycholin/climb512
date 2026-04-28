@@ -50,6 +50,7 @@ climb512/
         plan-types.ts
         plan-request.ts
         plan-intake-ai.ts
+        intake-templates.ts
         plan-snapshot.ts
         plan-access.ts
         intake.ts
@@ -74,11 +75,15 @@ climb512/
 - registration is a dedicated `/register` page
 - users have a generated primary key plus unique `userId` and unique `email`
 - registration captures first name, last name, email, user ID, age, and password
+- successful login and registration land on `/intake`
 - guided chat intake is available at `/intake`
 - manual onboarding remains available at `/onboarding`
 - manual onboarding captures goals, discipline, grades, start date, schedule, and equipment
 - guided intake builds a generic `PlanRequest` with goals, disciplines, levels, schedule, equipment, strength focus, and injuries/limitations
-- `PlanRequest` is adapted to the legacy `PlanInput` shape until the generator and simulator consume the generic request directly
+- guided intake currently has templates for climbing plus strength, running, strength training, and a generic fallback
+- guided intake does not show the old Plan Draft/manual setup panel; it keeps the structured draft hidden and chat-driven
+- `PlanRequest` is still adapted to legacy `PlanInput` for compatibility snapshots, but guided-intake generation uses the generic request directly
+- guided-intake plan generation now sends structured `PlanRequest` JSON to the generator and stores it in `PlanVersion.profileSnapshot.planRequest`
 - onboarding age was removed; plan generation uses the registered user age
 - grade dropdowns change by discipline:
   - bouldering: V-scale
@@ -132,6 +137,7 @@ User
 ```bash
 cd app
 npx prisma generate
+npm run test:unit
 npx tsc --noEmit
 npm run build
 ```
@@ -165,7 +171,9 @@ npx playwright test tests/plan-viewer-progress.spec.ts
 - snapshot parsing and shaping live in `app/src/lib/plan-snapshot.ts`
 - generic request schema and legacy adapter live in `app/src/lib/plan-request.ts`
 - guided intake template state and parsing lives in `app/src/lib/intake.ts`
+- intake template definitions live in `app/src/lib/intake-templates.ts`
 - onboarding and guided-intake generation requests go through `app/src/lib/ai-plan-generator.ts`
+- manual onboarding still uses legacy `PlanInput`; guided intake uses the `PlanRequest` generation path
 - the simulator implements a local OpenAI-compatible backend for plan generation only
 - `docker-compose.dev.yml` overlays the base compose file for bind-mounted development
 

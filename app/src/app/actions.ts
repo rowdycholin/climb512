@@ -13,8 +13,9 @@ import {
   type PlanSnapshot,
   type ProfileSnapshot,
 } from "@/lib/plan-snapshot";
-import { generatePlanWithAI } from "@/lib/ai-plan-generator";
+import { generatePlanFromPlanRequestWithAI, generatePlanWithAI } from "@/lib/ai-plan-generator";
 import type { PlanInput } from "@/lib/plan-types";
+import { planRequestToLegacyPlanInput, type PlanRequest } from "@/lib/plan-request";
 import { findOwnedPlanById, findOwnedPlanWithLogs, upsertExerciseLogForUser } from "@/lib/plan-access";
 import {
   adjustmentModeSchema,
@@ -27,7 +28,7 @@ import {
   validateAdjustmentProposal,
 } from "@/lib/ai-plan-adjuster";
 import {
-  intakeDraftToPlanInput,
+  intakeDraftToPlanRequest,
   parseIntakeDraftJson,
   partialIntakeDraftSchema,
   type IntakeMessage,
@@ -114,21 +115,23 @@ function parseDateInput(value: string) {
   return Number.isNaN(parsed.getTime()) ? new Date() : parsed;
 }
 
-async function createGeneratedPlan(params: {
+async function createGeneratedPlanFromRequest(params: {
   userId: string;
   loginId?: string;
-  input: PlanInput;
-  startDate: Date;
+  request: PlanRequest;
+  age: number;
 }) {
-  const weeks = await generatePlanWithAI(params.input, params.loginId);
-  const profileSnapshot = createProfileSnapshot(params.input);
+  const legacyInput = planRequestToLegacyPlanInput(params.request, params.age);
+  const weeks = await generatePlanFromPlanRequestWithAI(params.request, params.age, params.loginId);
+  const profileSnapshot = createProfileSnapshot(legacyInput, params.request);
   const planSnapshot = buildPlanSnapshot(weeks);
+  const title = `${params.request.sport}: ${params.request.goalDescription}`.slice(0, 120);
 
   const plan = await prisma.plan.create({
     data: {
       userId: params.userId,
-      title: `${params.input.currentGrade} -> ${params.input.targetGrade}`,
-      startDate: params.startDate,
+      title,
+      startDate: parseDateInput(params.request.startDate),
     },
   });
 
@@ -137,7 +140,7 @@ async function createGeneratedPlan(params: {
     profileSnapshot,
     planSnapshot,
     changeType: "generated",
-    changeSummary: "Initial AI-generated plan",
+    changeSummary: "Initial AI-generated plan from guided intake",
   });
 
   redirect(`/plan/${plan.id}`);
@@ -373,10 +376,7 @@ export async function login(_prevState: unknown, formData: FormData) {
   session.expiresAt = getSessionExpiresAt();
   await session.save();
 
-  const existingPlan = await prisma.plan.findFirst({
-    where: { userId: user.id },
-  });
-  redirect(existingPlan ? "/dashboard" : "/onboarding");
+  redirect("/intake");
 }
 
 export async function register(_prevState: unknown, formData: FormData) {
@@ -423,7 +423,7 @@ export async function register(_prevState: unknown, formData: FormData) {
   session.expiresAt = getSessionExpiresAt();
   await session.save();
 
-  redirect("/onboarding");
+  redirect("/intake");
 }
 
 export async function logout() {
@@ -499,12 +499,12 @@ export async function createPlanFromIntake(formData: FormData) {
   if (!user) redirect("/login");
 
   const draft = parseIntakeDraftJson(rawDraft);
-  const input = intakeDraftToPlanInput(draft, user.age);
-  await createGeneratedPlan({
+  const request = intakeDraftToPlanRequest(draft);
+  await createGeneratedPlanFromRequest({
     userId: session.userId,
     loginId: session.loginId,
-    input,
-    startDate: parseDateInput(draft.startDate),
+    request,
+    age: user.age,
   });
 }
 

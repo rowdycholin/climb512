@@ -49,6 +49,26 @@ function extractUserPrompt(payload) {
 }
 
 function extractPlanSummary(prompt) {
+  const planRequestStart = prompt.indexOf("PLAN_REQUEST_JSON:");
+  const athleteContextStart = prompt.indexOf("ATHLETE_CONTEXT:");
+  if (planRequestStart !== -1 && athleteContextStart !== -1 && athleteContextStart > planRequestStart) {
+    try {
+      const request = JSON.parse(prompt.slice(planRequestStart + "PLAN_REQUEST_JSON:".length, athleteContextStart).trim());
+      const weekMatch = prompt.match(/WEEK\s+(\d+)\s+of\s+(\d+)/i);
+      const sport = String(request.sport ?? "unknown");
+      return {
+        weekNum: weekMatch ? parseInt(weekMatch[1], 10) : 1,
+        weeksDuration: request.blockLengthWeeks ?? (weekMatch ? parseInt(weekMatch[2], 10) : null),
+        daysPerWeek: request.daysPerWeek ?? null,
+        discipline: Array.isArray(request.disciplines) && request.disciplines[0] ? request.disciplines[0] : sport,
+        currentGrade: request.currentLevel ?? "unknown",
+        targetGrade: request.targetLevel ?? request.targetDate ?? "unknown"
+      };
+    } catch {
+      // Fall back to legacy prompt summary below.
+    }
+  }
+
   const weekMatch = prompt.match(/WEEK\s+(\d+)\s+of\s+(\d+)/i);
   const planMatch = prompt.match(/- Plan:\s*(\d+)\s+weeks total,\s*(\d+)\s+training days\/week/i);
   const disciplineMatch = prompt.match(/- Discipline:\s*([^\n]+)/i);

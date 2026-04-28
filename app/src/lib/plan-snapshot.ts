@@ -1,4 +1,5 @@
 import type { PlanInput, WeekData } from "./plan-types";
+import type { PlanRequest } from "./plan-request";
 import type { Prisma } from "@prisma/client";
 
 interface WorkoutLogRecord {
@@ -14,6 +15,7 @@ interface WorkoutLogRecord {
 
 export interface ProfileSnapshot extends PlanInput {
   createdAt: string;
+  planRequest?: PlanRequest;
 }
 
 export interface ExerciseSnapshot {
@@ -96,10 +98,11 @@ function slug(value: string) {
     .slice(0, 40) || "item";
 }
 
-export function createProfileSnapshot(input: PlanInput): ProfileSnapshot {
+export function createProfileSnapshot(input: PlanInput, planRequest?: PlanRequest): ProfileSnapshot {
   return {
     ...input,
     createdAt: new Date().toISOString(),
+    ...(planRequest ? { planRequest } : {}),
   };
 }
 

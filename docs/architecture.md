@@ -31,7 +31,7 @@ Next.js 14 App Router              <- Docker service: web
 ### Intake, Onboarding, And Plan Creation
 
 1. User starts from `/intake` or `/onboarding`.
-2. `/intake` uses `PlanIntakeChat`, `app/src/lib/intake.ts`, and `app/src/lib/plan-request.ts` to guide the user through a one-question-at-a-time interview and build an editable generic `PlanRequest`.
+2. `/intake` uses `PlanIntakeChat`, `app/src/lib/intake.ts`, and `app/src/lib/plan-request.ts` to guide the user through a one-question-at-a-time interview and build a reviewed generic `PlanRequest`.
 3. Manual onboarding captures the older climbing-specific plan input fields directly.
 4. `createPlan()` or `createPlanFromIntake()` validates auth and loads the registered user's age.
 5. Guided intake adapts `PlanRequest` to the legacy `PlanInput`; manual onboarding already submits `PlanInput`.

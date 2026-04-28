@@ -12,7 +12,7 @@ export default async function IntakePage() {
       <AppHeader
         eyebrow="Plan Intake"
         title="Climb512"
-        subtitle="Chat through your training needs, then generate a structured plan from the draft."
+        subtitle="Tell me what you are training for, and I will help shape a plan around your goals."
       />
 
       <main className="mx-auto max-w-5xl p-4 py-8">
@@ -20,7 +20,7 @@ export default async function IntakePage() {
           <p className="text-xs font-semibold uppercase tracking-[0.16em] text-sky-700/70">Guided Setup</p>
           <h1 className="mt-2 text-3xl font-semibold text-slate-950">Build a plan through conversation</h1>
           <p className="mt-2 max-w-2xl text-sm text-slate-600">
-            The intake turns your notes into a reviewed JSON-style draft before the plan generator runs.
+            Answer a few focused questions, then create a plan when the chat has what it needs.
           </p>
         </div>
 

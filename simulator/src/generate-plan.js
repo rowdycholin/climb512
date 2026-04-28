@@ -3,6 +3,41 @@ const { getTemplatesForDiscipline } = require("./templates");
 const DAY_NAMES = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
 
 function parsePrompt(prompt) {
+  const planRequestStart = prompt.indexOf("PLAN_REQUEST_JSON:");
+  const athleteContextStart = prompt.indexOf("ATHLETE_CONTEXT:");
+  if (planRequestStart !== -1 && athleteContextStart !== -1 && athleteContextStart > planRequestStart) {
+    try {
+      const requestJson = prompt.slice(planRequestStart + "PLAN_REQUEST_JSON:".length, athleteContextStart).trim();
+      const request = JSON.parse(requestJson);
+      const weekMatch = prompt.match(/WEEK\s+(\d+)\s+of\s+(\d+)/i);
+      const ageMatch = prompt.match(/- Age:\s*(\d+)/i);
+      const sport = String(request.sport ?? "generic").toLowerCase();
+      const discipline = Array.isArray(request.disciplines) && request.disciplines[0]
+        ? String(request.disciplines[0]).toLowerCase()
+        : sport.includes("run")
+          ? "running"
+          : sport.includes("strength") || sport.includes("weight") || sport.includes("lift")
+            ? "strength_training"
+            : sport.includes("climb")
+              ? "bouldering"
+              : sport;
+
+      return {
+        weekNum: weekMatch ? parseInt(weekMatch[1], 10) : 1,
+        weeksDuration: request.blockLengthWeeks ?? (weekMatch ? parseInt(weekMatch[2], 10) : 4),
+        discipline,
+        currentGrade: request.currentLevel ?? "general fitness",
+        targetGrade: request.targetLevel ?? request.targetDate ?? "improved fitness",
+        age: ageMatch ? parseInt(ageMatch[1], 10) : 28,
+        goals: [request.goalDescription ?? "general training"],
+        equipment: Array.isArray(request.equipment) ? request.equipment.map((item) => String(item).toLowerCase()) : [],
+        daysPerWeek: request.daysPerWeek ?? 3
+      };
+    } catch {
+      // Fall back to the legacy prompt parser below.
+    }
+  }
+
   const weekMatch = prompt.match(/WEEK\s+(\d+)\s+of\s+(\d+)/i);
   const disciplineMatch = prompt.match(/- Discipline:\s*([^\n]+)/i);
   const currentGradeMatch = prompt.match(/- Current grade:\s*([^|]+)\|\s*Target:\s*([^\n]+)/i);

@@ -12,7 +12,7 @@ export async function registerUser(page: Page, userId: string, password = TEST_P
   await page.fill('input[name="password"]', password);
   await page.fill('input[name="verifyPassword"]', password);
   await page.click('button[type="submit"]');
-  await page.waitForURL(/\/(dashboard|onboarding)/, { timeout: 10_000 });
+  await page.waitForURL(/\/intake/, { timeout: 10_000 });
 }
 
 export async function createPlanFromOnboarding(page: Page, options: { startDate?: string; daysPerWeek?: string } = {}) {

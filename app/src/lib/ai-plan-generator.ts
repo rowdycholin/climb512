@@ -1,4 +1,5 @@
 import type { PlanInput, WeekData, DayData, SessionData, ExerciseData } from "./plan-types";
+import type { PlanRequest } from "./plan-request";
 
 const MODEL = process.env.ANTHROPIC_MODEL ?? "anthropic/claude-haiku-4-5";
 const MAX_TOKENS = parseInt(process.env.ANTHROPIC_MAX_TOKENS ?? "5000", 10);
@@ -195,7 +196,63 @@ interface ApiResult {
   finishReason: string;
 }
 
-async function callApi(input: PlanInput, weekNum: number, username?: string): Promise<ApiResult> {
+function buildPlanRequestWeekPrompt(request: PlanRequest, athleteAge: number, weekNum: number): string {
+  const equipmentList = request.equipment.length > 0
+    ? request.equipment.join(", ")
+    : "no special equipment listed";
+  const trainingFocus = request.trainingFocus.length > 0 ? request.trainingFocus.join(", ") : "general progression";
+  const disciplineList = request.disciplines.length > 0 ? request.disciplines.join(", ") : request.sport;
+
+  const phaseNote = (() => {
+    const progress = weekNum / request.blockLengthWeeks;
+    if (weekNum % 4 === 0) return "This is a DELOAD week - reduce intensity and volume by 40%, focus on recovery.";
+    if (progress < 0.3) return "FOUNDATION phase - build base fitness, skill, and movement quality.";
+    if (progress < 0.6) return "BUILD phase - increase workload progressively.";
+    if (progress < 0.85) return "SPECIFIC phase - shift toward goal-specific sessions.";
+    return request.goalType === "event" ? "PEAK phase - sharpen performance and reduce fatigue." : "CONSOLIDATE phase - maintain progress and avoid overreaching.";
+  })();
+
+  return `You are an expert training coach. Generate ONE week of a training plan as a JSON object.
+
+PLAN_REQUEST_JSON:
+${JSON.stringify(request)}
+
+ATHLETE_CONTEXT:
+- Age: ${athleteAge}
+- Sport: ${request.sport}
+- Disciplines: ${disciplineList}
+- Goal type: ${request.goalType}
+- Goal: ${request.goalDescription}
+- Target date: ${request.targetDate ?? "none"}
+- Current level: ${request.currentLevel ?? "not specified"}
+- Target level: ${request.targetLevel ?? "not specified"}
+- Training focus: ${trainingFocus}
+- Equipment: ${equipmentList}
+- Injuries: ${request.constraints.injuries.length ? request.constraints.injuries.join(", ") : "none listed"}
+- Limitations: ${request.constraints.limitations.length ? request.constraints.limitations.join(", ") : "none listed"}
+- Avoid exercises: ${request.constraints.avoidExercises.length ? request.constraints.avoidExercises.join(", ") : "none listed"}
+- Strength training: ${request.strengthTraining.include ? "include" : "do not emphasize"}${request.strengthTraining.focusAreas.length ? ` (${request.strengthTraining.focusAreas.join(", ")})` : ""}
+- Plan: ${request.blockLengthWeeks} weeks total, ${request.daysPerWeek} training days/week
+
+WEEK ${weekNum} of ${request.blockLengthWeeks}:
+- ${phaseNote}
+
+OUTPUT: Return ONLY a single JSON object (not an array) in this exact shape:
+{"weekNum":${weekNum},"theme":"<short theme>","days":[{"dayNum":1,"dayName":"Monday","focus":"<focus>","isRest":false,"sessions":[{"name":"<name>","description":"<one sentence>","duration":45,"exercises":[{"name":"<name>","sets":"3","reps":"5","duration":"10s","rest":"3 min","notes":"<coaching cue>"}]}]},{"dayNum":2,"dayName":"Tuesday","focus":"Rest","isRest":true,"sessions":[]},...7 days total]}
+
+RULES:
+- Exactly 7 days (Monday-Sunday), dayNum 1-7
+- Rest days: isRest=true, sessions=[], focus="Rest"
+- Training days: exactly ONE session, 3-4 exercises max
+- Choose exercises appropriate to the sport, goal, available equipment, and constraints
+- Respect injuries, limitations, and avoid-exercise requests
+- notes: REQUIRED, max 10 words
+- sets/reps/duration/rest: include only what applies, omit the rest
+- All string values must be SHORT
+- Return ONLY compact minified JSON, no markdown, no explanation`;
+}
+
+async function callApiWithPrompt(prompt: string, weekNum: number, username?: string): Promise<ApiResult> {
   const url = `${BASE_URL}/v1/chat/completions`;
 
   const res = await fetch(url, {
@@ -216,7 +273,7 @@ async function callApi(input: PlanInput, weekNum: number, username?: string): Pr
         },
         {
           role: "user",
-          content: buildWeekPrompt(input, weekNum),
+          content: prompt,
         },
       ],
     }),
@@ -246,13 +303,13 @@ async function callApi(input: PlanInput, weekNum: number, username?: string): Pr
   return { text, finishReason };
 }
 
-async function generateWeek(input: PlanInput, weekNum: number, username?: string): Promise<WeekData> {
+async function generateWeekFromPrompt(prompt: string, weekNum: number, username?: string): Promise<WeekData> {
   const errors: string[] = [];
 
   for (let attempt = 1; attempt <= 2; attempt++) {
     let apiResult: ApiResult;
     try {
-      apiResult = await callApi(input, weekNum, username);
+      apiResult = await callApiWithPrompt(prompt, weekNum, username);
     } catch (e) {
       errors.push(`attempt ${attempt}: ${(e as Error).message}`);
       continue;
@@ -293,6 +350,14 @@ async function generateWeek(input: PlanInput, weekNum: number, username?: string
   throw new Error(`AI failed to generate week ${weekNum} after 2 attempts. ${errors.join(" | ")}`);
 }
 
+async function generateWeek(input: PlanInput, weekNum: number, username?: string): Promise<WeekData> {
+  return generateWeekFromPrompt(buildWeekPrompt(input, weekNum), weekNum, username);
+}
+
+async function generateWeekFromPlanRequest(request: PlanRequest, athleteAge: number, weekNum: number, username?: string): Promise<WeekData> {
+  return generateWeekFromPrompt(buildPlanRequestWeekPrompt(request, athleteAge, weekNum), weekNum, username);
+}
+
 export async function generatePlanWithAI(input: PlanInput, username?: string): Promise<WeekData[]> {
   const started = Date.now();
   console.log(`[ai-plan] generating ${input.weeksDuration} weeks in parallel`);
@@ -303,6 +368,24 @@ export async function generatePlanWithAI(input: PlanInput, username?: string): P
 
   weeks.sort((a, b) => a.weekNum - b.weekNum);
   console.log(`[ai-plan] generated ${weeks.length} weeks in ${Math.round((Date.now() - started) / 1000)}s`);
+
+  return weeks;
+}
+
+export async function generatePlanFromPlanRequestWithAI(
+  request: PlanRequest,
+  athleteAge: number,
+  username?: string,
+): Promise<WeekData[]> {
+  const started = Date.now();
+  console.log(`[ai-plan] generating ${request.blockLengthWeeks} weeks from PlanRequest in parallel`);
+
+  const weeks = await Promise.all(
+    Array.from({ length: request.blockLengthWeeks }, (_, i) => generateWeekFromPlanRequest(request, athleteAge, i + 1, username)),
+  );
+
+  weeks.sort((a, b) => a.weekNum - b.weekNum);
+  console.log(`[ai-plan] generated ${weeks.length} PlanRequest weeks in ${Math.round((Date.now() - started) / 1000)}s`);
 
   return weeks;
 }

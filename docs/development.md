@@ -136,7 +136,7 @@ The app stores plans as snapshots, not relational `Week/Day/Exercise` rows.
 - `User` stores account profile data and login identity
 - `Plan` is the top-level record and stores `startDate`
 - `PlanVersion` stores `profileSnapshot` and `planSnapshot` JSON
-- guided intake builds `PlanRequest` first, then adapts it to the legacy generator input for now
+- guided intake builds `PlanRequest` first and sends that structured request to generation; manual onboarding still uses the legacy generator input
 - `WorkoutLog` stores performed work against snapshot exercise keys
 - Date/time columns use PostgreSQL `TIMESTAMPTZ(3)` and the Docker database runs in UTC.
 
