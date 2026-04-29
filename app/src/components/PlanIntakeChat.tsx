@@ -85,6 +85,10 @@ export default function PlanIntakeChat() {
           userMessage,
           messages: nextMessages,
         });
+        if (response.assistantMessage === "SESSION_EXPIRED") {
+          window.location.href = "/login";
+          return;
+        }
         setDraft(response.draft);
         setMessages([...nextMessages, { role: "assistant", content: response.assistantMessage }]);
         scrollToLatestAndFocus();

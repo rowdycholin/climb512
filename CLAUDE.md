@@ -213,7 +213,8 @@ npx playwright test tests/plan-viewer-progress.spec.ts
 ## Operational Notes
 
 - sessions are boot-scoped and time-limited
-- session cookies currently expire after 30 minutes
+- session cookies currently expire after 30 minutes of inactivity
+- guided intake refreshes the session on each chat exchange and redirects expired sessions back to login
 - recreating the `web` container invalidates prior boot sessions
 - `migrate` must complete successfully before `web` starts
 - migrations are tracked in `_app_migrations`

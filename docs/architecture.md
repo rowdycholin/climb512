@@ -186,7 +186,8 @@ This keeps revision history intact and avoids the complexity of mutating a deep 
 
 ## Operational Notes
 
-- sessions are cookie-based, boot-scoped, and currently expire after 30 minutes
+- sessions are cookie-based, boot-scoped, and expire after 30 minutes of inactivity
+- guided intake refreshes the session on each chat exchange and before plan creation so long active chats do not expire mid-flow
 - the `migrate` service must succeed before `web` starts
 - migrations are raw SQL files tracked in `_app_migrations`
 - Docker defaults the app to the local simulator for plan generation

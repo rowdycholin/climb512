@@ -33,6 +33,7 @@ Current important files:
 - `app/src/lib/intake.ts`
 - `app/src/components/PlanIntakeChat.tsx`
 - `app/src/lib/ai-plan-generator.ts`
+- `app/src/lib/plan-intake-ai.test.ts`
 - `simulator/src/generate-plan.js`
 - `testing/tests/intake.spec.ts`
 
@@ -71,9 +72,13 @@ The AI should respond with one of two structured states:
 
 The app validates the draft with Zod before accepting it. Invalid AI output should not mutate the saved draft.
 
-The current implementation uses a simulator-backed version of this contract. The local guided intake still produces the draft deterministically, but the server action now validates that output as an AI-style response before returning it to the UI. The real AI provider should plug into this same interface later.
+The current implementation uses the real AI provider for intake when the app is pointed at a live backend. Local/simulator mode still has a deterministic fallback that returns the same `PlanIntakeAiResponse` contract, so tests can run without paid model calls.
 
-The guided interview now chooses an intake template. The supported profiles are `climbing_strength`, `running`, and `strength_training`; unknown sports use a generic fallback template so the app does not need one-off parser branches for every new sport.
+The intake contract has a local safety fence before the simulator/provider boundary. Clearly unsafe, prompt-injection, credential-seeking, exploit, or unrelated general-assistant requests are refused locally without mutating the draft.
+
+The live guided interview is now coach-led rather than template-led. It sends the current draft, recent conversation, and missing required fields to the model, then asks for the most useful next one-question follow-up. Sport templates remain as local fallback/checklist helpers rather than the primary user experience.
+
+The intake prompt includes today's date and the date boundary normalizes relative or ambiguous date answers. `today`, `now`, `as soon as possible`, slash dates, and month-name dates such as `Monday May 4th` are normalized to `YYYY-MM-DD`. If the model returns a past year for a start date, the app rolls it forward to the next future occurrence.
 
 The guided intake screen no longer shows an editable manual draft form or a visible Plan Draft panel. It submits the structured draft behind the scenes once enough information has been collected.
 
@@ -107,9 +112,17 @@ Manual onboarding remains available during transition
   -> manual onboarding is retired or kept only as an advanced/debug fallback
 ```
 
-### Use `PlanRequest` As The Durable Intake Contract
+### Use `PlanRequest` As The Current Intake Envelope
 
-`PlanRequest` should be the long-term input contract for plan generation.
+`PlanRequest` is the current structured envelope for plan generation. It should not become a rigid forever-schema that blocks activities with unusual planning needs.
+
+The app should treat `PlanRequest` as:
+
+- a shared minimum contract for common training-plan fields
+- an adapter boundary between chat and generation
+- a place to store broadly useful context
+
+It should not prevent sport- or activity-specific context from being carried forward. A future version may add an `activityContext` or `customFields` object so unusual sports can preserve richer details without forcing everything into generic fields.
 
 It should represent:
 
@@ -193,7 +206,7 @@ The app should create a new `PlanVersion` for the adjusted plan. Workout logs fr
 
 ## Data And Versioning Rules
 
-The current `Plan`, `PlanVersion`, and `WorkoutLog` model can support the first version of AI-assisted adjustments.
+The current `Plan`, `PlanVersion`, and `WorkoutLog` model can support the first version of AI-assisted adjustments. Worker-based generation will add explicit plan-generation state and job tracking.
 
 Recommended rules:
 
@@ -204,6 +217,13 @@ Recommended rules:
 - The new version should preserve locked historical days and replace only the adjustable future days.
 - Existing `WorkoutLog` rows should never be deleted or rewritten during adjustment.
 - My Plans should show one plan, with the current version active.
+
+Planned generation additions:
+
+- `Plan.generationStatus`: `generating`, `ready`, or `failed`
+- `Plan.generationError`: nullable failure message
+- `Plan.generatedWeeks`: number of completed generated weeks
+- `PlanGenerationJob`: durable job row for sequential week generation
 
 Implemented schema addition:
 
@@ -217,7 +237,7 @@ The simulator should evolve into separate deterministic test helpers instead of 
 
 Recommended simulator modes:
 
-- intake simulator: conversation plus template plus current draft -> `PlanRequest` draft and next question
+- intake simulator: conversation plus checklist hints plus current draft -> `PlanRequest` draft and next question
 - plan generation simulator: completed `PlanRequest` -> generated plan JSON
 - adjustment simulator: `PlanAdjustmentRequest` plus current plan and logs -> revised future plan JSON
 
@@ -255,24 +275,29 @@ Recommended work:
 - [x] Update the simulator/local intake path to return the same response contract.
 - [x] Make the app reject invalid AI output without mutating the draft.
 - [x] Keep the final `PlanRequest` available to the generation action before generation.
+- [x] Add local intake fencing for unsafe or unrelated chat messages.
+- [x] Add prompt-level task boundaries for intake and plan generation.
 - [x] Add retry/error handling when AI output fails validation.
 - [x] Document the system prompt and JSON contract.
-- [ ] Plug the real AI provider into the same interface after the simulator-backed contract is tested.
+- [x] Plug the real AI provider into the same interface after the simulator-backed contract is tested.
 
 Validation before moving on:
 
-- [ ] Unit tests for valid AI intake responses.
-- [ ] Unit tests for invalid AI intake responses.
+- [x] Unit tests for valid AI intake responses.
+- [x] Unit tests for invalid AI intake responses.
+- [x] Unit tests for unsafe/unrelated intake message fencing.
+- [x] Unit tests for prompt boundary text.
 - [x] Playwright test using simulator-backed AI contract responses.
 - [x] Playwright test for happy-path intake.
-- [ ] Playwright test for invalid AI output fallback.
+- [x] Playwright test for unsafe prompt refusal while keeping intake usable.
+- [x] Playwright test for invalid AI output fallback.
 - [x] Full Playwright suite passes.
 
 ## Phase 3: Template-Guided Interview
 
-Status: complete.
+Status: complete as local fallback/checklist infrastructure. The live product direction has shifted from template-led scripting to coach-led AI intake.
 
-Goal: keep the AI chat guided without creating one-off sport parsers.
+Goal: keep the AI chat guided without creating one-off sport parsers. Templates should provide minimum required field hints and deterministic local fallback behavior, not a rigid script in live mode.
 
 Recommended work:
 
@@ -426,9 +451,158 @@ Validation before moving on:
 - [x] Playwright test that My Plans still shows one plan.
 - [x] Full Playwright suite passes.
 
-## Phase 7: Add More Sports
+## Phase 7: Sequential Worker-Based Plan Generation
 
-Do this only after `PlanRequest`, the generator, and the adjustment flow are stable.
+Goal: improve plan quality and responsiveness by generating plans one week at a time through a worker service instead of generating every week in parallel.
+
+Rationale:
+
+- true progression needs each week to know what happened in prior weeks
+- parallel generation only knows week number, total weeks, and phase hints
+- users should not wait for the full plan before seeing anything
+- a worker can keep generating later weeks while the user reviews Week 1
+- failures in later weeks should not discard the whole plan
+- users should be able to recover from later-week failures through an AI repair chat that completes the remaining plan
+
+Target flow:
+
+```text
+AI intake completes
+  -> app creates Plan with generationStatus="generating"
+  -> app creates initial PlanVersion with empty or partial snapshot
+  -> app creates PlanGenerationJob
+  -> worker generates Week 1
+  -> plan page shows Week 1 and placeholders for remaining weeks
+  -> worker generates Week 2 using Week 1 summary
+  -> worker generates Week 3 using prior-week summary
+  -> ...
+  -> worker marks Plan generationStatus="ready"
+```
+
+Failure recovery flow:
+
+```text
+Worker fails while generating a later week
+  -> app keeps the already generated weeks visible
+  -> plan status becomes failed
+  -> plan page shows the failed week and error summary
+  -> user opens an AI repair chat
+  -> user can clarify constraints, simplify the plan, or ask the coach to continue differently
+  -> app creates or updates a PlanGenerationJob from the failed week forward
+  -> worker resumes sequential generation using prior generated weeks plus repair feedback
+  -> plan status returns to generating, then ready
+```
+
+Recommended implementation batches:
+
+**Batch 1: Foundation**
+
+- schema fields on `Plan`
+- `PlanGenerationJob` table
+- helper functions for job state and progress
+- partial snapshot / plan viewer support
+- progress UI and placeholders
+- no change to the real generation flow yet
+
+**Batch 2: Sequential Generation Core**
+
+- `generateNextWeekFromPlanContext`
+- previous-week summaries
+- next-week prompt changes
+- validation for one generated week
+- unit tests for prompt construction and week validation
+
+**Batch 3: Worker**
+
+- worker service
+- Docker Compose worker
+- job polling and locking
+- one-week-at-a-time updates
+- job completion and failure handling
+
+**Batch 4: Product Integration**
+
+- guided intake creates plan/job instead of blocking on all weeks
+- plan page polls while generating
+- user sees Week 1 / partial plan while remaining weeks build
+- manual onboarding remains on the existing path until the worker flow is stable
+
+**Batch 5: Failure Repair Chat**
+
+- failed job UI
+- AI repair chat
+- repair feedback storage
+- resume generation from failed week forward
+
+Recommended schema additions:
+
+- [ ] Add `Plan.generationStatus`.
+- [ ] Add `Plan.generationError`.
+- [ ] Add `Plan.generatedWeeks`.
+- [ ] Add `PlanGenerationJob` table with:
+  - `planId`
+  - `userId`
+  - `status`
+  - `totalWeeks`
+  - `nextWeekNum`
+  - `lastError`
+  - `lockedAt`
+  - timestamps
+
+Recommended app work:
+
+- [ ] Change guided-intake plan creation to create the plan/job quickly instead of blocking on all weeks.
+- [ ] Save a partial `PlanVersion.planSnapshot` as each week is generated.
+- [ ] Update plan viewer to support partial snapshots.
+- [ ] Show generated weeks immediately.
+- [ ] Show placeholders for missing future weeks.
+- [ ] Show progress such as `Generating week X of Y`.
+- [ ] Poll or refresh while `generationStatus="generating"`.
+- [ ] Show generated weeks even when later-week generation fails.
+- [ ] Show failed week, last error, and a clear repair entry point when generation fails.
+- [ ] Add an AI repair chat for failed generation jobs.
+- [ ] Let repair chat collect user guidance such as simplify, reduce volume, avoid an exercise, change schedule, or continue from prior weeks.
+- [ ] Resume generation from the failed week forward instead of restarting the entire plan.
+- [ ] Keep manual onboarding on the current generation path until the worker flow is stable, or explicitly migrate it as a separate step.
+
+Recommended worker work:
+
+- [ ] Add a worker service to Docker Compose.
+- [ ] Worker polls pending `PlanGenerationJob` rows.
+- [ ] Worker locks one job at a time.
+- [ ] Worker generates exactly one next week per job iteration.
+- [ ] Worker passes prior generated week summaries into the next-week prompt.
+- [ ] Worker updates the partial snapshot and progress after every generated week.
+- [ ] Worker marks job and plan ready when all weeks are generated.
+- [ ] Worker marks job and plan failed with an error message when generation cannot recover automatically.
+- [ ] Worker can resume a failed job from `nextWeekNum` after repair feedback is added.
+
+Recommended generator work:
+
+- [ ] Add `generateNextWeekFromPlanContext`.
+- [ ] Pass full `PlanRequest`, including future `activityContext` / `customFields`.
+- [ ] Pass previously generated week summaries.
+- [ ] Pass current week number and total weeks.
+- [ ] Ask the model to progress from previous volume, intensity, exercises, and recovery load.
+- [ ] Include repair feedback when regenerating after a failed week.
+- [ ] Validate each generated week before saving it.
+
+Validation before moving on:
+
+- [ ] Unit tests for generation job state transitions.
+- [ ] Unit tests for next-week prompt context including previous week summary.
+- [ ] Worker integration test for generating a multi-week plan to ready status.
+- [ ] Playwright test that Week 1 appears before the full plan is complete.
+- [ ] Playwright test that placeholders/progress are shown for missing weeks.
+- [ ] Playwright test that the plan becomes ready after worker completion.
+- [ ] Failure/retry test for a failed generation job.
+- [ ] Playwright test that failed later-week generation keeps earlier weeks visible.
+- [ ] Playwright test that AI repair chat can resume and complete a failed plan.
+- [ ] Existing plan viewer, logging, manual edits, and adjustment tests still pass.
+
+## Phase 8: Add More Sports
+
+Do this only after `PlanRequest`, the generator, the adjustment flow, and worker-based generation are stable.
 
 Candidate additions:
 
@@ -455,6 +629,7 @@ Do not add a sport by adding scattered sport-specific branches across the app. A
 ## Open Questions
 
 - Should `PlanRequest` stay in `PlanVersion.profileSnapshot`, or should it later move to a dedicated column/table?
+- Should `PlanRequest` grow an `activityContext` / `customFields` escape hatch for sports with planning needs that do not fit the generic envelope?
 - Should weight training become a separate sport profile or remain a climbing support module?
 - How closely should the simulator emulate the real AI provider versus only providing deterministic test plans?
 - Should the app show explicit warnings when injuries are entered?

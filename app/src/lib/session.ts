@@ -71,3 +71,10 @@ export async function getSession(): Promise<IronSession<SessionData>> {
 
   return session;
 }
+
+export async function refreshSession(session: IronSession<SessionData>) {
+  if (!session.isLoggedIn) return;
+
+  session.expiresAt = getSessionExpiresAt();
+  await session.save();
+}

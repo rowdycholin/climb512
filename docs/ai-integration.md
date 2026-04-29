@@ -39,14 +39,17 @@ Guided intake generation sends the structured `PlanRequest` directly to the gene
 
 The `/intake` route is the first step toward a generic chat-based plan intake. Today it is intentionally conservative:
 
-- it is a rule-based interview flow, not a remote AI call
-- it asks for sport/discipline, goal, timeline, equipment, strength training, start date, current level, schedule, and injuries/limitations
+- it uses the live AI provider for a coach-led interview when pointed at a live backend
+- local/simulator mode can still use deterministic fallback extraction for tests and demos
+- it asks flexible follow-up questions around sport/discipline, goal, timeline, equipment, strength training, start date, current level, schedule, preferences, and injuries/limitations
 - it extracts a generic `PlanRequest` from the user's answers
 - the structured draft stays hidden from the UI and is submitted once required fields are ready
 - it sends `PlanRequest` to the generator
 - the simulator consumes `PlanRequest` fields for sport selection, event vs ongoing goals, strength support, and injury/avoid-exercise substitutions
 
-This keeps the UI and validation path ready for a future model-backed intake while giving the simulator and generator a clear migration target.
+The model still has to return the validated `PlanIntakeAiResponse` JSON contract. Invalid output falls back without mutating the draft.
+
+The intake prompt includes today's date. The server also normalizes common date answers and guards against past start dates, including natural inputs like `today`, `now`, `as soon as possible`, `10/15/26`, and `Monday May 4th`.
 
 Output:
 
@@ -110,6 +113,8 @@ The app appends `/v1/chat/completions` itself.
 | `ANTHROPIC_BASE_URL` | provider base URL |
 | `ANTHROPIC_MODEL` | model identifier |
 | `ANTHROPIC_MAX_TOKENS` | output token cap |
+| `ANTHROPIC_INTAKE_MAX_TOKENS` | intake response token cap |
+| `AI_INTAKE_MODE=local` | force deterministic local intake fallback |
 
 ## Privacy note
 

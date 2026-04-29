@@ -23,6 +23,18 @@ Key controls:
 - logged-week manual additions preserve existing logged exercises and only append new custom work
 - `adjustFuturePlan()` loads plans through ownership-checked helpers and preserves locked history from previous logs
 
+## AI task boundaries
+
+AI-facing plan generation prompts include an explicit task boundary:
+
+- only create training plan JSON for the provided athlete context
+- refuse unrelated domains such as hacking, malware, credential requests, secrets, code writing, scraping, jokes, roleplay, legal/financial advice, political persuasion, or unrelated personal advice
+- treat injuries, limitations, and exercises to avoid as hard constraints
+- avoid diagnosis, medical treatment, nutrition prescriptions, supplement advice, and unrelated coaching
+- output only the required JSON object
+
+The intake contract also defines a matching system prompt for future model-backed intake. The live intake path still uses code-level fencing before the simulator/provider boundary and validates responses with `PlanIntakeAiResponse`.
+
 ## Snapshot-model implications
 
 The app does not trust relational exercise IDs from a normalized plan tree.
@@ -46,12 +58,13 @@ That login header is not sent to live provider URLs.
 
 - user A cannot open user B's `/plan/[id]`
 - plan logging verifies ownership and snapshot exercise membership before writing
+- user A cannot submit `logExercise` for user B's `planId` + `exerciseKey`
+- user A cannot save manual edits against user B's plan
+- user A cannot adjust user B's future plan
 - logged weeks are locked against manual structural edits
 - logged weeks allow additive custom exercises without rewriting old logs
 - future-plan adjustment preserves old logs and keeps the plan under the same `Plan`
 
-## Recommended follow-up tests
+## Test-only attack harness
 
-- user A cannot submit `logExercise` for user B's `planId` + `exerciseKey`
-- user A cannot save manual edits against user B's plan
-- user A cannot adjust user B's future plan
+`testing/tests/security.spec.ts` uses the gated `/test-only/plan-action-attacks` route to exercise real server actions with forged cross-user plan IDs. The route is only enabled in local/test conditions and verifies both the action response and that victim plan log/version counts do not change.

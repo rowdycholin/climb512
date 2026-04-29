@@ -65,9 +65,6 @@ services:
     environment:
       DATABASE_URL: postgresql://climber:climber512@postgres:5432/climbapp
       SESSION_SECRET: super-secret-session-key-change-in-production-32chars!!
-      AI_MODE: ${AI_MODE:-simulate}
-      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-simulator}
-      ANTHROPIC_BASE_URL: ${ANTHROPIC_BASE_URL:-http://simulator:8787}
     depends_on:
       migrate:
         condition: service_completed_successfully

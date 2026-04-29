@@ -4,7 +4,7 @@ import bcrypt from "bcryptjs";
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { getPostLoginPath } from "@/lib/post-login-route";
-import { getSession, getSessionBootId, getSessionExpiresAt } from "@/lib/session";
+import { getSession, getSessionBootId, getSessionExpiresAt, refreshSession } from "@/lib/session";
 import {
   buildPlanSnapshot,
   createProfileSnapshot,
@@ -701,11 +701,12 @@ export async function continuePlanIntake(input: {
 }): Promise<IntakeResponse> {
   const session = await getSession();
   if (!session.isLoggedIn) {
-    return { draft: {}, ready: false, assistantMessage: "Please sign in again before building a plan." };
+    return { draft: {}, ready: false, assistantMessage: "SESSION_EXPIRED" };
   }
+  await refreshSession(session);
 
   const draft = partialIntakeDraftSchema.parse(input.draft ?? {});
-  return continuePlanIntakeWithAiContract({
+  return await continuePlanIntakeWithAiContract({
     draft,
     userMessage: input.userMessage,
     messages: input.messages,
@@ -715,6 +716,7 @@ export async function continuePlanIntake(input: {
 export async function createPlanFromIntake(formData: FormData) {
   const session = await getSession();
   if (!session.isLoggedIn) redirect("/login");
+  await refreshSession(session);
 
   const rawDraft = formData.get("draft");
   if (typeof rawDraft !== "string") redirect("/intake");

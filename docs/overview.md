@@ -44,7 +44,7 @@ The preferred UX direction is:
 
 - direct editing for day and exercise changes
 - mobile-friendly interactions
-- AI-style intake focused on producing a generic `PlanRequest`
+- coach-led AI intake focused on producing a generic `PlanRequest`
 - AI focused on plan generation from validated inputs
 - AI-assisted plan adjustment through a day-level request contract; the first implementation uses deterministic future-plan rewriting until the real AI provider is plugged in
 
@@ -72,7 +72,7 @@ Current editing behavior:
 
 ## Important Operational Notes
 
-In Docker, the app uses the local simulator service for plan generation by default. That keeps normal testing and demos off the paid provider path.
+In Docker, the app uses the AI settings from `app/.env`; point `ANTHROPIC_BASE_URL` at the simulator for no-cost local demos, or at the live provider for real AI testing.
 
 For local development, `docker-compose.dev.yml` bind-mounts `./app` into the web container and runs `next dev`.
 

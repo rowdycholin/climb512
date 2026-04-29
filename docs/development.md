@@ -86,7 +86,7 @@ cd app
 npm run dev
 ```
 
-Note: if you run the app outside Docker and keep `app/.env` unchanged, plan generation may go to the live provider, not the simulator.
+Note: if you run the app outside Docker and keep `app/.env` unchanged, intake and plan generation may go to the live provider, not the simulator. Set `AI_INTAKE_MODE=local` if you want deterministic intake while leaving generation on the configured backend.
 
 ## Migrations
 

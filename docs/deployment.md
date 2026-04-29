@@ -131,5 +131,6 @@ This removes Postgres data plus the dev `node_modules` and `.next` volumes.
 - the DB should move to a managed Postgres service in production
 - TLS should terminate at a reverse proxy or load balancer
 - migrations should still run as a separate one-shot job before new app traffic is accepted
-- session behavior is intentionally short-lived today: cookies are boot-scoped and expire after 30 minutes
+- session behavior is intentionally short-lived today: cookies are boot-scoped and expire after 30 minutes of inactivity
+- guided intake refreshes the session during active chat exchanges and before plan creation; expired intake sessions redirect back to login
 - a real production deployment should explicitly decide whether plan generation points to the simulator or a live provider
