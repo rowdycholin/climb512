@@ -20,7 +20,7 @@ The goal is to move carefully:
 - [x] Guided intake includes event goals and ongoing goals.
 - [x] Guided intake includes injuries, limitations, and exercises to avoid.
 - [x] Guided intake includes weight training as part of a climbing-support plan.
-- [x] Guided intake sends `PlanRequest` directly to the plan generator.
+- [x] Guided intake creates a `PlanGenerationJob` from `PlanRequest` and the worker generates the plan.
 - [x] Manual onboarding still uses the legacy climbing-shaped `PlanInput`.
 - [x] Playwright regression exists for guided intake and plan generation.
 - [x] Manual onboarding still exists, but the product direction is to replace it with AI intake.
@@ -78,9 +78,9 @@ The intake contract has a local safety fence before the simulator/provider bound
 
 The live guided interview is now coach-led rather than template-led. It sends the current draft, recent conversation, and missing required fields to the model, then asks for the most useful next one-question follow-up. Sport templates remain as local fallback/checklist helpers rather than the primary user experience.
 
-The intake prompt includes today's date and the date boundary normalizes relative or ambiguous date answers. `today`, `now`, `as soon as possible`, slash dates, and month-name dates such as `Monday May 4th` are normalized to `YYYY-MM-DD`. If the model returns a past year for a start date, the app rolls it forward to the next future occurrence.
+The intake prompt includes the browser's local date and time zone, and the date boundary normalizes relative or ambiguous date answers. `today`, `now`, `as soon as possible`, slash dates, and month-name dates such as `Monday May 4th` are normalized to `YYYY-MM-DD`. If the model returns a past year for a start date, the app rolls it forward to the next future occurrence.
 
-The guided intake screen no longer shows an editable manual draft form or a visible Plan Draft panel. It submits the structured draft behind the scenes once enough information has been collected.
+The guided intake screen no longer shows an editable manual draft form or a visible Plan Draft panel. It submits the structured draft behind the scenes once enough information has been collected. The magic-wand generate button stays disabled until the draft passes the full `PlanRequest` schema, and the assistant tells the user to click the magic wand when the plan can be generated.
 
 ### Separate Intake From Plan Generation
 

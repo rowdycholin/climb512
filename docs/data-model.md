@@ -71,6 +71,7 @@ The generation fields are foundation data for sequential worker-based generation
 ### PlanGenerationJob
 
 Durable worker state for generating missing plan weeks one at a time.
+Completed rows remain as durable generation history and debugging context.
 
 | Column | Type | Notes |
 |---|---|---|

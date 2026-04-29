@@ -88,6 +88,8 @@ climb512/
 - guided intake does not show the old Plan Draft/manual setup panel; it keeps the structured draft hidden and chat-driven
 - `PlanRequest` is still adapted to legacy `PlanInput` for compatibility snapshots, but guided-intake generation uses the generic request directly
 - guided-intake plan creation now stores structured `PlanRequest` JSON, creates a `PlanGenerationJob`, and redirects while the worker generates weeks
+- guided intake uses the browser's local date/time zone for relative answers such as `today`
+- the magic-wand generate button stays disabled until the hidden draft passes the full `PlanRequest` schema
 - onboarding age was removed; plan generation uses the registered user age
 - grade dropdowns change by discipline:
   - bouldering: V-scale
@@ -200,7 +202,7 @@ npx playwright test tests/plan-viewer-progress.spec.ts
 ## AI Notes
 
 - the app uses plain `fetch` to an OpenAI-compatible `/v1/chat/completions` endpoint
-- `/intake` is an AI-style guided intake scaffold today; it uses a simulator-backed `PlanIntakeAiResponse` contract and does not call the remote AI backend yet
+- `/intake` is a guided intake chat; Docker currently forces deterministic local intake, while non-Docker or live-provider mode can use the model-backed `PlanIntakeAiResponse` contract
 - AI intake responses are validated in `app/src/lib/plan-intake-ai.ts` before the UI receives draft changes
 - in Docker, `ANTHROPIC_BASE_URL` defaults to `http://simulator:8787`
 - outside Docker, `app/.env` may still point to OpenRouter

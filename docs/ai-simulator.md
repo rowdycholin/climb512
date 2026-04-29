@@ -48,13 +48,13 @@ Returns the active simulator runtime config:
 
 ## Docker behavior
 
-In Docker, the `web` service points `ANTHROPIC_BASE_URL` at:
+In Docker, the `web` and `plan-worker` services point `ANTHROPIC_BASE_URL` at:
 
 ```text
 http://simulator:8787
 ```
 
-So plan generation uses the simulator by default unless you explicitly override the base URL.
+So guided-intake plan generation uses the simulator by default unless you explicitly override the base URL. `web` creates the generation job, and `plan-worker` sends the sequential week prompts to the simulator.
 
 ## Runtime controls
 
@@ -99,13 +99,14 @@ Current error modes:
 The simulator logs plan-generation requests so you can tail it during testing:
 
 ```bash
-docker compose logs -f simulator
+docker compose logs -f web plan-worker simulator
 ```
 
 Example line:
 
 ```text
-[simulator] generated plan user=testuser1 weeks=4 daysPerWeek=2 sport=climbing goalType=event discipline=bouldering scenario=baseline seed=demo-seed mode=none
+[simulator] accepted prompt type=next-week user=testuser1 week=1/4 scenario=baseline mode=none
+[simulator] generated plan week type=next-week user=testuser1 week=1/4 daysPerWeek=3 discipline=bouldering grades=V4->V6 scenario=baseline seed=demo-seed mode=none
 ```
 
 The login ID header is only sent when the app is talking to a simulator-like local backend, not to a live provider.

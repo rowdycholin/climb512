@@ -53,7 +53,9 @@ The `/intake` route is the first step toward a generic chat-based plan intake. T
 
 The model still has to return the validated `PlanIntakeAiResponse` JSON contract. Invalid output falls back without mutating the draft.
 
-The intake prompt includes today's date. The server also normalizes common date answers and guards against past start dates, including natural inputs like `today`, `now`, `as soon as possible`, `10/15/26`, and `Monday May 4th`.
+The intake prompt includes the browser's local date and time zone. The server also normalizes common date answers and guards against past start dates, including natural inputs like `today`, `now`, `as soon as possible`, `10/15/26`, and `Monday May 4th`.
+
+When enough information has been collected, the assistant tells the user to click the magic-wand button. The button stays disabled until the hidden draft passes the full `PlanRequest` schema.
 
 Worker output:
 
@@ -100,7 +102,8 @@ There are currently two backend modes:
 ### Docker default
 
 - `ANTHROPIC_BASE_URL=http://simulator:8787`
-- generation goes to the local simulator service
+- intake uses deterministic local extraction via `AI_INTAKE_MODE=local`
+- generation goes to the local simulator service from both `web` and `plan-worker`
 
 ### Live provider
 

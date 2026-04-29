@@ -144,6 +144,8 @@ The app stores plans as snapshots, not relational `Week/Day/Exercise` rows.
 - plan progress and complete status are derived from `Plan.startDate` plus snapshot week count, not stored as separate columns
 - explicit user completion is stored on `Plan.completedAt`, `completionReason`, and `completionNotes`; this overrides the calendar-derived active state in the UI
 - guided intake builds `PlanRequest`, creates a `PlanGenerationJob`, and lets `plan-worker` generate weeks; manual onboarding still uses the legacy generator input
+- guided intake uses the browser's local date/time zone for relative answers such as `today`
+- the magic-wand generate button is locked until the hidden draft passes the full `PlanRequest` schema
 - the simulator consumes `PlanRequest` fields for sport-specific templates, event vs ongoing themes, strength support, and basic injury/avoid-exercise substitutions
 - `WorkoutLog` stores performed work against snapshot exercise keys
 - logged-week manual edits may append custom exercises while preserving existing prescribed exercise keys for prior logs
