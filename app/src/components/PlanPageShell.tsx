@@ -2,10 +2,17 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { CheckCircle2, MessageCircle, PencilLine, RotateCcw } from "lucide-react";
-import { completePlan, reopenPlan } from "@/app/actions";
+import { CheckCircle2, MessageCircle, PencilLine, RotateCcw, WandSparkles } from "lucide-react";
+import { completePlan, reopenPlan, repairPlanGeneration } from "@/app/actions";
 import PlanWorkspace from "@/components/PlanWorkspace";
 import { Button } from "@/components/ui/button";
+
+const REPAIR_PROMPTS = [
+  "Reduce volume and continue from the prior generated weeks.",
+  "Simplify the schedule and avoid cramming missed work.",
+  "Avoid the movement that caused the failed week and choose safer alternatives.",
+  "Keep the same goal, but make the remaining weeks more conservative.",
+];
 
 interface PlanPageShellProps {
   planId: string;
@@ -51,6 +58,11 @@ interface PlanPageShellProps {
       isReady: boolean;
       error: string | null;
     };
+    generationJob: {
+      failedWeekNum: number | null;
+      lastError: string | null;
+      repairNotes: string | null;
+    } | null;
   };
 }
 
@@ -67,6 +79,7 @@ export default function PlanPageShell({
   const [editorOpen, setEditorOpen] = useState(false);
   const [coachOpen, setCoachOpen] = useState(false);
   const [completionPanelOpen, setCompletionPanelOpen] = useState(false);
+  const [repairNotes, setRepairNotes] = useState(summary.generationJob?.repairNotes ?? "");
 
   const activeWeek = weeks[activeWeekIndex] ?? null;
   const activeWeekLocked = useMemo(
@@ -89,6 +102,11 @@ export default function PlanPageShell({
 
     return () => window.clearInterval(timer);
   }, [router, summary.generation.isGenerating]);
+
+  useEffect(() => {
+    if (!summary.generation.isFailed) return;
+    setRepairNotes(summary.generationJob?.repairNotes ?? "");
+  }, [summary.generation.isFailed, summary.generationJob?.repairNotes]);
 
   function toggleEditor() {
     setEditorOpen((value) => {
@@ -222,14 +240,51 @@ export default function PlanPageShell({
           }`}>
             <p className="font-medium">
               {summary.generation.isFailed
-                ? "Plan generation needs attention"
+                ? `Week ${summary.generationJob?.failedWeekNum ?? summary.generation.nextWeekNum ?? summary.generation.generatedWeeks + 1} needs repair`
                 : `Generating week ${summary.generation.nextWeekNum ?? summary.generation.generatedWeeks} of ${summary.generation.totalWeeks}`}
             </p>
             <p className="mt-1">
               {summary.generation.isFailed
-                ? summary.generation.error ?? "The already generated weeks are still available."
+                ? summary.generationJob?.lastError ?? summary.generation.error ?? "The already generated weeks are still available."
                 : `${summary.generation.generatedWeeks}/${summary.generation.totalWeeks} weeks ready (${summary.generation.percent}%).`}
             </p>
+            {summary.generation.isFailed && (
+              <form action={repairPlanGeneration} className="mt-3 rounded-lg border border-red-200 bg-white/80 p-3 text-slate-800">
+                <input type="hidden" name="planId" value={planId} />
+                <label htmlFor="repair-notes" className="mb-1 block text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+                  Repair guidance
+                </label>
+                <textarea
+                  id="repair-notes"
+                  name="repairNotes"
+                  rows={3}
+                  maxLength={2000}
+                  required
+                  value={repairNotes}
+                  onChange={(event) => setRepairNotes(event.target.value)}
+                  placeholder="Reduce volume, avoid a movement, simplify the schedule, or continue from prior weeks."
+                  className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 placeholder:text-slate-400 focus:border-red-400 focus:outline-none"
+                />
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {REPAIR_PROMPTS.map((prompt) => (
+                    <button
+                      key={prompt}
+                      type="button"
+                      onClick={() => setRepairNotes(prompt)}
+                      className="rounded-full border border-red-100 bg-red-50 px-3 py-1 text-xs text-red-700 transition-colors hover:border-red-200 hover:bg-red-100"
+                    >
+                      {prompt}
+                    </button>
+                  ))}
+                </div>
+                <div className="mt-2 flex justify-end">
+                  <Button type="submit" className="gap-2">
+                    <WandSparkles className="h-4 w-4" />
+                    Resume Generation
+                  </Button>
+                </div>
+              </form>
+            )}
           </div>
         )}
 

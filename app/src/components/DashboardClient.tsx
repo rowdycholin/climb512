@@ -97,7 +97,7 @@ export default function DashboardClient({ plans }: { plans: Plan[] }) {
                       </p>
                     )}
                   </div>
-                  <p className="whitespace-nowrap text-xs text-slate-400">{plan.createdAtLabel}</p>
+                  <p className="whitespace-nowrap text-xs text-slate-400">Created {plan.createdAtLabel}</p>
                 </div>
               </CardContent>
             </Card>

@@ -24,6 +24,7 @@ export default async function PlanPage({ params }: { params: { id: string } }) {
     totalWeeks,
     error: plan.generationError,
   });
+  const latestGenerationJob = plan.generationJobs[0] ?? null;
 
   if (generation.isGenerating || generation.isFailed) {
     console.log(
@@ -80,6 +81,13 @@ export default async function PlanPage({ params }: { params: { id: string } }) {
               effectiveFromDay: plan.currentVersion.effectiveFromDay,
             },
             generation,
+            generationJob: latestGenerationJob
+              ? {
+                  failedWeekNum: latestGenerationJob.status === "failed" ? latestGenerationJob.nextWeekNum : null,
+                  lastError: latestGenerationJob.lastError,
+                  repairNotes: latestGenerationJob.repairNotes,
+                }
+              : null,
           }}
         />
       </main>

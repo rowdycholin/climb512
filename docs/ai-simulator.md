@@ -44,6 +44,8 @@ Returns the active simulator runtime config:
 - `scenario`
 - `latencyMs`
 - `errorMode`
+- `errorWeek`
+- `errorOnce`
 - supported scenarios
 
 ## Docker behavior
@@ -65,6 +67,8 @@ AI_SIMULATOR_SEED=demo-seed
 AI_SIMULATOR_SCENARIO=baseline
 AI_SIMULATOR_LATENCY_MS=0
 AI_SIMULATOR_ERROR_MODE=none
+AI_SIMULATOR_ERROR_WEEK=
+AI_SIMULATOR_ERROR_ONCE=0
 ```
 
 ### Seed
@@ -93,6 +97,18 @@ Current error modes:
 - `timeout`
 - `invalid_json`
 - `truncated_json`
+
+Batch 5 repair testing can target a later week:
+
+```bash
+AI_SIMULATOR_ERROR_MODE=http_500
+AI_SIMULATOR_ERROR_WEEK=3
+AI_SIMULATOR_ERROR_ONCE=0
+```
+
+With that setup, Week 1 and Week 2 can generate normally, Week 3 fails until the error mode is cleared, and the app can show the failed-job repair UI. After entering repair guidance, clear the error mode and restart the simulator/worker; the worker can resume from Week 3.
+
+Use `AI_SIMULATOR_ERROR_ONCE=1` when you want to test a transient provider error that succeeds on retry. Because the generator retries failed model calls before marking the job failed, one-time errors may recover without showing the repair UI.
 
 ## Logging
 

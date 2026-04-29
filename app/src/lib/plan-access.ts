@@ -27,6 +27,10 @@ export async function findOwnedPlanWithLogs(planId: string, userId: string) {
     },
     include: {
       currentVersion: true,
+      generationJobs: {
+        orderBy: { updatedAt: "desc" },
+        take: 1,
+      },
       workoutLogs: {
         where: { userId },
         orderBy: { loggedAt: "desc" },

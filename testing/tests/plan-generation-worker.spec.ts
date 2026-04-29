@@ -1,0 +1,32 @@
+import { expect, test } from "@playwright/test";
+import { dockerServiceUsesSimulator, registerUser, seedPendingGenerationPlan } from "./helpers";
+
+test.skip(
+  !dockerServiceUsesSimulator("web") || !dockerServiceUsesSimulator("plan-worker"),
+  "Worker generation regression runs only when web and plan-worker use the simulator backend.",
+);
+
+test("worker generation shows partial progress before completing the plan", async ({ page }) => {
+  const suffix = `${Date.now()}-${test.info().workerIndex}`;
+  const userId = `intake-worker-${suffix}`;
+
+  await registerUser(page, userId);
+  const { planId } = seedPendingGenerationPlan(userId, suffix);
+
+  await page.goto(`/plan/${planId}`);
+
+  await expect(page.getByText(/Generating week [1-4] of 4/)).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByRole("heading", { name: "Week 1" })).toBeVisible({ timeout: 120_000 });
+  await expect(page.getByRole("button", { name: /W4 pending/ })).toBeVisible();
+
+  await page.getByRole("button", { name: /W4 pending/ }).click();
+  await expect(page.getByRole("heading", { name: "Week is still generating" })).toBeVisible();
+  await expect(page.getByText(/weeks ready/).first()).toBeVisible();
+
+  await expect(page.getByRole("button", { name: /^W4$/ })).toBeVisible({ timeout: 90_000 });
+  await page.getByRole("button", { name: /^W4$/ }).click();
+  await expect(page.getByRole("heading", { name: "Week 4" })).toBeVisible();
+
+  await expect(page.getByText("Generating week")).toHaveCount(0, { timeout: 30_000 });
+  await expect(page.getByRole("button", { name: "Complete plan" })).toBeEnabled();
+});

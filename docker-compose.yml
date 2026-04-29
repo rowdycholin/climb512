@@ -9,6 +9,8 @@ services:
       AI_SIMULATOR_SCENARIO: ${AI_SIMULATOR_SCENARIO:-baseline}
       AI_SIMULATOR_LATENCY_MS: ${AI_SIMULATOR_LATENCY_MS:-0}
       AI_SIMULATOR_ERROR_MODE: ${AI_SIMULATOR_ERROR_MODE:-none}
+      AI_SIMULATOR_ERROR_WEEK: ${AI_SIMULATOR_ERROR_WEEK:-}
+      AI_SIMULATOR_ERROR_ONCE: ${AI_SIMULATOR_ERROR_ONCE:-0}
     ports:
       - "8787:8787"
 
@@ -68,6 +70,7 @@ services:
       ANTHROPIC_BASE_URL: http://simulator:8787
       ANTHROPIC_API_KEY: simulator-local-key
       AI_INTAKE_MODE: local
+      ENABLE_TEST_ROUTES: ${ENABLE_TEST_ROUTES:-1}
     depends_on:
       migrate:
         condition: service_completed_successfully

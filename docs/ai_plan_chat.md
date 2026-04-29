@@ -529,10 +529,11 @@ Recommended implementation batches:
 
 **Batch 5: Failure Repair Chat**
 
-- failed job UI
-- AI repair chat
-- repair feedback storage
-- resume generation from failed week forward
+- [x] simulator support for week-targeted failures
+- [x] failed job UI
+- [x] AI repair chat
+- [x] repair feedback storage
+- [x] resume generation from failed week forward
 
 Recommended schema additions:
 
@@ -559,10 +560,10 @@ Recommended app work:
 - [x] Show progress such as `Generating week X of Y`.
 - [x] Poll or refresh while `generationStatus="generating"`.
 - [x] Show generated weeks even when later-week generation fails.
-- [ ] Show failed week, last error, and a clear repair entry point when generation fails.
-- [ ] Add an AI repair chat for failed generation jobs.
-- [ ] Let repair chat collect user guidance such as simplify, reduce volume, avoid an exercise, change schedule, or continue from prior weeks.
-- [ ] Resume generation from the failed week forward instead of restarting the entire plan.
+- [x] Show failed week, last error, and a clear repair entry point when generation fails.
+- [x] Add an AI repair chat for failed generation jobs.
+- [x] Let repair chat collect user guidance such as simplify, reduce volume, avoid an exercise, change schedule, or continue from prior weeks.
+- [x] Resume generation from the failed week forward instead of restarting the entire plan.
 - [x] Keep manual onboarding on the current generation path until the worker flow is stable, or explicitly migrate it as a separate step.
 
 Recommended worker work:
@@ -591,14 +592,15 @@ Validation before moving on:
 
 - [x] Unit tests for generation job state transitions.
 - [x] Unit tests for next-week prompt context including previous week summary.
-- [ ] Worker integration test for generating a multi-week plan to ready status.
-- [ ] Playwright test that Week 1 appears before the full plan is complete.
-- [ ] Playwright test that placeholders/progress are shown for missing weeks.
-- [ ] Playwright test that the plan becomes ready after worker completion.
-- [ ] Failure/retry test for a failed generation job.
-- [ ] Playwright test that failed later-week generation keeps earlier weeks visible.
-- [ ] Playwright test that AI repair chat can resume and complete a failed plan.
-- [ ] Existing plan viewer, logging, manual edits, and adjustment tests still pass.
+- [x] Worker integration test for generating a multi-week plan to ready status.
+- [x] Playwright test that Week 1 appears before the full plan is complete.
+- [x] Playwright test that placeholders/progress are shown for missing weeks.
+- [x] Playwright test that the plan becomes ready after worker completion.
+- [x] Failure/retry test for simulator week-targeted failure controls.
+- [x] Worker failure/repair integration test for a failed generation job.
+- [x] Playwright test that failed later-week generation keeps earlier weeks visible.
+- [x] Playwright test that AI repair chat can resume and complete a failed plan.
+- [x] Existing plan viewer, logging, manual edits, and adjustment tests still pass.
 
 ## Phase 8: Add More Sports
 

@@ -1,6 +1,7 @@
 const http = require("http");
 const fs = require("fs");
 const { generateWeekFromPrompt } = require("./generate-plan");
+const { createErrorController } = require("./error-control");
 
 const PORT = parseInt(process.env.PORT ?? "8787", 10);
 const LATENCY_MS = parseInt(process.env.AI_SIMULATOR_LATENCY_MS ?? "0", 10);
@@ -8,6 +9,7 @@ const ERROR_MODE = process.env.AI_SIMULATOR_ERROR_MODE ?? "none";
 const SEED = process.env.AI_SIMULATOR_SEED ?? "demo-seed";
 const SCENARIO = process.env.AI_SIMULATOR_SCENARIO ?? "baseline";
 const VALID_SCENARIOS = new Set(["baseline", "hangboard_bouldering", "sport_endurance", "deload_preview"]);
+const ERROR_CONTROLLER = createErrorController(process.env);
 
 function logLine(message) {
   const line = `${message}\n`;
@@ -158,6 +160,8 @@ const server = http.createServer((request, response) => {
       port: PORT,
       latencyMs: LATENCY_MS,
       errorMode: ERROR_MODE,
+      errorWeek: ERROR_CONTROLLER.targetWeek,
+      errorOnce: ERROR_CONTROLLER.errorOnce,
       seed: SEED,
       scenario: SCENARIO,
       supportedScenarios: Array.from(VALID_SCENARIOS),
@@ -216,15 +220,20 @@ const server = http.createServer((request, response) => {
     );
 
     const respond = () => {
-      if (applyErrorMode(response, content)) {
+      const shouldApplyError = ERROR_CONTROLLER.shouldApply({
+        user: username,
+        weekNum: summary.weekNum,
+      });
+
+      if (shouldApplyError && applyErrorMode(response, content)) {
         logLine(
-          `[simulator] response mode=${ERROR_MODE} type=${promptType} user=${username} week=${summary.weekNum}/${summary.weeksDuration ?? "?"} scenario=${scenario} seed=${SEED}`,
+          `[simulator] response mode=${ERROR_MODE} errorWeek=${ERROR_CONTROLLER.targetWeek ?? "any"} errorOnce=${ERROR_CONTROLLER.errorOnce ? "1" : "0"} type=${promptType} user=${username} week=${summary.weekNum}/${summary.weeksDuration ?? "?"} scenario=${scenario} seed=${SEED}`,
         );
         return;
       }
 
       logLine(
-        `[simulator] generated plan week type=${promptType} user=${username} week=${summary.weekNum}/${summary.weeksDuration ?? "?"} daysPerWeek=${summary.daysPerWeek ?? "?"} discipline=${summary.discipline} grades=${summary.currentGrade}->${summary.targetGrade} scenario=${scenario} seed=${SEED} mode=${ERROR_MODE}`,
+        `[simulator] generated plan week type=${promptType} user=${username} week=${summary.weekNum}/${summary.weeksDuration ?? "?"} daysPerWeek=${summary.daysPerWeek ?? "?"} discipline=${summary.discipline} grades=${summary.currentGrade}->${summary.targetGrade} scenario=${scenario} seed=${SEED} mode=${ERROR_MODE} errorWeek=${ERROR_CONTROLLER.targetWeek ?? "none"}`,
       );
 
       sendJson(response, 200, buildChatCompletionResponse(content, "stop"));

@@ -867,6 +867,97 @@ export async function reopenPlan(formData: FormData) {
   redirect(`/plan/${plan.id}`);
 }
 
+export async function repairPlanGeneration(formData: FormData) {
+  const session = await getSession();
+  if (!session.isLoggedIn) redirect("/login");
+  await refreshSession(session);
+
+  const planId = formData.get("planId");
+  const repairNotesRaw = formData.get("repairNotes");
+
+  if (typeof planId !== "string") redirect("/dashboard");
+
+  const repairNotes =
+    typeof repairNotesRaw === "string" && repairNotesRaw.trim()
+      ? repairNotesRaw.trim().slice(0, 2000)
+      : "Continue from the failed week using the prior generated weeks as context.";
+
+  const plan = await findOwnedPlanById(planId, session.userId);
+  if (!plan?.currentVersion) redirect("/dashboard");
+
+  const job = await prisma.planGenerationJob.findFirst({
+    where: {
+      planId: plan.id,
+      userId: session.userId,
+      status: "failed",
+    },
+    orderBy: { updatedAt: "desc" },
+  });
+
+  if (!job) redirect(`/plan/${plan.id}`);
+
+  const snapshot = parsePlanSnapshot(plan.currentVersion.planSnapshot);
+  const generatedWeeks = countGeneratedWeeks(snapshot);
+
+  if (generatedWeeks >= job.totalWeeks) {
+    await prisma.$transaction([
+      prisma.planGenerationJob.update({
+        where: { id: job.id },
+        data: {
+          status: "ready",
+          lastError: null,
+          lockedAt: null,
+          repairNotes: null,
+        },
+      }),
+      prisma.plan.update({
+        where: { id: plan.id },
+        data: {
+          generationStatus: "ready",
+          generationError: null,
+          generatedWeeks,
+          updatedAt: new Date(),
+        },
+      }),
+    ]);
+
+    redirect(`/plan/${plan.id}`);
+  }
+
+  const resumeWeek = Math.min(
+    job.totalWeeks,
+    Math.max(1, job.nextWeekNum, generatedWeeks + 1),
+  );
+
+  await prisma.$transaction([
+    prisma.planGenerationJob.update({
+      where: { id: job.id },
+      data: {
+        status: "pending",
+        nextWeekNum: resumeWeek,
+        lastError: null,
+        lockedAt: null,
+        repairNotes,
+      },
+    }),
+    prisma.plan.update({
+      where: { id: plan.id },
+      data: {
+        generationStatus: "generating",
+        generationError: null,
+        generatedWeeks,
+        updatedAt: new Date(),
+      },
+    }),
+  ]);
+
+  console.log(
+    `[web] repaired plan generation plan=${plan.id} job=${job.id} resumeWeek=${resumeWeek}/${job.totalWeeks}`,
+  );
+
+  redirect(`/plan/${plan.id}`);
+}
+
 export async function logExercise(formData: FormData) {
   const session = await getSession();
   if (!session.isLoggedIn) return { error: "Not authenticated" };

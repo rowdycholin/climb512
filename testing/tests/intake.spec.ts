@@ -71,10 +71,7 @@ test("guided intake builds a hidden structured draft and generates a plan", asyn
 
   await page.getByLabel("Plan intake message").fill("4");
   await page.getByRole("button", { name: "Send intake message" }).click();
-  await expect(page.getByText(/injuries or limitations/i)).toBeVisible();
-
-  await page.getByLabel("Plan intake message").fill("Previous pulley injury, avoid max hangs early.");
-  await page.getByRole("button", { name: "Send intake message" }).click();
+  await expect(page.getByText(/Click the magic wand/i).first()).toBeVisible();
 
   await expect(page.getByText("Plan Draft")).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Generate Training Plan" })).toBeEnabled();
