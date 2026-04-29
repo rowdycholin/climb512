@@ -1,5 +1,6 @@
 import type { PlanInput, WeekData, DayData, SessionData, ExerciseData } from "./plan-types";
 import type { PlanRequest } from "./plan-request";
+import type { WeekSnapshot } from "./plan-snapshot";
 
 const MODEL = process.env.ANTHROPIC_MODEL ?? "anthropic/claude-haiku-4-5";
 const MAX_TOKENS = parseInt(process.env.ANTHROPIC_MAX_TOKENS ?? "5000", 10);
@@ -225,6 +226,99 @@ interface ApiResult {
   finishReason: string;
 }
 
+export interface PreviousWeekSummary {
+  weekNum: number;
+  theme: string;
+  trainingDays: number;
+  restDays: number;
+  totalSessions: number;
+  totalExercises: number;
+  focusAreas: string[];
+  keyExercises: string[];
+}
+
+export interface GenerateNextWeekContext {
+  request: PlanRequest;
+  athleteAge: number;
+  weekNum: number;
+  totalWeeks?: number;
+  previousWeeks: Array<WeekData | WeekSnapshot>;
+  repairFeedback?: string | null;
+  username?: string;
+}
+
+function uniqueShort(values: Array<string | null | undefined>, maxItems: number) {
+  return Array.from(new Set(values.map((value) => value?.trim()).filter(Boolean) as string[])).slice(0, maxItems);
+}
+
+export function summarizeGeneratedWeeks(weeks: Array<WeekData | WeekSnapshot>): PreviousWeekSummary[] {
+  return weeks
+    .slice()
+    .sort((a, b) => a.weekNum - b.weekNum)
+    .map((week) => {
+      const trainingDays = week.days.filter((day) => !day.isRest).length;
+      const restDays = week.days.filter((day) => day.isRest).length;
+      const sessions = week.days.reduce<Array<{ exercises: Array<{ name: string }> }>>(
+        (acc, day) => [...acc, ...day.sessions],
+        [],
+      );
+      const exercises = sessions.reduce<Array<{ name: string }>>(
+        (acc, session) => [...acc, ...session.exercises],
+        [],
+      );
+
+      return {
+        weekNum: week.weekNum,
+        theme: week.theme,
+        trainingDays,
+        restDays,
+        totalSessions: sessions.length,
+        totalExercises: exercises.length,
+        focusAreas: uniqueShort(week.days.map((day) => day.focus), 8),
+        keyExercises: uniqueShort(exercises.map((exercise) => exercise.name), 10),
+      };
+    });
+}
+
+export function validateGeneratedWeek(week: WeekData, expectedWeekNum: number): WeekData {
+  const errors: string[] = [];
+
+  if (week.weekNum !== expectedWeekNum) errors.push(`weekNum must be ${expectedWeekNum}`);
+  if (!week.theme.trim()) errors.push("theme is required");
+  if (week.days.length !== 7) errors.push("exactly 7 days are required");
+
+  for (let index = 0; index < 7; index++) {
+    const day = week.days[index];
+    const expectedDayNum = index + 1;
+    if (!day) {
+      errors.push(`day ${expectedDayNum} is missing`);
+      continue;
+    }
+    if (day.dayNum !== expectedDayNum) errors.push(`day ${expectedDayNum} has invalid dayNum`);
+    if (day.dayName !== DAY_NAMES[index]) errors.push(`day ${expectedDayNum} must be ${DAY_NAMES[index]}`);
+    if (!day.focus.trim()) errors.push(`day ${expectedDayNum} focus is required`);
+    if (day.isRest && day.sessions.length > 0) errors.push(`day ${expectedDayNum} rest day must not have sessions`);
+    if (!day.isRest && day.sessions.length !== 1) errors.push(`day ${expectedDayNum} training day must have one session`);
+
+    for (const session of day.sessions) {
+      if (!session.name.trim()) errors.push(`day ${expectedDayNum} session name is required`);
+      if (!Number.isFinite(session.duration) || session.duration <= 0) errors.push(`day ${expectedDayNum} session duration must be positive`);
+      if (session.exercises.length < 1) errors.push(`day ${expectedDayNum} session needs exercises`);
+      if (session.exercises.length > 5) errors.push(`day ${expectedDayNum} session has too many exercises`);
+
+      for (const exercise of session.exercises) {
+        if (!exercise.name.trim()) errors.push(`day ${expectedDayNum} exercise name is required`);
+      }
+    }
+  }
+
+  if (errors.length > 0) {
+    throw new Error(`Invalid generated week ${expectedWeekNum}: ${errors.join("; ")}`);
+  }
+
+  return week;
+}
+
 function buildPlanRequestWeekPrompt(request: PlanRequest, athleteAge: number, weekNum: number): string {
   const equipmentList = request.equipment.length > 0
     ? request.equipment.join(", ")
@@ -277,6 +371,92 @@ RULES:
 - Training days: exactly ONE session, 3-4 exercises max
 - Choose exercises appropriate to the sport, goal, available equipment, and constraints
 - Respect injuries, limitations, and avoid-exercise requests
+- notes: REQUIRED, max 10 words
+- sets/reps/duration/rest: include only what applies, omit the rest
+- All string values must be SHORT
+- Return ONLY compact minified JSON, no markdown, no explanation`;
+}
+
+export function buildNextWeekPrompt(params: {
+  request: PlanRequest;
+  athleteAge: number;
+  weekNum: number;
+  totalWeeks?: number;
+  previousWeekSummaries: PreviousWeekSummary[];
+  repairFeedback?: string | null;
+}) {
+  const { request, athleteAge, weekNum } = params;
+  const totalWeeks = params.totalWeeks ?? request.blockLengthWeeks;
+  const previousWeekSummaries = params.previousWeekSummaries.slice(-6);
+  const previousWeekContext = previousWeekSummaries.length
+    ? JSON.stringify(previousWeekSummaries)
+    : "[]";
+  const equipmentList = request.equipment.length > 0
+    ? request.equipment.join(", ")
+    : "no special equipment listed";
+  const trainingFocus = request.trainingFocus.length > 0 ? request.trainingFocus.join(", ") : "general progression";
+  const disciplineList = request.disciplines.length > 0 ? request.disciplines.join(", ") : request.sport;
+
+  const phaseNote = (() => {
+    const progress = weekNum / totalWeeks;
+    if (weekNum % 4 === 0) return "This is a deload or consolidation week unless the prior weeks were already very light.";
+    if (progress < 0.3) return "Foundation phase: build repeatable skill, base capacity, and movement quality.";
+    if (progress < 0.6) return "Build phase: progress workload from prior weeks without a sudden spike.";
+    if (progress < 0.85) return "Specific phase: make sessions more goal-specific while preserving recovery.";
+    return request.goalType === "event"
+      ? "Peak phase: sharpen performance, reduce fatigue, and keep the athlete fresh."
+      : "Consolidation phase: sustain progress and avoid aggressive peaking.";
+  })();
+
+  return `You are an experienced ${request.sport} training coach who has created hundreds of safe, progressive plans for athletes in this sport. Generate exactly ONE next week of the training plan as JSON.
+
+PLAN_REQUEST_JSON:
+${JSON.stringify(request)}
+
+ATHLETE_CONTEXT:
+- Age: ${athleteAge}
+- Sport: ${request.sport}
+- Disciplines: ${disciplineList}
+- Goal type: ${request.goalType}
+- Goal: ${request.goalDescription}
+- Target date: ${request.targetDate ?? "none"}
+- Current level: ${request.currentLevel ?? "not specified"}
+- Target level: ${request.targetLevel ?? "not specified"}
+- Training focus: ${trainingFocus}
+- Equipment: ${equipmentList}
+- Injuries: ${request.constraints.injuries.length ? request.constraints.injuries.join(", ") : "none listed"}
+- Limitations: ${request.constraints.limitations.length ? request.constraints.limitations.join(", ") : "none listed"}
+- Avoid exercises: ${request.constraints.avoidExercises.length ? request.constraints.avoidExercises.join(", ") : "none listed"}
+- Strength training: ${request.strengthTraining.include ? "include" : "do not emphasize"}${request.strengthTraining.focusAreas.length ? ` (${request.strengthTraining.focusAreas.join(", ")})` : ""}
+- Plan: ${totalWeeks} weeks total, ${request.daysPerWeek} training days/week
+
+WEEK_TO_GENERATE:
+- Week ${weekNum} of ${totalWeeks}
+- ${phaseNote}
+
+PREVIOUS_WEEK_SUMMARIES_JSON:
+${previousWeekContext}
+
+PROGRESSION RULES:
+- Use previous-week summaries to progress logically from the work already scheduled.
+- Do not repeat the exact same week unless repair feedback explicitly asks for a reset.
+- Progress volume, intensity, exercise difficulty, or specificity gradually.
+- Keep recovery load coherent with prior training days, rest days, and total exercises.
+- If prior weeks were heavy, choose a more conservative week.
+- If this is Week 1, create a measured baseline week.
+${params.repairFeedback ? `- Repair feedback from the athlete/coach: ${params.repairFeedback}` : "- No repair feedback provided."}
+
+${PLAN_QUALITY_RULES}
+
+OUTPUT: Return ONLY a single JSON object (not an array) in this exact shape:
+{"weekNum":${weekNum},"theme":"<short theme>","days":[{"dayNum":1,"dayName":"Monday","focus":"<focus>","isRest":false,"sessions":[{"name":"<name>","description":"<one sentence>","duration":45,"exercises":[{"name":"<name>","sets":"3","reps":"5","duration":"10s","rest":"3 min","notes":"<coaching cue>"}]}]},{"dayNum":2,"dayName":"Tuesday","focus":"Rest","isRest":true,"sessions":[]},...7 days total]}
+
+RULES:
+- Exactly 7 days (Monday-Sunday), dayNum 1-7
+- Rest days: isRest=true, sessions=[], focus="Rest"
+- Training days: exactly ONE session, 3-4 exercises max
+- Choose exercises appropriate to the sport, goal, available equipment, and constraints
+- Respect injuries, limitations, and avoid-exercise requests as hard constraints
 - notes: REQUIRED, max 10 words
 - sets/reps/duration/rest: include only what applies, omit the rest
 - All string values must be SHORT
@@ -371,7 +551,7 @@ async function generateWeekFromPrompt(prompt: string, weekNum: number, username?
     }
 
     if (parseOk) {
-      return normalizeWeek(raw, weekNum);
+      return validateGeneratedWeek(normalizeWeek(raw, weekNum), weekNum);
     }
 
     errors.push(`attempt ${attempt}: unparseable (finish_reason=${apiResult.finishReason}). Raw head: ${cleaned.slice(0, 200)}`);
@@ -387,6 +567,21 @@ async function generateWeek(input: PlanInput, weekNum: number, username?: string
 
 async function generateWeekFromPlanRequest(request: PlanRequest, athleteAge: number, weekNum: number, username?: string): Promise<WeekData> {
   return generateWeekFromPrompt(buildPlanRequestWeekPrompt(request, athleteAge, weekNum), weekNum, username);
+}
+
+export async function generateNextWeekFromPlanContext(params: GenerateNextWeekContext): Promise<WeekData> {
+  const totalWeeks = params.totalWeeks ?? params.request.blockLengthWeeks;
+  const previousWeekSummaries = summarizeGeneratedWeeks(params.previousWeeks);
+  const prompt = buildNextWeekPrompt({
+    request: params.request,
+    athleteAge: params.athleteAge,
+    weekNum: params.weekNum,
+    totalWeeks,
+    previousWeekSummaries,
+    repairFeedback: params.repairFeedback,
+  });
+
+  return generateWeekFromPrompt(prompt, params.weekNum, params.username);
 }
 
 export async function generatePlanWithAI(input: PlanInput, username?: string): Promise<WeekData[]> {

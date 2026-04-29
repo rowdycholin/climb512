@@ -45,7 +45,10 @@ export interface IntakeResponse {
   assistantMessage: string;
 }
 
-const DEFAULT_START_DATE = () => new Date().toISOString().slice(0, 10);
+const DEFAULT_START_DATE = (clientToday?: string) =>
+  clientToday && /^\d{4}-\d{2}-\d{2}$/.test(clientToday)
+    ? clientToday
+    : new Date().toISOString().slice(0, 10);
 const CLIMBING_DISCIPLINES = ["bouldering", "sport", "trad", "ice", "alpine"] as const;
 const STRENGTH_TERMS = ["strength", "weights", "weight training", "lifting", "stronger", "gym"];
 
@@ -171,7 +174,7 @@ function applyGenericExtraction(draft: PartialIntakeDraft, text: string) {
   }
 }
 
-function applyStepAnswer(draft: PartialIntakeDraft, step: IntakeStep, text: string) {
+function applyStepAnswer(draft: PartialIntakeDraft, step: IntakeStep, text: string, clientToday?: string) {
   if (step === "sport") {
     draft.sport = normalizeSport(text);
     if (draft.sport === "climbing" && !draft.disciplines?.length) draft.disciplines = ["bouldering"];
@@ -220,7 +223,7 @@ function applyStepAnswer(draft: PartialIntakeDraft, step: IntakeStep, text: stri
 
   if (step === "start") {
     const date = parseUserDate(text);
-    draft.startDate = date ?? (/\b(?:asap|as soon as possible|now|today)\b/i.test(text) ? DEFAULT_START_DATE() : undefined);
+    draft.startDate = date ?? (/\b(?:asap|as soon as possible|now|today)\b/i.test(text) ? DEFAULT_START_DATE(clientToday) : undefined);
     return;
   }
 
@@ -262,13 +265,14 @@ export function createInitialIntakeDraft(): PartialIntakeDraft {
 export function continueIntakeDraft(params: {
   draft: PartialIntakeDraft;
   userMessage: string;
+  clientToday?: string;
 }): IntakeResponse {
   const text = params.userMessage.trim();
   const next = mergeBaseDraft({ ...createInitialIntakeDraft(), ...params.draft });
   const currentStep = next.intakeStep ?? nextStep(next);
 
   applyGenericExtraction(next, text);
-  applyStepAnswer(next, currentStep, text);
+  applyStepAnswer(next, currentStep, text, params.clientToday);
 
   next.intakeTemplateId = selectIntakeTemplate(next.sport).id;
   next.intakeStep = nextStep(next);

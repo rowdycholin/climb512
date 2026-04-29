@@ -72,7 +72,7 @@ Current editing behavior:
 
 ## Important Operational Notes
 
-In Docker, the app uses the AI settings from `app/.env`; point `ANTHROPIC_BASE_URL` at the simulator for no-cost local demos, or at the live provider for real AI testing.
+In Docker, the app and plan worker currently override AI settings to use the local simulator, so local demos and tests do not call the live provider. Remove or change the Compose AI overrides when deliberately testing against the live provider.
 
 For local development, `docker-compose.dev.yml` bind-mounts `./app` into the web container and runs `next dev`.
 

@@ -6,7 +6,7 @@ The simulator is now implemented as a separate top-level service in:
 
 - `simulator/`
 
-It currently supports **plan generation only**.
+It currently supports **plan generation only**, including the sequential worker's next-week prompts.
 
 Out of scope for now:
 

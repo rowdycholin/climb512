@@ -65,6 +65,30 @@ services:
     environment:
       DATABASE_URL: postgresql://climber:climber512@postgres:5432/climbapp
       SESSION_SECRET: super-secret-session-key-change-in-production-32chars!!
+      ANTHROPIC_BASE_URL: http://simulator:8787
+      ANTHROPIC_API_KEY: simulator-local-key
+      AI_INTAKE_MODE: local
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      simulator:
+        condition: service_started
+
+  plan-worker:
+    build:
+      context: ./app
+      target: worker
+    restart: unless-stopped
+    env_file:
+      - ./app/.env
+    environment:
+      DATABASE_URL: postgresql://climber:climber512@postgres:5432/climbapp
+      ANTHROPIC_BASE_URL: http://simulator:8787
+      ANTHROPIC_API_KEY: simulator-local-key
+      AI_INTAKE_MODE: local
+      PLAN_WORKER_POLL_INTERVAL_MS: ${PLAN_WORKER_POLL_INTERVAL_MS:-5000}
+      PLAN_WORKER_LOCK_TIMEOUT_MS: ${PLAN_WORKER_LOCK_TIMEOUT_MS:-600000}
+      PLAN_WORKER_STEP_DELAY_MS: ${PLAN_WORKER_STEP_DELAY_MS:-1500}
     depends_on:
       migrate:
         condition: service_completed_successfully

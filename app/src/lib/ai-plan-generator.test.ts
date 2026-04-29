@@ -1,0 +1,147 @@
+import { describe, expect, test } from "vitest";
+import {
+  buildNextWeekPrompt,
+  summarizeGeneratedWeeks,
+  validateGeneratedWeek,
+  type PreviousWeekSummary,
+} from "./ai-plan-generator";
+import type { PlanRequest } from "./plan-request";
+import type { WeekData } from "./plan-types";
+
+const request: PlanRequest = {
+  sport: "climbing",
+  disciplines: ["bouldering"],
+  goalType: "event",
+  goalDescription: "Prepare for a local bouldering competition",
+  targetDate: "2026-07-01",
+  blockLengthWeeks: 8,
+  daysPerWeek: 4,
+  currentLevel: "V4",
+  targetLevel: "V6",
+  startDate: "2026-05-04",
+  equipment: ["hangboard", "weights"],
+  trainingFocus: ["power", "finger strength"],
+  constraints: {
+    injuries: ["mild elbow irritation"],
+    limitations: [],
+    avoidExercises: ["campus board"],
+  },
+  strengthTraining: {
+    include: true,
+    experienceLevel: "intermediate",
+    focusAreas: ["pulling strength", "antagonists"],
+  },
+};
+
+const validWeek: WeekData = {
+  weekNum: 1,
+  theme: "Baseline power",
+  days: [
+    {
+      dayNum: 1,
+      dayName: "Monday",
+      focus: "Limit bouldering",
+      isRest: false,
+      sessions: [
+        {
+          name: "Limit boulders",
+          description: "Controlled hard attempts.",
+          duration: 60,
+          exercises: [
+            { name: "Limit problems", sets: "5", reps: "2", rest: "3 min", notes: "Stop before elbow pain" },
+          ],
+        },
+      ],
+    },
+    { dayNum: 2, dayName: "Tuesday", focus: "Rest", isRest: true, sessions: [] },
+    {
+      dayNum: 3,
+      dayName: "Wednesday",
+      focus: "Strength",
+      isRest: false,
+      sessions: [
+        {
+          name: "Pull strength",
+          description: "Moderate strength support.",
+          duration: 45,
+          exercises: [
+            { name: "Weighted pull-ups", sets: "4", reps: "4", rest: "2 min", notes: "Smooth reps only" },
+          ],
+        },
+      ],
+    },
+    { dayNum: 4, dayName: "Thursday", focus: "Rest", isRest: true, sessions: [] },
+    {
+      dayNum: 5,
+      dayName: "Friday",
+      focus: "Technique",
+      isRest: false,
+      sessions: [
+        {
+          name: "Movement drills",
+          description: "Easy volume with skill focus.",
+          duration: 50,
+          exercises: [
+            { name: "Silent feet", duration: "15 min", notes: "Move precisely" },
+          ],
+        },
+      ],
+    },
+    { dayNum: 6, dayName: "Saturday", focus: "Rest", isRest: true, sessions: [] },
+    { dayNum: 7, dayName: "Sunday", focus: "Rest", isRest: true, sessions: [] },
+  ],
+};
+
+describe("ai plan generator sequential core", () => {
+  test("summarizes prior weeks for sequential prompt context", () => {
+    const summaries = summarizeGeneratedWeeks([validWeek]);
+
+    expect(summaries).toEqual<PreviousWeekSummary[]>([
+      {
+        weekNum: 1,
+        theme: "Baseline power",
+        trainingDays: 3,
+        restDays: 4,
+        totalSessions: 3,
+        totalExercises: 3,
+        focusAreas: ["Limit bouldering", "Rest", "Strength", "Technique"],
+        keyExercises: ["Limit problems", "Weighted pull-ups", "Silent feet"],
+      },
+    ]);
+  });
+
+  test("builds a next-week prompt with previous summaries and repair feedback", () => {
+    const previousWeekSummaries = summarizeGeneratedWeeks([validWeek]);
+    const prompt = buildNextWeekPrompt({
+      request,
+      athleteAge: 34,
+      weekNum: 2,
+      totalWeeks: 8,
+      previousWeekSummaries,
+      repairFeedback: "Reduce elbow stress and avoid extra pulling volume.",
+    });
+
+    expect(prompt).toContain("Week 2 of 8");
+    expect(prompt).toContain("PREVIOUS_WEEK_SUMMARIES_JSON");
+    expect(prompt).toContain("\"weekNum\":1");
+    expect(prompt).toContain("Progress volume, intensity, exercise difficulty, or specificity gradually.");
+    expect(prompt).toContain("Reduce elbow stress");
+    expect(prompt).toContain("mild elbow irritation");
+    expect(prompt).toContain("campus board");
+  });
+
+  test("validates a well-formed generated week", () => {
+    expect(validateGeneratedWeek(validWeek, 1)).toBe(validWeek);
+  });
+
+  test("rejects malformed generated weeks before saving", () => {
+    const invalidWeek: WeekData = {
+      ...validWeek,
+      weekNum: 2,
+      days: validWeek.days.slice(0, 6),
+    };
+
+    expect(() => validateGeneratedWeek(invalidWeek, 1)).toThrow(/weekNum must be 1/);
+    expect(() => validateGeneratedWeek(invalidWeek, 1)).toThrow(/exactly 7 days/);
+  });
+});

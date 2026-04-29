@@ -16,6 +16,25 @@ ATHLETE_CONTEXT:
 WEEK ${weekNum} of ${request.blockLengthWeeks}:`;
 }
 
+function nextWeekPromptFor(request, weekNum = 2) {
+  return `You are an experienced ${request.sport} training coach. Generate exactly ONE next week of the training plan as JSON.
+
+PLAN_REQUEST_JSON:
+${JSON.stringify(request)}
+
+ATHLETE_CONTEXT:
+- Age: 35
+- Sport: ${request.sport}
+- Plan: ${request.blockLengthWeeks} weeks total, ${request.daysPerWeek} training days/week
+
+WEEK_TO_GENERATE:
+- Week ${weekNum} of ${request.blockLengthWeeks}
+
+PREVIOUS_WEEK_SUMMARIES_JSON:
+[{"weekNum":1,"theme":"Ongoing Foundation","trainingDays":3,"restDays":4,"totalSessions":3,"totalExercises":9}]
+`;
+}
+
 function baseRequest(overrides = {}) {
   return {
     sport: "climbing",
@@ -50,6 +69,13 @@ test("event and ongoing goals use different phase themes", () => {
   assert.match(ongoing.theme, /Ongoing/);
   assert.match(event.theme, /Event/);
   assert.notEqual(ongoing.theme, event.theme);
+});
+
+test("worker next-week prompts generate the requested week", () => {
+  const week = generateWeekFromPrompt(nextWeekPromptFor(baseRequest(), 2), { seed: "worker" });
+
+  assert.equal(week.weekNum, 2);
+  assert.equal(week.days.length, 7);
 });
 
 test("running requests generate running-specific sessions", () => {
@@ -110,4 +136,3 @@ test("injury constraints replace avoided exercises", () => {
   assert(!names.some((name) => /hangboard|crimp/i.test(name)));
   assert(names.some((name) => /open-hand|mobility|technique/i.test(name)));
 });
-

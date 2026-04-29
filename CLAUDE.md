@@ -57,6 +57,8 @@ climb512/
       intake.ts
       ai-plan-generator.ts
       ai-plan-adjuster.ts
+      worker/
+        plan-generation-worker.ts
     prisma/
       schema.prisma
       prisma.config.ts
@@ -85,7 +87,7 @@ climb512/
 - guided intake currently has templates for climbing plus strength, running, strength training, and a generic fallback
 - guided intake does not show the old Plan Draft/manual setup panel; it keeps the structured draft hidden and chat-driven
 - `PlanRequest` is still adapted to legacy `PlanInput` for compatibility snapshots, but guided-intake generation uses the generic request directly
-- guided-intake plan generation now sends structured `PlanRequest` JSON to the generator and stores it in `PlanVersion.profileSnapshot.planRequest`
+- guided-intake plan creation now stores structured `PlanRequest` JSON, creates a `PlanGenerationJob`, and redirects while the worker generates weeks
 - onboarding age was removed; plan generation uses the registered user age
 - grade dropdowns change by discipline:
   - bouldering: V-scale
@@ -105,6 +107,7 @@ climb512/
 - the detailed editor includes rest days, and adding an exercise to a rest day turns it into a training day
 - logged weeks protect existing work but allow additive custom exercises that can be tracked normally
 - AI plan generation is live
+- a `plan-worker` Docker service can generate plan weeks sequentially from `PlanGenerationJob`
 - day-level future plan adjustment is available from the plan page and creates a new `PlanVersion` from the next unlogged plan day forward
 - Docker defaults plan generation to the local `simulator` service
 
@@ -157,6 +160,7 @@ npm test
 ```bash
 docker compose up --build -d
 docker compose logs web --tail=20
+docker compose logs plan-worker --tail=20
 docker compose logs simulator --tail=20
 docker compose down
 docker compose down -v
@@ -187,7 +191,8 @@ npx playwright test tests/plan-viewer-progress.spec.ts
 - guided intake template state and parsing lives in `app/src/lib/intake.ts`
 - intake template definitions live in `app/src/lib/intake-templates.ts`
 - onboarding and guided-intake generation requests go through `app/src/lib/ai-plan-generator.ts`
-- manual onboarding still uses legacy `PlanInput`; guided intake uses the `PlanRequest` generation path
+- manual onboarding still uses legacy `PlanInput`; guided intake uses the `PlanRequest` worker generation path
+- sequential plan-week worker logic lives in `app/src/lib/plan-generation-worker.ts`
 - simulator plan generation uses `PlanRequest` fields for sport selection, event vs ongoing themes, strength support, and injury/avoid-exercise substitutions
 - the simulator implements a local OpenAI-compatible backend for plan generation only
 - `docker-compose.dev.yml` overlays the base compose file for bind-mounted development

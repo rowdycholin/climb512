@@ -497,35 +497,35 @@ Recommended implementation batches:
 
 **Batch 1: Foundation**
 
-- schema fields on `Plan`
-- `PlanGenerationJob` table
-- helper functions for job state and progress
-- partial snapshot / plan viewer support
-- progress UI and placeholders
-- no change to the real generation flow yet
+- [x] schema fields on `Plan`
+- [x] `PlanGenerationJob` table
+- [x] helper functions for job state and progress
+- [x] partial snapshot / plan viewer support
+- [x] progress UI and placeholders
+- [x] no change to the real generation flow yet
 
 **Batch 2: Sequential Generation Core**
 
-- `generateNextWeekFromPlanContext`
-- previous-week summaries
-- next-week prompt changes
-- validation for one generated week
-- unit tests for prompt construction and week validation
+- [x] `generateNextWeekFromPlanContext`
+- [x] previous-week summaries
+- [x] next-week prompt changes
+- [x] validation for one generated week
+- [x] unit tests for prompt construction and week validation
 
 **Batch 3: Worker**
 
-- worker service
-- Docker Compose worker
-- job polling and locking
-- one-week-at-a-time updates
-- job completion and failure handling
+- [x] worker service
+- [x] Docker Compose worker
+- [x] job polling and locking
+- [x] one-week-at-a-time updates
+- [x] job completion and failure handling
 
 **Batch 4: Product Integration**
 
-- guided intake creates plan/job instead of blocking on all weeks
-- plan page polls while generating
-- user sees Week 1 / partial plan while remaining weeks build
-- manual onboarding remains on the existing path until the worker flow is stable
+- [x] guided intake creates plan/job instead of blocking on all weeks
+- [x] plan page polls while generating
+- [x] user sees Week 1 / partial plan while remaining weeks build
+- [x] manual onboarding remains on the existing path until the worker flow is stable
 
 **Batch 5: Failure Repair Chat**
 
@@ -536,10 +536,10 @@ Recommended implementation batches:
 
 Recommended schema additions:
 
-- [ ] Add `Plan.generationStatus`.
-- [ ] Add `Plan.generationError`.
-- [ ] Add `Plan.generatedWeeks`.
-- [ ] Add `PlanGenerationJob` table with:
+- [x] Add `Plan.generationStatus`.
+- [x] Add `Plan.generationError`.
+- [x] Add `Plan.generatedWeeks`.
+- [x] Add `PlanGenerationJob` table with:
   - `planId`
   - `userId`
   - `status`
@@ -551,46 +551,46 @@ Recommended schema additions:
 
 Recommended app work:
 
-- [ ] Change guided-intake plan creation to create the plan/job quickly instead of blocking on all weeks.
-- [ ] Save a partial `PlanVersion.planSnapshot` as each week is generated.
-- [ ] Update plan viewer to support partial snapshots.
-- [ ] Show generated weeks immediately.
-- [ ] Show placeholders for missing future weeks.
-- [ ] Show progress such as `Generating week X of Y`.
-- [ ] Poll or refresh while `generationStatus="generating"`.
-- [ ] Show generated weeks even when later-week generation fails.
+- [x] Change guided-intake plan creation to create the plan/job quickly instead of blocking on all weeks.
+- [x] Save a partial `PlanVersion.planSnapshot` as each week is generated.
+- [x] Update plan viewer to support partial snapshots.
+- [x] Show generated weeks immediately.
+- [x] Show placeholders for missing future weeks.
+- [x] Show progress such as `Generating week X of Y`.
+- [x] Poll or refresh while `generationStatus="generating"`.
+- [x] Show generated weeks even when later-week generation fails.
 - [ ] Show failed week, last error, and a clear repair entry point when generation fails.
 - [ ] Add an AI repair chat for failed generation jobs.
 - [ ] Let repair chat collect user guidance such as simplify, reduce volume, avoid an exercise, change schedule, or continue from prior weeks.
 - [ ] Resume generation from the failed week forward instead of restarting the entire plan.
-- [ ] Keep manual onboarding on the current generation path until the worker flow is stable, or explicitly migrate it as a separate step.
+- [x] Keep manual onboarding on the current generation path until the worker flow is stable, or explicitly migrate it as a separate step.
 
 Recommended worker work:
 
-- [ ] Add a worker service to Docker Compose.
-- [ ] Worker polls pending `PlanGenerationJob` rows.
-- [ ] Worker locks one job at a time.
-- [ ] Worker generates exactly one next week per job iteration.
-- [ ] Worker passes prior generated week summaries into the next-week prompt.
-- [ ] Worker updates the partial snapshot and progress after every generated week.
-- [ ] Worker marks job and plan ready when all weeks are generated.
-- [ ] Worker marks job and plan failed with an error message when generation cannot recover automatically.
-- [ ] Worker can resume a failed job from `nextWeekNum` after repair feedback is added.
+- [x] Add a worker service to Docker Compose.
+- [x] Worker polls pending `PlanGenerationJob` rows.
+- [x] Worker locks one job at a time.
+- [x] Worker generates exactly one next week per job iteration.
+- [x] Worker passes prior generated week summaries into the next-week prompt.
+- [x] Worker updates the partial snapshot and progress after every generated week.
+- [x] Worker marks job and plan ready when all weeks are generated.
+- [x] Worker marks job and plan failed with an error message when generation cannot recover automatically.
+- [x] Worker can resume a failed job from `nextWeekNum` after repair feedback is added.
 
 Recommended generator work:
 
-- [ ] Add `generateNextWeekFromPlanContext`.
-- [ ] Pass full `PlanRequest`, including future `activityContext` / `customFields`.
-- [ ] Pass previously generated week summaries.
-- [ ] Pass current week number and total weeks.
-- [ ] Ask the model to progress from previous volume, intensity, exercises, and recovery load.
-- [ ] Include repair feedback when regenerating after a failed week.
-- [ ] Validate each generated week before saving it.
+- [x] Add `generateNextWeekFromPlanContext`.
+- [x] Pass full `PlanRequest`, including future `activityContext` / `customFields`.
+- [x] Pass previously generated week summaries.
+- [x] Pass current week number and total weeks.
+- [x] Ask the model to progress from previous volume, intensity, exercises, and recovery load.
+- [x] Include repair feedback when regenerating after a failed week.
+- [x] Validate each generated week before saving it.
 
 Validation before moving on:
 
-- [ ] Unit tests for generation job state transitions.
-- [ ] Unit tests for next-week prompt context including previous week summary.
+- [x] Unit tests for generation job state transitions.
+- [x] Unit tests for next-week prompt context including previous week summary.
 - [ ] Worker integration test for generating a multi-week plan to ready status.
 - [ ] Playwright test that Week 1 appears before the full plan is complete.
 - [ ] Playwright test that placeholders/progress are shown for missing weeks.

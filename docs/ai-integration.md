@@ -7,6 +7,8 @@ The stable AI integration today is **plan generation**. The app also has a guide
 Files:
 
 - `app/src/lib/ai-plan-generator.ts`
+- `app/src/lib/plan-generation-worker.ts`
+- `app/src/worker/plan-generation-worker.ts`
 - `app/src/lib/plan-request.ts`
 - `app/src/lib/intake.ts`
 - `app/src/lib/plan-adjustment-request.ts`
@@ -31,7 +33,9 @@ Manual onboarding still uses the legacy generator input:
 - equipment
 - discipline
 
-Guided intake generation sends the structured `PlanRequest` directly to the generator and stores the original request in `PlanVersion.profileSnapshot.planRequest`.
+Guided intake creates a plan shell, stores the original `PlanRequest` in `PlanVersion.profileSnapshot.planRequest`, and creates a `PlanGenerationJob`. The `plan-worker` service then generates one week at a time and saves a new partial `PlanVersion` after each week.
+
+Manual onboarding still generates the full plan in the request/response path until the worker flow is stable.
 
 `Plan.startDate` is saved on the `Plan` record for calendar positioning. It is included in the structured request for guided intake but the durable calendar anchor remains the `Plan.startDate` column.
 
@@ -44,25 +48,25 @@ The `/intake` route is the first step toward a generic chat-based plan intake. T
 - it asks flexible follow-up questions around sport/discipline, goal, timeline, equipment, strength training, start date, current level, schedule, preferences, and injuries/limitations
 - it extracts a generic `PlanRequest` from the user's answers
 - the structured draft stays hidden from the UI and is submitted once required fields are ready
-- it sends `PlanRequest` to the generator
+- it creates a `PlanGenerationJob` from the completed `PlanRequest`
 - the simulator consumes `PlanRequest` fields for sport selection, event vs ongoing goals, strength support, and injury/avoid-exercise substitutions
 
 The model still has to return the validated `PlanIntakeAiResponse` JSON contract. Invalid output falls back without mutating the draft.
 
 The intake prompt includes today's date. The server also normalizes common date answers and guards against past start dates, including natural inputs like `today`, `now`, `as soon as possible`, `10/15/26`, and `Monday May 4th`.
 
-Output:
+Worker output:
 
-- an array of generated week objects
+- one generated week object per job iteration
 - each week contains 7 days
 - each day contains sessions and exercises
 
 That raw result is converted into:
 
 - `profileSnapshot`
-- `planSnapshot`
+- partial `planSnapshot`
 
-and persisted as a new `PlanVersion`.
+and persisted as a new `PlanVersion` after each generated week.
 
 ## Plan adjustment
 

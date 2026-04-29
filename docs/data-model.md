@@ -10,9 +10,11 @@ The app uses a versioned plan model:
 User
   -> Plan
      |- startDate
+     |- generationStatus/generationError/generatedWeeks
      |- completedAt/completionReason/completionNotes
      |- currentVersionId -> PlanVersion
      |- PlanVersion (1:many)
+     |- PlanGenerationJob (1:many)
      -> WorkoutLog (1:many)
 ```
 
@@ -53,6 +55,9 @@ The long-lived container for one user plan.
 | title | TEXT? | Display label, usually `currentGrade -> targetGrade` |
 | currentVersionId | TEXT? | FK -> PlanVersion, current active revision |
 | startDate | TIMESTAMPTZ | Calendar anchor for Week 1 Day 1 |
+| generationStatus | TEXT | `ready`, `generating`, `pending`, or `failed` |
+| generationError | TEXT? | Last worker generation error |
+| generatedWeeks | INTEGER | Number of generated weeks currently available |
 | completedAt | TIMESTAMPTZ? | User-declared plan completion timestamp |
 | completionReason | TEXT? | Reason selected when marking complete |
 | completionNotes | TEXT? | Optional completion notes for future reference |
@@ -60,6 +65,26 @@ The long-lived container for one user plan.
 | updatedAt | TIMESTAMPTZ | Updated when a new version becomes current |
 
 `startDate` controls which week/day opens by default on the plan page. It can be in the past for development and testing. `completedAt` is set only when the user explicitly marks a plan complete; plans can also appear complete when the calendar passes the final plan day.
+
+The generation fields are foundation data for sequential worker-based generation. Existing all-at-once generation paths mark plans `ready` and keep `generatedWeeks` aligned to the current snapshot week count.
+
+### PlanGenerationJob
+
+Durable worker state for generating missing plan weeks one at a time.
+
+| Column | Type | Notes |
+|---|---|---|
+| id | TEXT/cuid | Primary key |
+| planId | TEXT | FK -> Plan |
+| userId | TEXT | FK -> User.id |
+| status | TEXT | `pending`, `generating`, `ready`, or `failed` |
+| totalWeeks | INTEGER | Total target weeks for the plan |
+| nextWeekNum | INTEGER | Next week the worker should generate |
+| lastError | TEXT? | Last unrecovered generation error |
+| repairNotes | TEXT? | Future repair-chat guidance |
+| lockedAt | TIMESTAMPTZ? | Worker lock timestamp |
+| createdAt | TIMESTAMPTZ | |
+| updatedAt | TIMESTAMPTZ | |
 
 ### PlanVersion
 

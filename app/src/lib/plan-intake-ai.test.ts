@@ -4,6 +4,7 @@ import { PLAN_GENERATION_SYSTEM_PROMPT, PLAN_QUALITY_RULES } from "./ai-plan-gen
 import {
   continuePlanIntakeWithAiContract,
   firstQuestionOnly,
+  INTAKE_READY_MESSAGE,
   INTAKE_VALIDATION_FALLBACK_MESSAGE,
   isPlanIntakeMessageAllowed,
   PLAN_INTAKE_SYSTEM_PROMPT,
@@ -13,7 +14,7 @@ import {
 const completeDraft = {
   sport: "climbing",
   disciplines: ["bouldering"],
-  goalType: "event",
+  goalType: "event" as const,
   goalDescription: "Send a bouldering project",
   targetDate: "2026-10-15",
   blockLengthWeeks: 8,
@@ -91,6 +92,27 @@ describe("plan intake AI contract", () => {
     expect(response.planRequestDraft.constraints?.avoidExercises).toEqual(["max hangs early"]);
   });
 
+  test("preserves empty constraints as an answered injury/limitation step", () => {
+    const response = validatePlanIntakeAiResponse({
+      status: "needs_more_info",
+      message: "What equipment do you have available?",
+      planRequestDraft: {
+        sport: "climbing",
+        constraints: {
+          injuries: [],
+          limitations: [],
+          avoidExercises: [],
+        },
+      },
+    });
+
+    expect(response.planRequestDraft.constraints).toEqual({
+      injuries: [],
+      limitations: [],
+      avoidExercises: [],
+    });
+  });
+
   test("drops invalid live-model internal intake step values", () => {
     const response = validatePlanIntakeAiResponse({
       status: "needs_more_info",
@@ -122,6 +144,32 @@ describe("plan intake AI contract", () => {
     });
 
     expect(response.planRequestDraft.startDate).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  });
+
+  test("uses the client local date for today answers", async () => {
+    const draft = {
+      ...createInitialIntakeDraft(),
+      sport: "climbing",
+      goalType: "ongoing" as const,
+      goalDescription: "Build endurance",
+      blockLengthWeeks: 8,
+      daysPerWeek: 3,
+      currentLevel: "intermediate",
+      equipment: ["gym"],
+      constraints: { injuries: [], limitations: [], avoidExercises: [] },
+      strengthTraining: { include: false, focusAreas: [] },
+      intakeStep: "start" as const,
+};
+
+    const response = await continuePlanIntakeWithAiContract({
+      draft,
+      userMessage: "today",
+      messages: [{ role: "assistant", content: "When would you like to start?" }],
+      clientToday: "2026-04-28",
+      clientTimeZone: "America/New_York",
+    });
+
+    expect(response.draft.startDate).toBe("2026-04-28");
   });
 
   test("uses the next future occurrence for month-name start dates", () => {
@@ -257,6 +305,17 @@ describe("plan intake AI contract", () => {
     expect(response.assistantMessage).not.toMatch(/trouble reading/i);
   });
 
+  test("ready intake responses point users to the magic wand button", async () => {
+    const response = await continuePlanIntakeWithAiContract({
+      draft: completeDraft,
+      userMessage: "Looks good",
+      messages: [],
+    });
+
+    expect(response.ready).toBe(true);
+    expect(response.assistantMessage).toBe(INTAKE_READY_MESSAGE);
+  });
+
   test("keeps only one assistant question for model-backed intake responses", () => {
     expect(
       firstQuestionOnly(
@@ -277,6 +336,7 @@ describe("plan intake AI contract", () => {
     expect(PLAN_INTAKE_SYSTEM_PROMPT).toContain("Run a flexible coach-led interview");
     expect(PLAN_INTAKE_SYSTEM_PROMPT).toContain("not a rigid form");
     expect(PLAN_INTAKE_SYSTEM_PROMPT).toContain("Ask exactly one concise question");
+    expect(PLAN_INTAKE_SYSTEM_PROMPT).toContain("after constraints are present");
   });
 
   test("defines narrow plan-generation prompts for live model calls", () => {

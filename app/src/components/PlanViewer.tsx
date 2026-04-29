@@ -51,6 +51,19 @@ interface Week {
   days: Day[];
 }
 
+interface GenerationProgress {
+  status: string;
+  generatedWeeks: number;
+  totalWeeks: number;
+  missingWeeks: number;
+  nextWeekNum: number | null;
+  percent: number;
+  isGenerating: boolean;
+  isFailed: boolean;
+  isReady: boolean;
+  error: string | null;
+}
+
 const FOCUS_COLORS: Record<string, string> = {
   "Finger Strength": "bg-red-100 text-red-700 border-red-200",
   Endurance: "bg-blue-100 text-blue-700 border-blue-200",
@@ -412,9 +425,35 @@ function WeekCard({ planId, week, initialDayIndex }: { planId: string; week: Wee
   );
 }
 
+function MissingWeekCard({ weekNum, generation }: { weekNum: number; generation: GenerationProgress }) {
+  return (
+    <div className="rounded-2xl border border-dashed border-slate-300 bg-white/70 p-6 text-center">
+      <div className="mx-auto mb-3 flex h-10 w-10 items-center justify-center rounded-full border border-sky-200 bg-sky-50 text-sm font-semibold text-sky-700">
+        W{weekNum}
+      </div>
+      <h3 className="text-lg font-bold text-slate-800">
+        {generation.isFailed ? "Generation paused" : "Week is still generating"}
+      </h3>
+      <p className="mx-auto mt-2 max-w-md text-sm text-slate-500">
+        {generation.isFailed
+          ? generation.error ?? "Earlier weeks remain available while this plan waits for repair."
+          : `The worker will add Week ${weekNum} when it reaches this part of the plan.`}
+      </p>
+      <div className="mx-auto mt-4 h-2 max-w-xs overflow-hidden rounded-full bg-slate-200">
+        <div className="h-full rounded-full bg-sky-500" style={{ width: `${generation.percent}%` }} />
+      </div>
+      <p className="mt-2 text-xs text-slate-500">
+        {generation.generatedWeeks}/{generation.totalWeeks} weeks ready
+      </p>
+    </div>
+  );
+}
+
 export default function PlanViewer({
   planId,
   weeks,
+  totalWeeks = weeks.length,
+  generation,
   initialWeekIndex = 0,
   initialDayIndex = 0,
   activeWeekIndex,
@@ -422,6 +461,8 @@ export default function PlanViewer({
 }: {
   planId: string;
   weeks: Week[];
+  totalWeeks?: number;
+  generation?: GenerationProgress;
   initialWeekIndex?: number;
   initialDayIndex?: number;
   activeWeekIndex?: number;
@@ -430,6 +471,20 @@ export default function PlanViewer({
   const [internalActiveWeek, setInternalActiveWeek] = useState(initialWeekIndex);
   const weekScrollRef = useRef<HTMLDivElement>(null);
   const resolvedActiveWeek = activeWeekIndex ?? internalActiveWeek;
+  const resolvedTotalWeeks = Math.max(totalWeeks, weeks.length);
+  const resolvedGeneration = generation ?? {
+    status: "ready",
+    generatedWeeks: weeks.length,
+    totalWeeks: resolvedTotalWeeks,
+    missingWeeks: Math.max(0, resolvedTotalWeeks - weeks.length),
+    nextWeekNum: weeks.length < resolvedTotalWeeks ? weeks.length + 1 : null,
+    percent: resolvedTotalWeeks ? Math.round((weeks.length / resolvedTotalWeeks) * 100) : 100,
+    isGenerating: false,
+    isFailed: false,
+    isReady: true,
+    error: null,
+  };
+  const activeWeek = weeks[resolvedActiveWeek] ?? null;
 
   function setActiveWeek(index: number) {
     setInternalActiveWeek(index);
@@ -446,25 +501,34 @@ export default function PlanViewer({
   return (
     <div>
       <div ref={weekScrollRef} className="mb-6 flex gap-2 overflow-x-auto pb-2" style={{ scrollbarWidth: "thin" }}>
-        {weeks.map((week, index) => {
-          const allExercises = week.days.flatMap((day) => day.sessions.flatMap((session) => session.exercises));
-          const done = allExercises.filter((exercise) => exercise.logs[0]?.completed).length;
-          const pct = allExercises.length ? Math.round((done / allExercises.length) * 100) : 0;
+        {Array.from({ length: resolvedTotalWeeks }, (_, index) => {
+          const week = weeks[index] ?? null;
+          const allExercises = week ? week.days.flatMap((day) => day.sessions.flatMap((session) => session.exercises)) : [];
+          const done = week ? allExercises.filter((exercise) => exercise.logs[0]?.completed).length : 0;
+          const pct = week && allExercises.length ? Math.round((done / allExercises.length) * 100) : 0;
           const isCurrent = index === initialWeekIndex;
+          const isMissing = !week;
 
           return (
             <button
-              key={week.id}
+              key={week?.id ?? `missing-week-${index + 1}`}
               onClick={() => setActiveWeek(index)}
               className={`shrink-0 rounded-xl border px-3 py-2 text-sm font-medium transition-colors ${
                 resolvedActiveWeek === index
                   ? "border-blue-600 bg-blue-600 text-white shadow-sm"
+                  : isMissing
+                    ? "border-dashed border-slate-300 bg-slate-50 text-slate-400 hover:bg-slate-100"
                   : isCurrent
                     ? "border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100"
                     : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
               }`}
             >
-              <span>W{week.weekNum}</span>
+              <span>W{week?.weekNum ?? index + 1}</span>
+              {isMissing && (
+                <span className={`mt-0.5 block text-[10px] ${resolvedActiveWeek === index ? "text-blue-100" : "text-slate-400"}`}>
+                  pending
+                </span>
+              )}
               {isCurrent && resolvedActiveWeek !== index && (
                 <span className="mt-0.5 block text-[10px] text-blue-500">now</span>
               )}
@@ -478,11 +542,15 @@ export default function PlanViewer({
         })}
       </div>
 
-      <WeekCard
-        planId={planId}
-        week={weeks[resolvedActiveWeek]}
-        initialDayIndex={resolvedActiveWeek === initialWeekIndex ? initialDayIndex : -1}
-      />
+      {activeWeek ? (
+        <WeekCard
+          planId={planId}
+          week={activeWeek}
+          initialDayIndex={resolvedActiveWeek === initialWeekIndex ? initialDayIndex : -1}
+        />
+      ) : (
+        <MissingWeekCard weekNum={resolvedActiveWeek + 1} generation={resolvedGeneration} />
+      )}
     </div>
   );
 }

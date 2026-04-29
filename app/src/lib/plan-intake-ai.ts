@@ -40,6 +40,8 @@ export interface PlanIntakeAiInput {
   draft: PartialIntakeDraft;
   userMessage: string;
   messages: IntakeMessage[];
+  clientToday?: string;
+  clientTimeZone?: string;
 }
 
 export const PLAN_INTAKE_SYSTEM_PROMPT = `You are an intake assistant for creating training plans.
@@ -69,13 +71,17 @@ OUTPUT:
 - Return only the required PlanIntakeAiResponse JSON shape.
 - Do not include extra fields.
 - For unknown draft fields, omit the field instead of using null, 0, empty strings, or empty arrays.
-- The planRequestDraft must preserve previously collected valid details unless the user explicitly changes them.`;
+- The planRequestDraft must preserve previously collected valid details unless the user explicitly changes them.
+- Do not ask again about injuries, limitations, pain, or exercises to avoid after constraints are present in the current draft.`;
 
 const INTAKE_REFUSAL_MESSAGE =
   "I can only help create training plans here. Tell me about your sport, goal, schedule, equipment, current level, or limitations.";
 
 export const INTAKE_VALIDATION_FALLBACK_MESSAGE =
   "I had trouble reading that plan intake response. Please answer the current training-plan question again.";
+
+export const INTAKE_READY_MESSAGE =
+  "I have enough information to build your plan. Click the magic wand button to generate it.";
 
 const TEST_INVALID_AI_OUTPUT_MESSAGE = "__test_invalid_ai_output__";
 
@@ -162,7 +168,7 @@ function withDirectAnswerHints(input: PlanIntakeAiInput): PlanIntakeAiInput {
   }
 
   if (!draft.startDate && /when would you like to start|start/i.test(previousPrompt)) {
-    const startDate = cleanDate(answer);
+    const startDate = cleanDate(answer, input.clientToday);
     if (startDate) draft.startDate = startDate;
   }
 
@@ -185,10 +191,12 @@ export function firstQuestionOnly(message: string) {
 }
 
 function toIntakeResponse(response: PlanIntakeAiResponse): IntakeResponse {
+  const assistantMessage = response.status === "needs_more_info" ? nextNonDuplicateQuestion(response) : INTAKE_READY_MESSAGE;
+
   return {
     draft: response.planRequestDraft,
     ready: response.status === "ready",
-    assistantMessage: response.status === "needs_more_info" ? firstQuestionOnly(response.message) : response.message,
+    assistantMessage,
   };
 }
 
@@ -205,7 +213,8 @@ function cleanString(value: unknown) {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
 
-function todayIsoDate() {
+function todayIsoDate(clientToday?: string) {
+  if (clientToday && /^\d{4}-\d{2}-\d{2}$/.test(clientToday)) return clientToday;
   return new Date().toISOString().slice(0, 10);
 }
 
@@ -213,8 +222,8 @@ function formatIsoDate(year: number, month: number, day: number) {
   return `${year.toString().padStart(4, "0")}-${month.toString().padStart(2, "0")}-${day.toString().padStart(2, "0")}`;
 }
 
-function rollForwardIfPast(isoDate: string) {
-  const today = todayIsoDate();
+function rollForwardIfPast(isoDate: string, clientToday?: string) {
+  const today = todayIsoDate(clientToday);
   if (isoDate >= today) return isoDate;
 
   const match = isoDate.match(/^(\d{4})-(\d{2})-(\d{2})$/);
@@ -261,11 +270,11 @@ function monthNumber(value: string) {
   return months[value.toLowerCase()];
 }
 
-function cleanDate(value: unknown) {
+function cleanDate(value: unknown, clientToday?: string) {
   const text = cleanString(value);
   if (!text) return undefined;
-  if (/^\d{4}-\d{2}-\d{2}$/.test(text)) return rollForwardIfPast(text);
-  if (/^(today|now|asap|as soon as possible)$/i.test(text)) return todayIsoDate();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(text)) return rollForwardIfPast(text, clientToday);
+  if (/^(today|now|asap|as soon as possible)$/i.test(text)) return todayIsoDate(clientToday);
 
   const slash = text.match(/^(\d{1,2})\/(\d{1,2})(?:\/(\d{2}|\d{4}))?$/);
   if (slash) {
@@ -273,7 +282,7 @@ function cleanDate(value: unknown) {
     const day = parseInt(slash[2], 10);
     const rawYear = slash[3] ? parseInt(slash[3], 10) : new Date().getFullYear();
     const year = rawYear < 100 ? 2000 + rawYear : rawYear;
-    return rollForwardIfPast(formatIsoDate(year, month, day));
+    return rollForwardIfPast(formatIsoDate(year, month, day), clientToday);
   }
 
   const named = text.match(/^(?:(?:mon|tue|wed|thu|fri|sat|sun)(?:day)?\s+)?([a-z]+)\s+(\d{1,2})(?:st|nd|rd|th)?(?:,?\s+(\d{2}|\d{4}))?$/i);
@@ -284,7 +293,7 @@ function cleanDate(value: unknown) {
   const day = parseInt(named[2], 10);
   const rawYear = named[3] ? parseInt(named[3], 10) : new Date().getFullYear();
   const year = rawYear < 100 ? 2000 + rawYear : rawYear;
-  return rollForwardIfPast(formatIsoDate(year, month, day));
+  return rollForwardIfPast(formatIsoDate(year, month, day), clientToday);
 }
 
 function cleanPositiveInteger(value: unknown) {
@@ -321,20 +330,23 @@ function compactObject(value: Record<string, unknown>) {
   return Object.fromEntries(Object.entries(value).filter(([, item]) => item !== undefined));
 }
 
-function normalizeAiDraft(rawDraft: unknown) {
+function normalizeAiDraft(rawDraft: unknown, clientToday?: string) {
   const draft = rawDraft && typeof rawDraft === "object" ? rawDraft as Record<string, unknown> : {};
-  const constraints = draft.constraints && typeof draft.constraints === "object"
+  const hasConstraints = Object.prototype.hasOwnProperty.call(draft, "constraints") && draft.constraints && typeof draft.constraints === "object";
+  const constraints = hasConstraints
     ? draft.constraints as Record<string, unknown>
     : {};
   const strengthTraining = draft.strengthTraining && typeof draft.strengthTraining === "object"
     ? draft.strengthTraining as Record<string, unknown>
     : {};
 
-  const cleanedConstraints = compactObject({
-    injuries: cleanStringArray(constraints.injuries),
-    limitations: cleanStringArray(constraints.limitations),
-    avoidExercises: cleanStringArray(constraints.avoidExercises),
-  });
+  const cleanedConstraints = hasConstraints
+    ? {
+        injuries: cleanStringArray(constraints.injuries) ?? [],
+        limitations: cleanStringArray(constraints.limitations) ?? [],
+        avoidExercises: cleanStringArray(constraints.avoidExercises) ?? [],
+      }
+    : {};
 
   const cleanedStrengthTraining = compactObject({
     include: cleanBoolean(strengthTraining.include),
@@ -347,25 +359,64 @@ function normalizeAiDraft(rawDraft: unknown) {
     disciplines: cleanStringArray(draft.disciplines),
     goalType: cleanString(draft.goalType),
     goalDescription: cleanString(draft.goalDescription),
-    targetDate: draft.targetDate === null ? null : cleanDate(draft.targetDate),
+    targetDate: draft.targetDate === null ? null : cleanDate(draft.targetDate, clientToday),
     blockLengthWeeks: cleanPositiveInteger(draft.blockLengthWeeks),
     daysPerWeek: cleanPositiveInteger(draft.daysPerWeek),
     currentLevel: cleanString(draft.currentLevel),
     targetLevel: cleanString(draft.targetLevel),
-    startDate: cleanDate(draft.startDate),
+    startDate: cleanDate(draft.startDate, clientToday),
     equipment: cleanStringArray(draft.equipment),
     trainingFocus: cleanStringArray(draft.trainingFocus),
-    constraints: Object.keys(cleanedConstraints).length ? cleanedConstraints : undefined,
+    constraints: hasConstraints ? cleanedConstraints : undefined,
     strengthTraining: Object.keys(cleanedStrengthTraining).length ? cleanedStrengthTraining : undefined,
     intakeStep: cleanIntakeStep(draft.intakeStep),
     intakeTemplateId: cleanString(draft.intakeTemplateId),
   });
 }
 
-function normalizeAiResponse(response: unknown) {
+function mergeDrafts(previous: PartialIntakeDraft, next: PartialIntakeDraft): PartialIntakeDraft {
+  return {
+    ...previous,
+    ...next,
+    constraints: next.constraints
+      ? {
+          injuries: next.constraints.injuries ?? [],
+          limitations: next.constraints.limitations ?? [],
+          avoidExercises: next.constraints.avoidExercises ?? [],
+        }
+      : previous.constraints,
+    strengthTraining: next.strengthTraining
+      ? {
+          ...previous.strengthTraining,
+          ...next.strengthTraining,
+          focusAreas: next.strengthTraining.focusAreas ?? previous.strengthTraining?.focusAreas ?? [],
+        }
+      : previous.strengthTraining,
+  };
+}
+
+function constraintsAnswered(draft: PartialIntakeDraft) {
+  return Boolean(draft.constraints);
+}
+
+function asksAboutConstraints(message: string) {
+  return /\b(injur|injuries|hurt|pain|limitation|limitations|avoid|exercise(?:s)? to avoid|movement limitation)\b/i.test(message);
+}
+
+function nextNonDuplicateQuestion(response: PlanIntakeAiResponse) {
+  const message = firstQuestionOnly(response.message);
+  if (!constraintsAnswered(response.planRequestDraft) || !asksAboutConstraints(message)) return message;
+
+  const fallback = nextQuestionForDraft(response.planRequestDraft);
+  return asksAboutConstraints(fallback)
+    ? "Any training preferences I should account for before I build the plan?"
+    : fallback;
+}
+
+function normalizeAiResponse(response: unknown, clientToday?: string) {
   if (!response || typeof response !== "object") return response;
   const raw = response as Record<string, unknown>;
-  const planRequestDraft = normalizeAiDraft(raw.planRequestDraft);
+  const planRequestDraft = normalizeAiDraft(raw.planRequestDraft, clientToday);
   return {
     ...raw,
     message: cleanString(raw.message) ?? nextQuestionForDraft(planRequestDraft),
@@ -373,8 +424,8 @@ function normalizeAiResponse(response: unknown) {
   };
 }
 
-export function validatePlanIntakeAiResponse(response: unknown) {
-  return planIntakeAiResponseSchema.parse(normalizeAiResponse(response));
+export function validatePlanIntakeAiResponse(response: unknown, clientToday?: string) {
+  return planIntakeAiResponseSchema.parse(normalizeAiResponse(response, clientToday));
 }
 
 function requiredFieldStatus(draft: PartialIntakeDraft) {
@@ -409,10 +460,11 @@ function nextQuestionForDraft(draft: PartialIntakeDraft | Record<string, unknown
 function buildCoachIntakePrompt(input: PlanIntakeAiInput) {
   const missing = requiredFieldStatus(input.draft);
   const recentMessages = input.messages.slice(-12);
-  const today = todayIsoDate();
+  const today = todayIsoDate(input.clientToday);
 
   return `TODAY:
 ${today}
+${input.clientTimeZone ? `\nCLIENT_TIME_ZONE:\n${input.clientTimeZone}` : ""}
 
 CURRENT_PLAN_REQUEST_DRAFT_JSON:
 ${JSON.stringify(input.draft)}
@@ -435,11 +487,12 @@ COACHING INSTRUCTIONS:
 - Ask exactly one natural follow-up question that would most improve the plan.
 - Never ask for two fields in one response. If several fields are missing, choose one.
 - If enough required fields are present but important nuance is missing, you may ask one extra useful coach question.
+- Do not ask again about injuries, limitations, pain, or exercises to avoid after constraints are present in CURRENT_PLAN_REQUEST_DRAFT_JSON, even when those arrays are empty.
 - Mark status "ready" only when planRequestDraft validates as a complete PlanRequest.
 - For ongoing goals, set targetDate to null and ask for or infer a practical blockLengthWeeks.
 - For event goals, capture targetDate when provided and use it to infer blockLengthWeeks if needed.
 - Dates in planRequestDraft must be YYYY-MM-DD.
-- Use TODAY to interpret relative dates like "today", "tomorrow", "next Monday", "Monday May 4th", or "in 8 weeks".
+- Use TODAY and CLIENT_TIME_ZONE to interpret relative dates like "today", "tomorrow", "next Monday", "Monday May 4th", or "in 8 weeks".
 - Never output a startDate or targetDate before TODAY. If the user gives a month/day without a year, choose the next future occurrence.
 - If the user has injuries, limitations, or exercises to avoid, preserve them in constraints.
 - If the user wants strength training, preserve it in strengthTraining and trainingFocus.
@@ -510,7 +563,7 @@ async function callModelBackedIntake(input: PlanIntakeAiInput): Promise<PlanInta
   const content = data.choices?.[0]?.message?.content?.trim();
   if (!content) throw new Error("No AI intake response content");
 
-  return validatePlanIntakeAiResponse(extractJsonObject(content));
+  return validatePlanIntakeAiResponse(extractJsonObject(content), input.clientToday);
 }
 
 function shouldUseModelBackedIntake() {
@@ -523,19 +576,20 @@ export function simulatePlanIntakeAiResponse(input: PlanIntakeAiInput): PlanInta
       status: "ready",
       message: "",
       planRequestDraft: {},
-    });
+    }, input.clientToday);
   }
 
   const response = continueIntakeDraft({
     draft: input.draft,
     userMessage: input.userMessage,
+    clientToday: input.clientToday,
   });
 
   return validatePlanIntakeAiResponse({
     status: response.ready ? "ready" : "needs_more_info",
     message: response.assistantMessage,
     planRequestDraft: response.draft,
-  });
+  }, input.clientToday);
 }
 
 export async function continuePlanIntakeWithAiContract(input: PlanIntakeAiInput): Promise<IntakeResponse> {
@@ -549,7 +603,10 @@ export async function continuePlanIntakeWithAiContract(input: PlanIntakeAiInput)
     const response = shouldUseModelBackedIntake()
       ? await callModelBackedIntake(hintedInput)
       : simulatePlanIntakeAiResponse(hintedInput);
-    return toIntakeResponse(response);
+    return toIntakeResponse({
+      ...response,
+      planRequestDraft: mergeDrafts(input.draft, response.planRequestDraft),
+    });
   } catch (error) {
     console.warn(`[ai-intake] Falling back after invalid or failed intake response: ${(error as Error).message}`);
     return validationFallbackResponse(input.draft);

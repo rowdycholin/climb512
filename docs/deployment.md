@@ -8,6 +8,7 @@
 | `migrate` | one-shot SQL migration runner |
 | `simulator` | local AI backend simulator for plan generation |
 | `web` | Next.js standalone app |
+| `plan-worker` | background worker for sequential plan-week generation |
 
 ## Startup
 
@@ -21,8 +22,9 @@ Startup order:
 2. `migrate`
 3. `simulator`
 4. `web`
+5. `plan-worker`
 
-`web` will not start until `migrate` exits successfully.
+`web` and `plan-worker` will not start until `migrate` exits successfully.
 
 For local development, use the dev overlay instead:
 
@@ -57,9 +59,16 @@ The current application schema depends on:
 
 ```bash
 docker compose logs web --tail=20
+docker compose logs plan-worker --tail=50
 docker compose logs simulator --tail=50
 docker compose logs migrate --tail=50
 docker compose logs postgres --tail=50
+```
+
+For generation debugging, tail the three moving pieces together:
+
+```bash
+docker compose logs -f web plan-worker simulator
 ```
 
 Useful simulator checks:
@@ -87,8 +96,9 @@ curl -I http://localhost:8080/login
 | `ANTHROPIC_BASE_URL` | AI backend base URL |
 | `ANTHROPIC_MODEL` | model name |
 | `ANTHROPIC_MAX_TOKENS` | output cap |
+| `PLAN_WORKER_STEP_DELAY_MS` | optional pause between sequential week generations so partial progress is visible |
 
-In Docker, the `web` service defaults `ANTHROPIC_BASE_URL` to `http://simulator:8787`, so plan generation uses the simulator unless explicitly overridden.
+In Docker, the `web` and `plan-worker` services currently pin `ANTHROPIC_BASE_URL` to `http://simulator:8787` and `AI_INTAKE_MODE` to `local`, so local testing does not call the live AI provider. To test against the live provider, remove or change those Compose overrides and restart the services.
 
 ### Simulator service
 

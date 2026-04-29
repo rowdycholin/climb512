@@ -37,6 +37,7 @@ In Docker, `docker-compose.yml` overrides the AI base URL so the app talks to th
 ```bash
 docker compose up --build -d
 docker compose logs web --tail=20
+docker compose logs plan-worker --tail=20
 docker compose logs simulator --tail=20
 ```
 
@@ -44,6 +45,7 @@ Services:
 
 - app: `http://localhost:8080`
 - simulator: `http://localhost:8787`
+- plan worker: background service, inspect with `docker compose logs plan-worker -f`
 
 ### Development Docker
 
@@ -66,6 +68,7 @@ The dev override:
 - keeps `/app/node_modules` in the `web_node_modules` Docker volume
 - keeps `/app/.next` in the `web_next_cache` Docker volume
 - runs `npm run dev -- --hostname 0.0.0.0 --port 8080`
+- keeps the `plan-worker` service on the image-built worker target unless you override it separately
 
 Useful dev commands:
 
@@ -73,6 +76,7 @@ Useful dev commands:
 bash scripts/stop-dev.sh
 bash scripts/start-dev.sh --fresh
 docker compose -f docker-compose.yml -f docker-compose.dev.yml logs web -f
+docker compose logs -f web plan-worker simulator
 ```
 
 `--fresh` removes Postgres data plus the dev dependency/cache volumes.
@@ -139,7 +143,7 @@ The app stores plans as snapshots, not relational `Week/Day/Exercise` rows.
 - `PlanVersion.effectiveFromDay` stores the absolute plan day where an adjusted version begins; day 1 is week 1 day 1
 - plan progress and complete status are derived from `Plan.startDate` plus snapshot week count, not stored as separate columns
 - explicit user completion is stored on `Plan.completedAt`, `completionReason`, and `completionNotes`; this overrides the calendar-derived active state in the UI
-- guided intake builds `PlanRequest` first and sends that structured request to generation; manual onboarding still uses the legacy generator input
+- guided intake builds `PlanRequest`, creates a `PlanGenerationJob`, and lets `plan-worker` generate weeks; manual onboarding still uses the legacy generator input
 - the simulator consumes `PlanRequest` fields for sport-specific templates, event vs ongoing themes, strength support, and basic injury/avoid-exercise substitutions
 - `WorkoutLog` stores performed work against snapshot exercise keys
 - logged-week manual edits may append custom exercises while preserving existing prescribed exercise keys for prior logs

@@ -16,7 +16,8 @@ import {
   type PlanSnapshot,
   type ProfileSnapshot,
 } from "@/lib/plan-snapshot";
-import { generatePlanFromPlanRequestWithAI, generatePlanWithAI } from "@/lib/ai-plan-generator";
+import { countGeneratedWeeks } from "@/lib/plan-generation-state";
+import { generatePlanWithAI } from "@/lib/ai-plan-generator";
 import type { PlanInput } from "@/lib/plan-types";
 import { planRequestToLegacyPlanInput, type PlanRequest } from "@/lib/plan-request";
 import { findOwnedPlanById, findOwnedPlanWithLogs, upsertExerciseLogForUser } from "@/lib/plan-access";
@@ -135,33 +136,63 @@ function parseDateInput(value: string) {
 
 async function createGeneratedPlanFromRequest(params: {
   userId: string;
-  loginId?: string;
   request: PlanRequest;
   age: number;
 }) {
   const legacyInput = planRequestToLegacyPlanInput(params.request, params.age);
-  const weeks = await generatePlanFromPlanRequestWithAI(params.request, params.age, params.loginId);
   const profileSnapshot = createProfileSnapshot(legacyInput, params.request);
-  const planSnapshot = buildPlanSnapshot(weeks);
+  const planSnapshot: PlanSnapshot = { weeks: [] };
   const title = `${params.request.sport}: ${params.request.goalDescription}`.slice(0, 120);
 
-  const plan = await prisma.plan.create({
-    data: {
-      userId: params.userId,
-      title,
-      startDate: parseDateInput(params.request.startDate),
-    },
+  const planId = await prisma.$transaction(async (tx) => {
+    const plan = await tx.plan.create({
+      data: {
+        userId: params.userId,
+        title,
+        startDate: parseDateInput(params.request.startDate),
+        generationStatus: "generating",
+        generationError: null,
+        generatedWeeks: 0,
+      },
+    });
+
+    const version = await tx.planVersion.create({
+      data: {
+        planId: plan.id,
+        versionNum: 1,
+        changeType: "worker_generation_started",
+        changeSummary: "Initial plan shell from guided intake",
+        profileSnapshot: toStoredJson(profileSnapshot),
+        planSnapshot: toStoredJson(planSnapshot),
+      },
+    });
+
+    await tx.plan.update({
+      where: { id: plan.id },
+      data: {
+        currentVersionId: version.id,
+        updatedAt: new Date(),
+      },
+    });
+
+    const job = await tx.planGenerationJob.create({
+      data: {
+        planId: plan.id,
+        userId: params.userId,
+        status: "pending",
+        totalWeeks: params.request.blockLengthWeeks,
+        nextWeekNum: 1,
+      },
+    });
+
+    console.log(
+      `[web] queued guided-intake plan generation user=${params.userId} plan=${plan.id} job=${job.id} sport=${params.request.sport} weeks=${params.request.blockLengthWeeks} daysPerWeek=${params.request.daysPerWeek}`,
+    );
+
+    return plan.id;
   });
 
-  await createPlanVersion({
-    planId: plan.id,
-    profileSnapshot,
-    planSnapshot,
-    changeType: "generated",
-    changeSummary: "Initial AI-generated plan from guided intake",
-  });
-
-  redirect(`/plan/${plan.id}`);
+  redirect(`/plan/${planId}`);
 }
 
 async function createPlanVersion(params: {
@@ -209,6 +240,9 @@ async function createPlanVersion(params: {
     where: { id: planId },
     data: {
       currentVersionId: version.id,
+      generatedWeeks: countGeneratedWeeks(planSnapshot),
+      generationStatus: "ready",
+      generationError: null,
       updatedAt: new Date(),
     },
   });
@@ -698,6 +732,8 @@ export async function continuePlanIntake(input: {
   draft: unknown;
   userMessage: string;
   messages: IntakeMessage[];
+  clientToday?: string;
+  clientTimeZone?: string;
 }): Promise<IntakeResponse> {
   const session = await getSession();
   if (!session.isLoggedIn) {
@@ -710,6 +746,8 @@ export async function continuePlanIntake(input: {
     draft,
     userMessage: input.userMessage,
     messages: input.messages,
+    clientToday: input.clientToday,
+    clientTimeZone: input.clientTimeZone,
   });
 }
 
@@ -731,7 +769,6 @@ export async function createPlanFromIntake(formData: FormData) {
   const request = intakeDraftToPlanRequest(draft);
   await createGeneratedPlanFromRequest({
     userId: session.userId,
-    loginId: session.loginId,
     request,
     age: user.age,
   });

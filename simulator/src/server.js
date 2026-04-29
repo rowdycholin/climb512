@@ -187,7 +187,17 @@ const server = http.createServer((request, response) => {
     }
 
     const prompt = extractUserPrompt(payload);
-    if (!prompt.includes("Generate ONE week of a training plan")) {
+    const promptType = prompt.includes("Generate exactly ONE next week of the training plan")
+      ? "next-week"
+      : prompt.includes("Generate ONE week of a training plan")
+        ? "single-week"
+        : "unsupported";
+    const supportsPlanGenerationPrompt =
+      prompt.includes("Generate ONE week of a training plan") ||
+      prompt.includes("Generate exactly ONE next week of the training plan");
+
+    if (!supportsPlanGenerationPrompt) {
+      logLine(`[simulator] rejected unsupported prompt type=${promptType}`);
       sendJson(response, 400, { error: { message: "Simulator currently supports plan generation prompts only" } });
       return;
     }
@@ -201,16 +211,20 @@ const server = http.createServer((request, response) => {
     const username = request.headers["x-climb-user"] || "unknown-user";
     const summary = extractPlanSummary(prompt);
 
+    logLine(
+      `[simulator] accepted prompt type=${promptType} user=${username} week=${summary.weekNum}/${summary.weeksDuration ?? "?"} scenario=${scenario} mode=${ERROR_MODE}`,
+    );
+
     const respond = () => {
       if (applyErrorMode(response, content)) {
         logLine(
-          `[simulator] response mode=${ERROR_MODE} user=${username} week=${summary.weekNum}/${summary.weeksDuration ?? "?"} scenario=${scenario} seed=${SEED}`,
+          `[simulator] response mode=${ERROR_MODE} type=${promptType} user=${username} week=${summary.weekNum}/${summary.weeksDuration ?? "?"} scenario=${scenario} seed=${SEED}`,
         );
         return;
       }
 
       logLine(
-        `[simulator] generated plan week user=${username} week=${summary.weekNum}/${summary.weeksDuration ?? "?"} daysPerWeek=${summary.daysPerWeek ?? "?"} discipline=${summary.discipline} grades=${summary.currentGrade}->${summary.targetGrade} scenario=${scenario} seed=${SEED} mode=${ERROR_MODE}`,
+        `[simulator] generated plan week type=${promptType} user=${username} week=${summary.weekNum}/${summary.weeksDuration ?? "?"} daysPerWeek=${summary.daysPerWeek ?? "?"} discipline=${summary.discipline} grades=${summary.currentGrade}->${summary.targetGrade} scenario=${scenario} seed=${SEED} mode=${ERROR_MODE}`,
       );
 
       sendJson(response, 200, buildChatCompletionResponse(content, "stop"));

@@ -1,6 +1,7 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import { CheckCircle2, MessageCircle, PencilLine, RotateCcw } from "lucide-react";
 import { completePlan, reopenPlan } from "@/app/actions";
 import PlanWorkspace from "@/components/PlanWorkspace";
@@ -9,6 +10,7 @@ import { Button } from "@/components/ui/button";
 interface PlanPageShellProps {
   planId: string;
   weeks: Parameters<typeof PlanWorkspace>[0]["weeks"];
+  totalWeeks: number;
   initialWeekIndex: number;
   initialDayIndex: number;
   summary: {
@@ -37,31 +39,56 @@ interface PlanPageShellProps {
       changeSummary: string | null;
       effectiveFromDay: number | null;
     };
+    generation: {
+      status: string;
+      generatedWeeks: number;
+      totalWeeks: number;
+      missingWeeks: number;
+      nextWeekNum: number | null;
+      percent: number;
+      isGenerating: boolean;
+      isFailed: boolean;
+      isReady: boolean;
+      error: string | null;
+    };
   };
 }
 
 export default function PlanPageShell({
   planId,
   weeks,
+  totalWeeks,
   initialWeekIndex,
   initialDayIndex,
   summary,
 }: PlanPageShellProps) {
+  const router = useRouter();
   const [activeWeekIndex, setActiveWeekIndex] = useState(initialWeekIndex);
   const [editorOpen, setEditorOpen] = useState(false);
   const [coachOpen, setCoachOpen] = useState(false);
   const [completionPanelOpen, setCompletionPanelOpen] = useState(false);
 
-  const activeWeek = weeks[activeWeekIndex];
+  const activeWeek = weeks[activeWeekIndex] ?? null;
   const activeWeekLocked = useMemo(
     () =>
-      activeWeek.days.some((day) =>
+      activeWeek?.days.some((day) =>
         day.sessions.some((session) =>
           session.exercises.some((exercise) => exercise.logs.length > 0),
         ),
-      ),
+      ) ?? false,
     [activeWeek],
   );
+  const completionDisabled = !summary.generation.isReady;
+
+  useEffect(() => {
+    if (!summary.generation.isGenerating) return;
+
+    const timer = window.setInterval(() => {
+      router.refresh();
+    }, 1500);
+
+    return () => window.clearInterval(timer);
+  }, [router, summary.generation.isGenerating]);
 
   function toggleEditor() {
     setEditorOpen((value) => {
@@ -102,6 +129,7 @@ export default function PlanPageShell({
               aria-label={editorOpen ? "Close day editor" : "Open day editor"}
               title={activeWeekLocked ? "Add exercises without changing logged work" : "Edit this week"}
               onClick={toggleEditor}
+              disabled={!activeWeek}
               className={`gap-2 ${editorOpen ? "shadow-sm" : "border-white/80 bg-white/80 backdrop-blur"}`}
             >
               <PencilLine className="h-4 w-4" />
@@ -113,6 +141,7 @@ export default function PlanPageShell({
               aria-label={coachOpen ? "Close plan adjustment" : "Open plan adjustment"}
               title="Adjust future plan"
               onClick={toggleCoach}
+              disabled={!activeWeek}
               className={`gap-2 ${coachOpen ? "shadow-sm" : "border-white/80 bg-white/80 backdrop-blur"}`}
             >
               <MessageCircle className="h-4 w-4" />
@@ -137,8 +166,9 @@ export default function PlanPageShell({
                 type="button"
                 variant={completionPanelOpen ? "default" : "outline"}
                 aria-label="Complete plan"
-                title="Complete plan"
+                title={completionDisabled ? "Plan generation must finish first" : "Complete plan"}
                 onClick={() => setCompletionPanelOpen((value) => !value)}
+                disabled={completionDisabled}
                 className={`gap-2 ${completionPanelOpen ? "shadow-sm" : "border-white/80 bg-white/80 backdrop-blur"}`}
               >
                 <CheckCircle2 className="h-4 w-4" />
@@ -155,7 +185,7 @@ export default function PlanPageShell({
           <span>&middot;</span>
           <span>Age {summary.age}</span>
           <span>&middot;</span>
-          <span>Week {activeWeek.weekNum}: {activeWeek.theme}</span>
+          <span>{activeWeek ? `Week ${activeWeek.weekNum}: ${activeWeek.theme}` : `Week ${activeWeekIndex + 1}: generating`}</span>
           <span>&middot;</span>
           <span>Start {summary.calendar.startDateLabel}</span>
           <span>&middot;</span>
@@ -184,7 +214,26 @@ export default function PlanPageShell({
           </div>
         )}
 
-        {completionPanelOpen && !summary.completion.isUserCompleted && (
+        {(summary.generation.isGenerating || summary.generation.isFailed) && (
+          <div className={`mt-3 rounded-lg border px-3 py-2 text-sm ${
+            summary.generation.isFailed
+              ? "border-red-200 bg-red-50 text-red-800"
+              : "border-sky-200 bg-sky-50 text-sky-800"
+          }`}>
+            <p className="font-medium">
+              {summary.generation.isFailed
+                ? "Plan generation needs attention"
+                : `Generating week ${summary.generation.nextWeekNum ?? summary.generation.generatedWeeks} of ${summary.generation.totalWeeks}`}
+            </p>
+            <p className="mt-1">
+              {summary.generation.isFailed
+                ? summary.generation.error ?? "The already generated weeks are still available."
+                : `${summary.generation.generatedWeeks}/${summary.generation.totalWeeks} weeks ready (${summary.generation.percent}%).`}
+            </p>
+          </div>
+        )}
+
+        {completionPanelOpen && !summary.completion.isUserCompleted && !completionDisabled && (
           <form action={completePlan} className="mt-4 rounded-xl border border-emerald-200 bg-white/90 p-4 shadow-sm">
             <input type="hidden" name="planId" value={planId} />
             <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
@@ -235,7 +284,7 @@ export default function PlanPageShell({
           ))}
         </div>
 
-        {activeWeekLocked && (
+        {activeWeek && activeWeekLocked && (
           <p className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
             Week {activeWeek.weekNum} already has workout logs. Existing work is protected, but you can still add extra exercises from Edit Day.
           </p>
@@ -245,6 +294,8 @@ export default function PlanPageShell({
       <PlanWorkspace
         planId={planId}
         weeks={weeks}
+        totalWeeks={totalWeeks}
+        generation={summary.generation}
         activeWeekIndex={activeWeekIndex}
         initialDayIndex={initialDayIndex}
         editorOpen={editorOpen}

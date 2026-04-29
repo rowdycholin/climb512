@@ -8,18 +8,20 @@ import {
   type IntakeMessage,
   type PartialIntakeDraft,
 } from "@/lib/intake";
+import { planRequestSchema } from "@/lib/plan-request";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 
 function hasRequiredDraftFields(draft: PartialIntakeDraft) {
-  return Boolean(
-    draft.sport &&
-      draft.goalDescription &&
-      draft.blockLengthWeeks &&
-      draft.daysPerWeek &&
-      draft.startDate &&
-      draft.currentLevel,
-  );
+  return planRequestSchema.safeParse(draft).success;
+}
+
+function localIsoDate() {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = `${now.getMonth() + 1}`.padStart(2, "0");
+  const day = `${now.getDate()}`.padStart(2, "0");
+  return `${year}-${month}-${day}`;
 }
 
 export default function PlanIntakeChat() {
@@ -84,6 +86,8 @@ export default function PlanIntakeChat() {
           draft,
           userMessage,
           messages: nextMessages,
+          clientToday: localIsoDate(),
+          clientTimeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
         });
         if (response.assistantMessage === "SESSION_EXPIRED") {
           window.location.href = "/login";
@@ -149,8 +153,16 @@ export default function PlanIntakeChat() {
         {error && <p className="mt-2 text-sm text-red-600">{error}</p>}
         <form action={createPlanFromIntake} className="mt-4 flex items-center justify-end gap-3">
           <input type="hidden" name="draft" value={serializedDraft} />
-          {!ready && <p className="text-right text-xs text-slate-500">Answer the remaining questions to unlock plan creation.</p>}
-          <Button type="submit" size="icon-lg" disabled={!ready} aria-label="Generate Training Plan" title="Generate training plan">
+          <p className="text-right text-xs text-slate-500">
+            {ready ? "Ready. Click the magic wand to generate your plan." : "Answer the remaining questions to unlock plan creation."}
+          </p>
+          <Button
+            type="submit"
+            size="icon-lg"
+            disabled={!ready}
+            aria-label={ready ? "Generate training plan" : "Generate training plan locked"}
+            title={ready ? "Generate training plan" : "Answer the remaining questions first"}
+          >
             <WandSparkles className="h-4 w-4" />
           </Button>
         </form>

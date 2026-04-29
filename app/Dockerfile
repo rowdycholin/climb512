@@ -31,3 +31,8 @@ EXPOSE 8080
 ENV PORT=8080
 ENV HOSTNAME="0.0.0.0"
 CMD ["node", "server.js"]
+
+FROM builder AS worker
+ENV NODE_ENV=production
+ENV NEXT_TELEMETRY_DISABLED=1
+CMD ["npm", "run", "worker:plan-generation"]

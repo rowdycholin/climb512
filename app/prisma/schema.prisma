@@ -7,54 +7,80 @@ datasource db {
 }
 
 model User {
-  id           String       @id @default(cuid())
-  userId       String       @unique
-  firstName    String
-  lastName     String
-  email        String       @unique
-  age          Int
-  passwordHash String
-  createdAt    DateTime     @default(now()) @db.Timestamptz(3)
-  plans        Plan[]
-  workoutLogs  WorkoutLog[]
+  id             String              @id @default(cuid())
+  userId         String              @unique
+  firstName      String
+  lastName       String
+  email          String              @unique
+  age            Int
+  passwordHash   String
+  createdAt      DateTime            @default(now()) @db.Timestamptz(3)
+  plans          Plan[]
+  workoutLogs    WorkoutLog[]
+  generationJobs PlanGenerationJob[]
 }
 
 model Plan {
-  id               String        @id @default(cuid())
+  id               String              @id @default(cuid())
   userId           String
-  user             User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user             User                @relation(fields: [userId], references: [id], onDelete: Cascade)
   title            String?
-  currentVersionId String?       @unique
-  currentVersion   PlanVersion?  @relation("CurrentPlanVersion", fields: [currentVersionId], references: [id], onDelete: SetNull, onUpdate: Cascade)
-  versions         PlanVersion[] @relation("PlanVersions")
-  workoutLogs      WorkoutLog[] 
-  startDate        DateTime      @default(now()) @db.Timestamptz(3)
-  completedAt      DateTime?     @db.Timestamptz(3)
+  currentVersionId String?             @unique
+  currentVersion   PlanVersion?        @relation("CurrentPlanVersion", fields: [currentVersionId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  versions         PlanVersion[]       @relation("PlanVersions")
+  generationJobs   PlanGenerationJob[]
+  workoutLogs      WorkoutLog[]
+  startDate        DateTime            @default(now()) @db.Timestamptz(3)
+  generationStatus String              @default("ready")
+  generationError  String?
+  generatedWeeks   Int                 @default(0)
+  completedAt      DateTime?           @db.Timestamptz(3)
   completionReason String?
   completionNotes  String?
-  createdAt        DateTime      @default(now()) @db.Timestamptz(3)
-  updatedAt        DateTime      @updatedAt @db.Timestamptz(3)
+  createdAt        DateTime            @default(now()) @db.Timestamptz(3)
+  updatedAt        DateTime            @updatedAt @db.Timestamptz(3)
 
+  @@index([userId])
+  @@index([generationStatus])
+}
+
+model PlanGenerationJob {
+  id          String    @id @default(cuid())
+  planId      String
+  plan        Plan      @relation(fields: [planId], references: [id], onDelete: Cascade)
+  userId      String
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  status      String    @default("pending")
+  totalWeeks  Int
+  nextWeekNum Int       @default(1)
+  lastError   String?
+  repairNotes String?
+  lockedAt    DateTime? @db.Timestamptz(3)
+  createdAt   DateTime  @default(now()) @db.Timestamptz(3)
+  updatedAt   DateTime  @updatedAt @db.Timestamptz(3)
+
+  @@index([status, lockedAt])
+  @@index([planId])
   @@index([userId])
 }
 
 model PlanVersion {
-  id              String        @id @default(cuid())
-  planId          String
-  plan            Plan          @relation("PlanVersions", fields: [planId], references: [id], onDelete: Cascade)
-  versionNum      Int
-  basedOnVersionId String?
-  basedOnVersion  PlanVersion?  @relation("PlanVersionLineage", fields: [basedOnVersionId], references: [id], onDelete: SetNull, onUpdate: Cascade)
-  derivedVersions PlanVersion[] @relation("PlanVersionLineage")
-  changeType      String
-  changeSummary   String?
+  id                String        @id @default(cuid())
+  planId            String
+  plan              Plan          @relation("PlanVersions", fields: [planId], references: [id], onDelete: Cascade)
+  versionNum        Int
+  basedOnVersionId  String?
+  basedOnVersion    PlanVersion?  @relation("PlanVersionLineage", fields: [basedOnVersionId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  derivedVersions   PlanVersion[] @relation("PlanVersionLineage")
+  changeType        String
+  changeSummary     String?
   effectiveFromWeek Int?
   effectiveFromDay  Int?
-  profileSnapshot Json
-  planSnapshot    Json
-  createdAt       DateTime      @default(now()) @db.Timestamptz(3)
-  workoutLogs     WorkoutLog[]
-  currentForPlan  Plan?         @relation("CurrentPlanVersion")
+  profileSnapshot   Json
+  planSnapshot      Json
+  createdAt         DateTime      @default(now()) @db.Timestamptz(3)
+  workoutLogs       WorkoutLog[]
+  currentForPlan    Plan?         @relation("CurrentPlanVersion")
 
   @@unique([planId, versionNum])
   @@index([planId])
@@ -62,26 +88,26 @@ model PlanVersion {
 }
 
 model WorkoutLog {
-  id                String      @id @default(cuid())
-  userId            String
-  user              User        @relation(fields: [userId], references: [id], onDelete: Cascade)
-  planId            String
-  plan              Plan        @relation(fields: [planId], references: [id], onDelete: Cascade)
-  planVersionId     String
-  planVersion       PlanVersion @relation(fields: [planVersionId], references: [id], onDelete: Cascade)
-  weekNum           Int
-  dayNum            Int
-  sessionKey        String
-  exerciseKey       String
-  exerciseName      String
+  id                 String      @id @default(cuid())
+  userId             String
+  user               User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  planId             String
+  plan               Plan        @relation(fields: [planId], references: [id], onDelete: Cascade)
+  planVersionId      String
+  planVersion        PlanVersion @relation(fields: [planVersionId], references: [id], onDelete: Cascade)
+  weekNum            Int
+  dayNum             Int
+  sessionKey         String
+  exerciseKey        String
+  exerciseName       String
   prescribedSnapshot Json
-  setsCompleted     Int?
-  repsCompleted     String?
-  weightUsed        String?
-  durationActual    String?
-  notes             String?
-  completed         Boolean     @default(false)
-  loggedAt          DateTime    @default(now()) @db.Timestamptz(3)
+  setsCompleted      Int?
+  repsCompleted      String?
+  weightUsed         String?
+  durationActual     String?
+  notes              String?
+  completed          Boolean     @default(false)
+  loggedAt           DateTime    @default(now()) @db.Timestamptz(3)
 
   @@unique([userId, planId, exerciseKey])
   @@index([userId, planId])

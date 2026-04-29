@@ -7,6 +7,8 @@ import PlanViewer from "@/components/PlanViewer";
 export default function PlanWorkspace({
   planId,
   weeks,
+  totalWeeks,
+  generation,
   activeWeekIndex,
   initialDayIndex,
   editorOpen,
@@ -17,6 +19,8 @@ export default function PlanWorkspace({
 }: {
   planId: string;
   weeks: Parameters<typeof PlanViewer>[0]["weeks"];
+  totalWeeks: number;
+  generation: Parameters<typeof PlanViewer>[0]["generation"];
   activeWeekIndex: number;
   initialDayIndex: number;
   editorOpen: boolean;
@@ -25,23 +29,31 @@ export default function PlanWorkspace({
   onCoachOpenChange: (open: boolean) => void;
   onActiveWeekChange: (index: number) => void;
 }) {
+  const activeWeek = weeks[activeWeekIndex] ?? null;
+
   return (
     <>
-      <PlanEditor
-        planId={planId}
-        week={weeks[activeWeekIndex]}
-        isOpen={editorOpen}
-        onOpenChange={onEditorOpenChange}
-      />
-      <PlanAdjuster
-        planId={planId}
-        week={weeks[activeWeekIndex]}
-        isOpen={coachOpen}
-        onOpenChange={onCoachOpenChange}
-      />
+      {activeWeek && (
+        <>
+          <PlanEditor
+            planId={planId}
+            week={activeWeek}
+            isOpen={editorOpen}
+            onOpenChange={onEditorOpenChange}
+          />
+          <PlanAdjuster
+            planId={planId}
+            week={activeWeek}
+            isOpen={coachOpen}
+            onOpenChange={onCoachOpenChange}
+          />
+        </>
+      )}
       <PlanViewer
         planId={planId}
         weeks={weeks}
+        totalWeeks={totalWeeks}
+        generation={generation}
         initialWeekIndex={activeWeekIndex}
         initialDayIndex={initialDayIndex}
         activeWeekIndex={activeWeekIndex}

@@ -16,6 +16,11 @@ Next.js 14 App Router              <- Docker service: web
        \- OpenAI-compatible chat completions
             |- simulator in Docker by default       <- Docker service: simulator
             \- live provider when explicitly configured
+
+Plan generation worker                 <- Docker service: plan-worker
+  |- polls PlanGenerationJob
+  |- generates one plan week per iteration
+  \- writes partial PlanVersion snapshots
 ```
 
 ## Core Request Flows
@@ -38,18 +43,19 @@ Next.js 14 App Router              <- Docker service: web
 2. `/intake` uses `PlanIntakeChat`, `app/src/lib/intake.ts`, and `app/src/lib/plan-request.ts` to guide the user through a one-question-at-a-time interview and build a generic `PlanRequest` behind the scenes.
 3. Manual onboarding captures the older climbing-specific plan input fields directly.
 4. `createPlan()` or `createPlanFromIntake()` validates auth and loads the registered user's age.
-5. Guided intake sends the structured `PlanRequest` to generation; manual onboarding still submits the legacy `PlanInput`.
+5. Guided intake creates a plan shell plus `PlanGenerationJob`; manual onboarding still submits the legacy `PlanInput` and blocks for a full generated plan.
 6. `DisciplineLevelFields` switches grade systems on the manual form:
    - bouldering -> V-scale
    - sport/trad/alpine -> YDS
    - ice -> WI
-7. `generatePlanWithAI()` requests week JSON from the configured AI backend.
-8. The app builds:
+7. For guided intake, `plan-worker` polls the job and requests one week at a time from the configured AI backend.
+8. For manual onboarding, `generatePlanWithAI()` requests full week JSON from the configured AI backend.
+9. The app builds:
    - `profileSnapshot`
    - `planSnapshot`
-9. A `Plan` row is created with `startDate`.
-10. A first `PlanVersion` row is created with `changeType = "generated"`.
-11. `Plan.currentVersionId` is updated.
+10. A `Plan` row is created with `startDate`.
+11. Guided intake updates partial `PlanVersion` snapshots as each worker iteration completes.
+12. `Plan.currentVersionId` is updated.
 
 ### Plan Page Load
 
