@@ -33,6 +33,33 @@ export const lockedLoggedExerciseSchema = z.object({
   completed: z.boolean(),
 });
 
+export const adjustmentScopeSchema = z.discriminatedUnion("type", [
+  z.object({
+    type: z.literal("day_only"),
+    startWeek: z.number().int().min(1),
+    startDay: z.number().int().min(1).max(7),
+    endWeek: z.number().int().min(1),
+    endDay: z.number().int().min(1).max(7),
+  }),
+  z.object({
+    type: z.literal("week_only"),
+    startWeek: z.number().int().min(1),
+    endWeek: z.number().int().min(1),
+  }),
+  z.object({
+    type: z.literal("date_range"),
+    startWeek: z.number().int().min(1),
+    startDay: z.number().int().min(1).max(7),
+    endWeek: z.number().int().min(1),
+    endDay: z.number().int().min(1).max(7),
+  }),
+  z.object({
+    type: z.literal("future_from_day"),
+    startWeek: z.number().int().min(1),
+    startDay: z.number().int().min(1).max(7),
+  }),
+]);
+
 export const planAdjustmentRequestSchema = z.object({
   reason: planAdjustmentReasonSchema,
   userFeedback: z.string().trim().min(1).max(2000),
@@ -53,6 +80,7 @@ export type PlanAdjustmentReason = z.infer<typeof planAdjustmentReasonSchema>;
 export type AdjustmentDayRef = z.infer<typeof adjustmentDayRefSchema>;
 export type LockedCompletedDay = z.infer<typeof lockedCompletedDaySchema>;
 export type LockedLoggedExercise = z.infer<typeof lockedLoggedExerciseSchema>;
+export type AdjustmentScope = z.infer<typeof adjustmentScopeSchema>;
 export type PlanAdjustmentRequest = z.infer<typeof planAdjustmentRequestSchema>;
 
 export interface WorkoutLogDayMarker {
@@ -72,6 +100,65 @@ export interface PlanVersionAdjustmentContext {
 
 export function planDayFromWeekDay(weekNum: number, dayNum: number) {
   return (weekNum - 1) * 7 + dayNum;
+}
+
+export function scopeContainsPlanDay(scope: AdjustmentScope, planDay: number) {
+  switch (scope.type) {
+    case "day_only":
+    case "date_range": {
+      const start = planDayFromWeekDay(scope.startWeek, scope.startDay);
+      const end = planDayFromWeekDay(scope.endWeek, scope.endDay);
+      return planDay >= start && planDay <= end;
+    }
+    case "week_only": {
+      const start = planDayFromWeekDay(scope.startWeek, 1);
+      const end = planDayFromWeekDay(scope.endWeek, 7);
+      return planDay >= start && planDay <= end;
+    }
+    case "future_from_day":
+      return planDay >= planDayFromWeekDay(scope.startWeek, scope.startDay);
+  }
+}
+
+export function scopeStartPlanDay(scope: AdjustmentScope) {
+  switch (scope.type) {
+    case "day_only":
+    case "date_range":
+    case "future_from_day":
+      return planDayFromWeekDay(scope.startWeek, scope.startDay);
+    case "week_only":
+      return planDayFromWeekDay(scope.startWeek, 1);
+  }
+}
+
+export function validateAdjustmentScopeUnchanged(
+  original: PlanSnapshot,
+  adjusted: PlanSnapshot,
+  scope: AdjustmentScope,
+  effectiveFromPlanDay: number,
+) {
+  const adjustedDays = new Map<string, DaySnapshot>();
+  for (const week of adjusted.weeks) {
+    for (const day of week.days) {
+      adjustedDays.set(`${week.weekNum}:${day.dayNum}`, day);
+    }
+  }
+
+  for (const week of original.weeks) {
+    for (const day of week.days) {
+      const planDay = planDayFromWeekDay(week.weekNum, day.dayNum);
+      if (planDay >= effectiveFromPlanDay && scopeContainsPlanDay(scope, planDay)) continue;
+
+      const adjustedDay = adjustedDays.get(`${week.weekNum}:${day.dayNum}`);
+      if (!adjustedDay) {
+        throw new Error(`Adjusted plan removed out-of-scope day week ${week.weekNum} day ${day.dayNum}`);
+      }
+
+      if (JSON.stringify(day) !== JSON.stringify(adjustedDay)) {
+        throw new Error(`Adjusted plan changed out-of-scope day week ${week.weekNum} day ${day.dayNum}`);
+      }
+    }
+  }
 }
 
 export function weekDayFromPlanDay(planDay: number) {

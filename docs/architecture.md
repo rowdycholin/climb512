@@ -20,7 +20,8 @@ Next.js 14 App Router              <- Docker service: web
 Plan generation worker                 <- Docker service: plan-worker
   |- polls PlanGenerationJob
   |- generates one plan week per iteration
-  \- writes partial PlanVersion snapshots
+  |- writes PlanGenerationWeek checkpoints
+  \- creates one user-facing PlanVersion when all weeks are ready
 ```
 
 ## Core Request Flows
@@ -54,8 +55,9 @@ Plan generation worker                 <- Docker service: plan-worker
    - `profileSnapshot`
    - `planSnapshot`
 10. A `Plan` row is created with `startDate`.
-11. Guided intake updates partial `PlanVersion` snapshots as each worker iteration completes.
-12. `Plan.currentVersionId` is updated.
+11. Guided intake creates a hidden operational shell `PlanVersion` so the worker has profile/request context while the plan is still generating.
+12. Guided intake stores each generated worker week in `PlanGenerationWeek`.
+13. When all weeks are ready, the worker creates the first user-facing generated `PlanVersion` and updates `Plan.currentVersionId`.
 
 ### Plan Page Load
 
@@ -64,6 +66,7 @@ Plan generation worker                 <- Docker service: plan-worker
 3. If unauthenticated, redirect to `/login`.
 4. `findOwnedPlanWithLogs()` loads the user's `Plan`, current `PlanVersion`, and `WorkoutLog` rows.
 5. `planSnapshot` is parsed and merged with logs into the plan view model.
+   - while generation is still in progress, `PlanGenerationWeek` rows are composed for partial display
 6. Current week/day is calculated from `Plan.startDate`.
 7. Day X of total plan days and completed status are derived from `Plan.startDate` and snapshot week count.
 8. If the user explicitly marks the plan complete, `Plan.completedAt` and optional completion notes are used for completion messaging.
@@ -104,19 +107,21 @@ Current editor behavior:
 ### Future Plan Adjustment
 
 1. User opens `Adjust Plan` from the plan summary.
-2. `PlanAdjuster` collects a reason and freeform feedback.
-3. `adjustFuturePlan()` loads the owned plan, current version, and workout logs.
-4. The app builds a `PlanAdjustmentRequest` with:
+2. `PlanAdjuster` collects conversational feedback and proposes a scoped adjustment.
+3. The proposal shows the inferred scope before apply, such as a single day, one week, a date range, or future days from a selected point.
+4. `applyConfirmedPlanAdjustment()` loads the owned plan, current version, and workout logs.
+5. The app builds a `PlanAdjustmentRequest` with:
    - original plan request/profile context
    - locked logged-day markers
    - current plan snapshot
    - user feedback
-5. The next unlogged plan day is calculated.
-6. Future days are rewritten from that effective day forward, while locked history is validated as unchanged.
-7. A new `PlanVersion` is created with `changeType = "ai_future_adjustment"`, `effectiveFromWeek`, and `effectiveFromDay`.
-8. `Plan.currentVersionId` advances, and old logs remain tied to their original version.
+   - approved adjustment scope
+6. The next unlogged plan day and approved scope determine which days may change.
+7. Future days inside scope are rewritten, while locked history and out-of-scope days are validated as unchanged.
+8. A new `PlanVersion` is created with `changeType = "ai_chat_adjustment"`, `effectiveFromWeek`, `effectiveFromDay`, and `changeMetadata`.
+9. `Plan.currentVersionId` advances, old logs remain tied to their original version, and affected days are highlighted only for the immediate post-apply view.
 
-The first implementation uses deterministic adjustment rules behind the day-level request/validation contract. A real AI provider can later replace that rewrite step without changing the persistence boundary.
+The current implementation uses deterministic proposal and rewrite rules behind the day-level request/validation contract. A real AI provider can later plug into the same boundary without changing the persistence model.
 
 ## Data Model Strategy
 
@@ -128,6 +133,9 @@ The app intentionally stores plans as versioned JSON documents:
 - `PlanVersion` stores:
   - `profileSnapshot` JSON
   - `planSnapshot` JSON
+  - optional `changeMetadata` JSON for adjustment/revert details
+- `PlanGenerationJob` stores worker progress and failure/repair state
+- `PlanGenerationWeek` stores one generated week snapshot per worker job/week while generation is in progress
 - `WorkoutLog` stores immutable user history tied to a specific version and exercise key
 
 This keeps revision history intact and avoids the complexity of mutating a deep relational week/day/exercise tree in place.
@@ -148,6 +156,7 @@ This keeps revision history intact and avoids the complexity of mutating a deep 
   - ownership-aware plan loading
   - snapshot exercise lookup
   - log authorization
+  - worker-week composition while generation is in progress
 - `app/src/lib/plan-snapshot.ts`
   - snapshot types
   - parsing helpers
@@ -155,7 +164,9 @@ This keeps revision history intact and avoids the complexity of mutating a deep 
 - `app/src/lib/plan-calendar.ts`
   - start-date progress and completed-plan calculations
 - `app/src/lib/plan-adjustment-request.ts`
-  - day-level adjustment request shaping, next-unlogged-day calculation, and locked-history validation
+  - day-level adjustment request shaping, scoped-change validation, next-unlogged-day calculation, and locked-history validation
+- `app/src/lib/plan-adjustment-chat.ts`
+  - conversational adjustment state, proposal schema, scope inference helpers, and proposal validation
 - `app/src/lib/post-login-route.ts`
   - post-login landing route selection
 - `app/src/lib/ai-plan-generator.ts`
@@ -184,7 +195,7 @@ This keeps revision history intact and avoids the complexity of mutating a deep 
 - `PlanEditor`
   - direct editing for the selected week, including additive exercises on logged weeks
 - `PlanAdjuster`
-  - broader future-plan adjustments from the next unlogged day forward
+  - conversational future-plan adjustments with inferred scope, proposal review, and apply confirmation
 - `PlanViewer`
   - week tabs, day accordions, workout logging
 - `DashboardClient`

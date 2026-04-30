@@ -7,6 +7,50 @@ import { parseProfileSnapshot } from "@/lib/plan-snapshot";
 import AppHeader from "@/components/AppHeader";
 import PlanPageShell from "@/components/PlanPageShell";
 
+function parseAdjustmentMetadata(raw: unknown) {
+  if (!raw || typeof raw !== "object") return null;
+  const value = raw as {
+    affectedDays?: unknown;
+  };
+  if (!Array.isArray(value.affectedDays)) return null;
+
+  return {
+    affectedDays: value.affectedDays
+      .map((day) => {
+        if (!day || typeof day !== "object") return null;
+        const item = day as {
+          weekNum?: unknown;
+          dayNum?: unknown;
+          planDay?: unknown;
+          dayName?: unknown;
+          summary?: unknown;
+        };
+        if (
+          typeof item.weekNum !== "number" ||
+          typeof item.dayNum !== "number" ||
+          typeof item.planDay !== "number"
+        ) {
+          return null;
+        }
+        return {
+          weekNum: item.weekNum,
+          dayNum: item.dayNum,
+          planDay: item.planDay,
+          dayName: typeof item.dayName === "string" ? item.dayName : "",
+          summary: typeof item.summary === "string" ? item.summary : "Adjusted",
+        };
+      })
+      .filter((day): day is { weekNum: number; dayNum: number; planDay: number; dayName: string; summary: string } => Boolean(day)),
+  };
+}
+
+function isUserFacingVersion(changeType: string) {
+  return ![
+    "worker_generation_started",
+    "worker_generation",
+  ].includes(changeType);
+}
+
 export default async function PlanPage({ params }: { params: { id: string } }) {
   const session = await getSession();
   if (!session.isLoggedIn) redirect("/login");
@@ -39,8 +83,25 @@ export default async function PlanPage({ params }: { params: { id: string } }) {
   const completedAtLabel = plan.completedAt
     ? new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" }).format(plan.completedAt)
     : null;
+  const versionDateFormatter = new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    timeZone: "UTC",
+  });
   const currentWeekIndex = Math.max(0, Math.min(calendarStatus.currentWeekIndex, Math.max(totalWeeks - 1, 0)));
   const currentDayIndex = calendarStatus.currentDayIndex;
+  const visibleVersions = plan.versions.filter(
+    (version) => version.id === plan.currentVersion.id || isUserFacingVersion(version.changeType),
+  );
+  const displayVersionById = new Map(
+    [...visibleVersions]
+      .sort((a, b) => a.versionNum - b.versionNum)
+      .map((version, index) => [version.id, index + 1]),
+  );
+  const currentDisplayVersionNum = displayVersionById.get(plan.currentVersion.id) ?? visibleVersions.length;
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-100 to-slate-50">
@@ -62,6 +123,8 @@ export default async function PlanPage({ params }: { params: { id: string } }) {
             targetGrade: profile.targetGrade,
             weeksDuration: profile.weeksDuration,
             goals: profile.goals,
+            sport: profile.planRequest?.sport ?? profile.discipline,
+            disciplines: profile.planRequest?.disciplines ?? [profile.discipline],
             daysPerWeek: profile.daysPerWeek,
             age: profile.age,
             equipment: profile.equipment,
@@ -76,10 +139,25 @@ export default async function PlanPage({ params }: { params: { id: string } }) {
               notes: plan.completionNotes,
             },
             version: {
+              id: plan.currentVersion.id,
+              versionNum: currentDisplayVersionNum,
               changeType: plan.currentVersion.changeType,
               changeSummary: plan.currentVersion.changeSummary,
               effectiveFromDay: plan.currentVersion.effectiveFromDay,
+              changeMetadata: parseAdjustmentMetadata(plan.currentVersion.changeMetadata),
             },
+            versions: visibleVersions
+              .map((version) => ({
+                id: version.id,
+                versionNum: displayVersionById.get(version.id) ?? version.versionNum,
+                rawVersionNum: version.versionNum,
+                changeType: version.changeType,
+                changeSummary: version.changeSummary,
+                effectiveFromWeek: version.effectiveFromWeek,
+                effectiveFromDay: version.effectiveFromDay,
+                createdAtLabel: versionDateFormatter.format(version.createdAt),
+                isCurrent: version.id === plan.currentVersion.id,
+              })),
             generation,
             generationJob: latestGenerationJob
               ? {

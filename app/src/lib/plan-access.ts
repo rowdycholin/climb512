@@ -5,7 +5,39 @@ import {
   parsePlanSnapshot,
   toStoredJson,
   type PlanSnapshot,
+  type WeekSnapshot,
 } from "./plan-snapshot";
+import { composePlanSnapshotFromGeneratedWeeks } from "./plan-generation-state";
+
+function parseWeekSnapshot(raw: unknown): WeekSnapshot {
+  return raw as WeekSnapshot;
+}
+
+function snapshotForGenerationState(params: {
+  currentSnapshot: PlanSnapshot;
+  generationStatus: string;
+  generationJobs: Array<{
+    weeks: Array<{
+      weekSnapshot: unknown;
+    }>;
+  }>;
+}) {
+  const rows = params.generationJobs[0]?.weeks ?? [];
+  if (rows.length === 0) return params.currentSnapshot;
+
+  const generatedSnapshot = composePlanSnapshotFromGeneratedWeeks(
+    rows.map((row) => parseWeekSnapshot(row.weekSnapshot)),
+  );
+
+  if (
+    params.generationStatus === "ready" &&
+    params.currentSnapshot.weeks.length >= generatedSnapshot.weeks.length
+  ) {
+    return params.currentSnapshot;
+  }
+
+  return generatedSnapshot;
+}
 
 export async function findOwnedPlanById(planId: string, userId: string) {
   return prisma.plan.findFirst({
@@ -27,9 +59,26 @@ export async function findOwnedPlanWithLogs(planId: string, userId: string) {
     },
     include: {
       currentVersion: true,
+      versions: {
+        orderBy: { versionNum: "desc" },
+        select: {
+          id: true,
+          versionNum: true,
+          changeType: true,
+          changeSummary: true,
+          effectiveFromWeek: true,
+          effectiveFromDay: true,
+          createdAt: true,
+        },
+      },
       generationJobs: {
         orderBy: { updatedAt: "desc" },
         take: 1,
+        include: {
+          weeks: {
+            orderBy: { weekNum: "asc" },
+          },
+        },
       },
       workoutLogs: {
         where: { userId },
@@ -40,7 +89,11 @@ export async function findOwnedPlanWithLogs(planId: string, userId: string) {
 
   if (!plan || !plan.currentVersion) return null;
 
-  const snapshot = parsePlanSnapshot(plan.currentVersion.planSnapshot);
+  const snapshot = snapshotForGenerationState({
+    currentSnapshot: parsePlanSnapshot(plan.currentVersion.planSnapshot),
+    generationStatus: plan.generationStatus,
+    generationJobs: plan.generationJobs,
+  });
   const view = buildPlanView(snapshot, plan.workoutLogs);
 
   return {
@@ -73,12 +126,25 @@ async function findAuthorizedExercise(planId: string, userId: string, exerciseKe
     },
     include: {
       currentVersion: true,
+      generationJobs: {
+        orderBy: { updatedAt: "desc" },
+        take: 1,
+        include: {
+          weeks: {
+            orderBy: { weekNum: "asc" },
+          },
+        },
+      },
     },
   });
 
   if (!plan?.currentVersion) return null;
 
-  const snapshot = parsePlanSnapshot(plan.currentVersion.planSnapshot);
+  const snapshot = snapshotForGenerationState({
+    currentSnapshot: parsePlanSnapshot(plan.currentVersion.planSnapshot),
+    generationStatus: plan.generationStatus,
+    generationJobs: plan.generationJobs,
+  });
   const match = findExerciseInSnapshot(snapshot, exerciseKey);
   if (!match) return null;
 

@@ -10,7 +10,7 @@ Parts of this proposal are still future-facing, but the current editor has alrea
 - add / duplicate / delete are icon actions
 - the old `move to another training day` dropdown has been removed
 - logged weeks now allow additive custom exercises while preserving existing logged work
-- broader plan changes now live in `Adjust Plan`, which creates a future `PlanVersion` from the next unlogged day forward
+- broader plan changes now live in `Adjust Plan`, which creates a new `PlanVersion` after a scoped proposal is approved
 
 The main unresolved proposal in this document is still valid:
 

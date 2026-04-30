@@ -12,13 +12,14 @@ Files:
 - `app/src/lib/plan-request.ts`
 - `app/src/lib/intake.ts`
 - `app/src/lib/plan-adjustment-request.ts`
+- `app/src/lib/plan-adjustment-chat.ts`
 
 The plan page also has a day-level future adjustment flow in:
 
 - `app/src/components/PlanAdjuster.tsx`
-- `app/src/app/actions.ts` (`adjustFuturePlan`)
+- `app/src/app/actions.ts` (`applyConfirmedPlanAdjustment`)
 
-That adjustment flow uses deterministic rewriting today, but it is shaped around `PlanAdjustmentRequest` so a real AI adjustment provider can be plugged in later. The older constrained week-adjustment helper in `app/src/lib/ai-plan-adjuster.ts` still exists as legacy prototype code.
+That adjustment flow uses deterministic conversational proposal/scope inference and deterministic rewriting today, but it is shaped around `PlanAdjustmentRequest` and the adjustment chat proposal schema so a real AI adjustment provider can be plugged in later. The older constrained week-adjustment helper in `app/src/lib/ai-plan-adjuster.ts` still exists as legacy prototype code.
 
 ## Plan generation
 
@@ -33,7 +34,7 @@ Manual onboarding still uses the legacy generator input:
 - equipment
 - discipline
 
-Guided intake creates a plan shell, stores the original `PlanRequest` in `PlanVersion.profileSnapshot.planRequest`, and creates a `PlanGenerationJob`. The `plan-worker` service then generates one week at a time and saves a new partial `PlanVersion` after each week.
+Guided intake creates a plan shell, stores the original `PlanRequest` in a hidden operational shell `PlanVersion.profileSnapshot.planRequest`, and creates a `PlanGenerationJob`. The `plan-worker` service then generates one week at a time and saves each week in `PlanGenerationWeek`. When every week is ready, the worker creates the first user-facing generated `PlanVersion`.
 
 Manual onboarding still generates the full plan in the request/response path until the worker flow is stable.
 
@@ -63,25 +64,27 @@ Worker output:
 - each week contains 7 days
 - each day contains sessions and exercises
 
-That raw result is converted into:
+That raw result is stored as:
 
 - `profileSnapshot`
-- partial `planSnapshot`
+- one `PlanGenerationWeek.weekSnapshot` per generated week
 
-and persisted as a new `PlanVersion` after each generated week.
+When the job completes, the generated weeks are composed into a full `PlanVersion.planSnapshot`.
 
 ## Plan adjustment
 
 Future-plan adjustment starts from the plan page's `Adjust Plan` panel:
 
-1. the user selects a change reason and describes what should change
-2. the app calculates the next unlogged plan day
-3. locked historical days and recent logs are summarized in a `PlanAdjustmentRequest`
-4. the future portion of the plan is rewritten
-5. locked history is validated as unchanged
-6. the adjusted snapshot is saved as a new `PlanVersion`
+1. the user describes what should change in chat
+2. the app proposes a scoped adjustment with a summary and affected days
+3. the user can accept the inferred scope or choose a small override
+4. the app calculates the next unlogged plan day
+5. locked historical days and recent logs are summarized in a `PlanAdjustmentRequest`
+6. only approved unlogged days inside the scope are rewritten
+7. locked history and out-of-scope days are validated as unchanged
+8. the adjusted snapshot is saved as a new `PlanVersion` with `changeMetadata`
 
-The current rewrite step is deterministic. The intended AI integration point is the same request/response boundary, not a direct mutation of stored logs or old versions.
+The current proposal and rewrite steps are deterministic. The intended AI integration point is the same request/response boundary, not a direct mutation of stored logs or old versions.
 
 ## Response handling
 
@@ -135,9 +138,10 @@ AI output is not written into normalized `Week/Day/Exercise` tables.
 
 Instead:
 
-- generated plans become `PlanVersion.planSnapshot`
+- worker-generated weeks are stored in `PlanGenerationWeek` until the job completes
+- completed generated plans become `PlanVersion.planSnapshot`
 - manual onboarding inputs and guided-intake `PlanRequest` context become `PlanVersion.profileSnapshot`
-- future adjustments become new `PlanVersion` rows with `changeType = "ai_future_adjustment"` and `effectiveFromDay`
+- future adjustments become new `PlanVersion` rows with `changeType = "ai_chat_adjustment"`, `effectiveFromDay`, and `changeMetadata`
 - user history stays in `WorkoutLog`
 
 That makes generated plans easier to revise later without destroying historical logs.

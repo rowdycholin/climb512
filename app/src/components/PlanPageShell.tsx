@@ -2,8 +2,8 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { CheckCircle2, MessageCircle, PencilLine, RotateCcw, WandSparkles } from "lucide-react";
-import { completePlan, reopenPlan, repairPlanGeneration } from "@/app/actions";
+import { CheckCircle2, History, MessageCircle, PencilLine, RotateCcw, WandSparkles } from "lucide-react";
+import { completePlan, reopenPlan, repairPlanGeneration, revertPlanVersion } from "@/app/actions";
 import PlanWorkspace from "@/components/PlanWorkspace";
 import { Button } from "@/components/ui/button";
 
@@ -25,6 +25,8 @@ interface PlanPageShellProps {
     targetGrade: string;
     weeksDuration: number;
     goals: string[];
+    sport: string;
+    disciplines: string[];
     daysPerWeek: number;
     age: number;
     equipment: string[];
@@ -42,10 +44,32 @@ interface PlanPageShellProps {
       notes: string | null;
     };
     version: {
+      id: string;
+      versionNum: number;
       changeType: string;
       changeSummary: string | null;
       effectiveFromDay: number | null;
+      changeMetadata: {
+        affectedDays: Array<{
+          weekNum: number;
+          dayNum: number;
+          planDay: number;
+          dayName: string;
+          summary: string;
+        }>;
+      } | null;
     };
+    versions: Array<{
+      id: string;
+      versionNum: number;
+      rawVersionNum: number;
+      changeType: string;
+      changeSummary: string | null;
+      effectiveFromWeek: number | null;
+      effectiveFromDay: number | null;
+      createdAtLabel: string;
+      isCurrent: boolean;
+    }>;
     generation: {
       status: string;
       generatedWeeks: number;
@@ -79,7 +103,10 @@ export default function PlanPageShell({
   const [editorOpen, setEditorOpen] = useState(false);
   const [coachOpen, setCoachOpen] = useState(false);
   const [completionPanelOpen, setCompletionPanelOpen] = useState(false);
+  const [versionHistoryOpen, setVersionHistoryOpen] = useState(false);
   const [repairNotes, setRepairNotes] = useState(summary.generationJob?.repairNotes ?? "");
+  const [transientAdjustmentMetadata, setTransientAdjustmentMetadata] =
+    useState<typeof summary.version.changeMetadata>(null);
 
   const activeWeek = weeks[activeWeekIndex] ?? null;
   const activeWeekLocked = useMemo(
@@ -124,6 +151,13 @@ export default function PlanPageShell({
     });
   }
 
+  function versionTypeLabel(changeType: string) {
+    return changeType
+      .replace(/^ai_/, "AI ")
+      .replace(/_/g, " ")
+      .replace(/\b\w/g, (letter) => letter.toUpperCase());
+  }
+
   return (
     <>
       <div className="mb-6 overflow-hidden rounded-[1.5rem] border border-white/70 bg-[radial-gradient(circle_at_top_left,_rgba(14,165,233,0.14),_transparent_32%),linear-gradient(145deg,_rgba(255,255,255,0.98),_rgba(240,249,255,0.92)_52%,_rgba(255,251,235,0.86))] p-5 shadow-[0_20px_50px_rgba(15,23,42,0.10)]">
@@ -141,6 +175,17 @@ export default function PlanPageShell({
             )}
           </div>
           <div className="flex items-center gap-2">
+            <Button
+              type="button"
+              variant={versionHistoryOpen ? "default" : "outline"}
+              aria-label={versionHistoryOpen ? "Close version history" : "Open version history"}
+              title="Version history"
+              onClick={() => setVersionHistoryOpen((value) => !value)}
+              className={`gap-2 ${versionHistoryOpen ? "shadow-sm" : "border-white/80 bg-white/80 backdrop-blur"}`}
+            >
+              <History className="h-4 w-4" />
+              <span className="hidden sm:inline">Versions</span>
+            </Button>
             <Button
               type="button"
               variant={editorOpen ? "default" : "outline"}
@@ -197,6 +242,8 @@ export default function PlanPageShell({
         </div>
 
         <div className="mt-4 flex flex-wrap gap-3 text-sm text-slate-700">
+          <span>Version {summary.version.versionNum}</span>
+          <span>&middot;</span>
           <span>Goals: {summary.goals.join(", ")}</span>
           <span>&middot;</span>
           <span>{summary.daysPerWeek} days/week</span>
@@ -218,17 +265,85 @@ export default function PlanPageShell({
           )}
         </div>
 
+        {versionHistoryOpen && (
+          <div className="mt-4 rounded-xl border border-slate-200 bg-white/90 p-4 shadow-sm">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-sm font-semibold text-slate-800">Version History</p>
+                <p className="mt-1 text-xs text-slate-500">
+                  Reverting creates a new current version. Existing workout logs are preserved.
+                </p>
+              </div>
+              <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-xs text-slate-600">
+                Current v{summary.version.versionNum}
+              </span>
+            </div>
+            <div className="mt-3 max-h-80 space-y-2 overflow-y-auto pr-1">
+              {summary.versions.map((version) => (
+                <div
+                  key={version.id}
+                  className={`rounded-lg border px-3 py-3 text-sm ${
+                    version.isCurrent
+                      ? "border-blue-200 bg-blue-50 text-blue-900"
+                      : "border-slate-200 bg-white text-slate-700"
+                  }`}
+                >
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <p className="font-semibold">Version {version.versionNum}</p>
+                        {version.isCurrent && (
+                          <span className="rounded-full border border-blue-200 bg-blue-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-blue-700">
+                            Current
+                          </span>
+                        )}
+                        <span className="text-xs text-slate-500">{version.createdAtLabel}</span>
+                      </div>
+                      <p className="mt-1 text-xs font-medium text-slate-500">
+                        {versionTypeLabel(version.changeType)}
+                        {version.effectiveFromDay ? ` from day ${version.effectiveFromDay}` : version.effectiveFromWeek ? ` from week ${version.effectiveFromWeek}` : ""}
+                      </p>
+                      {version.changeSummary && (
+                        <p className="mt-1 line-clamp-2 text-sm text-slate-700">{version.changeSummary}</p>
+                      )}
+                    </div>
+                    {!version.isCurrent && (
+                      <form
+                        action={revertPlanVersion}
+                        onSubmit={(event) => {
+                          if (
+                            !window.confirm(
+                              `Revert to Version ${version.versionNum}? This creates a new current version and keeps workout logs.`,
+                            )
+                          ) {
+                            event.preventDefault();
+                          }
+                        }}
+                      >
+                        <input type="hidden" name="planId" value={planId} />
+                        <input type="hidden" name="versionId" value={version.id} />
+                        <Button
+                          type="submit"
+                          variant="outline"
+                          size="sm"
+                          aria-label={`Revert to Version ${version.versionNum}`}
+                          title={`Revert to Version ${version.versionNum}`}
+                        >
+                          Revert
+                        </Button>
+                      </form>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         {summary.completion.isUserCompleted && summary.completion.completedAtLabel && (
           <div className="mt-3 rounded-lg border border-emerald-200 bg-white/80 px-3 py-2 text-sm text-emerald-800">
             <p className="font-medium">Marked complete {summary.completion.completedAtLabel}</p>
             {summary.completion.notes && <p className="mt-1 text-emerald-700">{summary.completion.notes}</p>}
-          </div>
-        )}
-
-        {summary.version.changeType === "ai_future_adjustment" && summary.version.changeSummary && (
-          <div className="mt-3 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-800">
-            <p className="font-medium">Plan adjusted</p>
-            <p className="mt-1">{summary.version.changeSummary}</p>
           </div>
         )}
 
@@ -351,6 +466,10 @@ export default function PlanPageShell({
         weeks={weeks}
         totalWeeks={totalWeeks}
         generation={summary.generation}
+        sport={summary.sport}
+        disciplines={summary.disciplines}
+        adjustmentMetadata={transientAdjustmentMetadata}
+        onAdjustmentApplied={setTransientAdjustmentMetadata}
         activeWeekIndex={activeWeekIndex}
         initialDayIndex={initialDayIndex}
         editorOpen={editorOpen}

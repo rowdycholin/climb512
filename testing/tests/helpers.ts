@@ -55,6 +55,32 @@ function runSql(sql: string) {
   );
 }
 
+export function readSqlValue(sql: string) {
+  const repoRoot = path.resolve(__dirname, "..", "..");
+  return execFileSync(
+    "docker",
+    [
+      "compose",
+      "exec",
+      "-T",
+      "postgres",
+      "psql",
+      "postgresql://climber:climber512@postgres:5432/climbapp",
+      "-v",
+      "ON_ERROR_STOP=1",
+      "-t",
+      "-A",
+      "-c",
+      sql,
+    ],
+    {
+      cwd: repoRoot,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+    },
+  ).trim();
+}
+
 export function dockerServiceUsesSimulator(service: "web" | "plan-worker") {
   const repoRoot = path.resolve(__dirname, "..", "..");
 
@@ -209,7 +235,8 @@ export function seedFailedGenerationPlan(userId: string, suffix: string) {
   const versionId = `pw-repair-version-${suffix}`;
   const jobId = `pw-repair-job-${suffix}`;
   const profileSnapshot = buildGenerationProfileSnapshot();
-  const planSnapshot = buildGeneratedWeeksSnapshot([1, 2]);
+  const planSnapshot = { weeks: [] };
+  const generatedWeeks = buildGeneratedWeeksSnapshot([1, 2]).weeks;
 
   const sql = `
     INSERT INTO "Plan" (
@@ -225,7 +252,7 @@ export function seedFailedGenerationPlan(userId: string, suffix: string) {
       "id", "planId", "versionNum", "changeType", "changeSummary", "profileSnapshot", "planSnapshot"
     )
     VALUES (
-      '${versionId}', '${planId}', 1, 'worker_generation', 'Generated weeks 1 and 2 before failure',
+      '${versionId}', '${planId}', 1, 'worker_generation_started', 'Initial plan shell from test seed',
       '${JSON.stringify(profileSnapshot).replace(/'/g, "''")}'::jsonb,
       '${JSON.stringify(planSnapshot).replace(/'/g, "''")}'::jsonb
     );
@@ -239,6 +266,26 @@ export function seedFailedGenerationPlan(userId: string, suffix: string) {
     )
     SELECT
       '${jobId}', '${planId}', "id", 'failed', 4, 3, 'Simulated AI failure', NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+    FROM "User"
+    WHERE "userId" = '${userId}';
+
+    INSERT INTO "PlanGenerationWeek" (
+      "id", "jobId", "planId", "userId", "weekNum", "status", "weekSnapshot", "createdAt", "updatedAt"
+    )
+    SELECT
+      'pw-repair-week-${suffix}-1', '${jobId}', '${planId}', "id", 1, 'ready',
+      '${JSON.stringify(generatedWeeks[0]).replace(/'/g, "''")}'::jsonb,
+      CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+    FROM "User"
+    WHERE "userId" = '${userId}';
+
+    INSERT INTO "PlanGenerationWeek" (
+      "id", "jobId", "planId", "userId", "weekNum", "status", "weekSnapshot", "createdAt", "updatedAt"
+    )
+    SELECT
+      'pw-repair-week-${suffix}-2', '${jobId}', '${planId}', "id", 2, 'ready',
+      '${JSON.stringify(generatedWeeks[1]).replace(/'/g, "''")}'::jsonb,
+      CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
     FROM "User"
     WHERE "userId" = '${userId}';
   `;

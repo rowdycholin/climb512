@@ -16,7 +16,8 @@ Users can:
 - explicitly mark a plan complete, leave completion notes, and reopen it if needed
 - log workouts by week and day
 - edit a selected week directly, including adding extra trackable exercises after a day has logs
-- adjust the future plan from the next unlogged day when the plan is too hard, too easy, or life changes
+- adjust the plan through a conversational proposal flow that can target one day, one week, a date range, or future days from a point
+- review plan version history and revert by creating a new current version from an older accepted version
 - move around authenticated screens from a shared menu
 - use a shared vertical icon+label menu, with a chat bubble for AI/chat flows and a wrench for manual setup or editing
 - preserve history when plans change later
@@ -37,8 +38,9 @@ The current backend is designed around revision-safe plans:
 - plans are versioned
 - logs stay attached to the version they came from
 - future edits create new `PlanVersion` rows instead of mutating history
+- worker generation stores in-progress weeks in `PlanGenerationWeek` and creates one generated user-facing version when complete
 - calendar position comes from `Plan.startDate`, not completion state
-- broad plan adjustments start from the next unlogged day and preserve previous workout logs
+- broad plan adjustments preserve previous workout logs and validate that only approved unlogged days change
 
 The preferred UX direction is:
 
@@ -46,7 +48,7 @@ The preferred UX direction is:
 - mobile-friendly interactions
 - coach-led AI intake focused on producing a generic `PlanRequest`
 - AI focused on plan generation from validated inputs
-- AI-assisted plan adjustment through a day-level request contract; the first implementation uses deterministic future-plan rewriting until the real AI provider is plugged in
+- AI-assisted plan adjustment through a scoped day-level request contract; the current implementation uses deterministic proposal/rewrite behavior until the real AI provider is plugged in
 
 Current editing behavior:
 

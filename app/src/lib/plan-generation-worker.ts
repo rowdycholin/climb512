@@ -1,7 +1,7 @@
 import { prisma } from "./prisma";
 import { generateNextWeekFromPlanContext } from "./ai-plan-generator";
-import { getNextJobStatusAfterWeek } from "./plan-generation-state";
-import { parsePlanSnapshot, parseProfileSnapshot, toStoredJson, type PlanSnapshot, type ProfileSnapshot } from "./plan-snapshot";
+import { composePlanSnapshotFromGeneratedWeeks, getNextJobStatusAfterWeek } from "./plan-generation-state";
+import { parseProfileSnapshot, toStoredJson, type ProfileSnapshot, type WeekSnapshot } from "./plan-snapshot";
 import { buildPlanSnapshot } from "./plan-snapshot";
 import type { Prisma } from "@prisma/client";
 import type { WeekData } from "./plan-types";
@@ -23,14 +23,13 @@ export interface PlanGenerationWorkerOptions {
   username?: string;
 }
 
-function appendGeneratedWeek(snapshot: PlanSnapshot, week: WeekData): PlanSnapshot {
+function toWeekSnapshot(week: WeekData) {
   const [weekSnapshot] = buildPlanSnapshot([week]).weeks;
-  const weeks = snapshot.weeks
-    .filter((existing) => existing.weekNum !== week.weekNum)
-    .concat(weekSnapshot)
-    .sort((a, b) => a.weekNum - b.weekNum);
+  return weekSnapshot;
+}
 
-  return { weeks };
+function parseWeekSnapshot(raw: unknown): WeekSnapshot {
+  return raw as WeekSnapshot;
 }
 
 async function claimNextGenerationJob(lockTimeoutMs = DEFAULT_LOCK_TIMEOUT_MS) {
@@ -109,41 +108,74 @@ async function failGenerationJob(job: ClaimedGenerationJob, error: unknown) {
 async function saveGeneratedWeek(params: {
   job: ClaimedGenerationJob;
   profileSnapshot: ProfileSnapshot;
-  currentSnapshot: PlanSnapshot;
-  currentVersionId: string;
+  baseVersionId: string;
   week: WeekData;
 }) {
-  const { job, profileSnapshot, currentSnapshot, currentVersionId, week } = params;
-  const nextSnapshot = appendGeneratedWeek(currentSnapshot, week);
+  const { job, profileSnapshot, baseVersionId, week } = params;
+  const weekSnapshot = toWeekSnapshot(week);
   const nextWeekNum = week.weekNum + 1;
   const nextStatus = getNextJobStatusAfterWeek({ nextWeekNum: week.weekNum, totalWeeks: job.totalWeeks });
-  const generatedWeeks = nextSnapshot.weeks.length;
+
+  let savedGeneratedWeeks = 0;
 
   await prisma.$transaction(async (tx) => {
-    const latest = await tx.planVersion.findFirst({
-      where: { planId: job.planId },
-      orderBy: { versionNum: "desc" },
-      select: { versionNum: true },
-    });
-
-    const version = await tx.planVersion.create({
-      data: {
+    await tx.planGenerationWeek.upsert({
+      where: {
+        jobId_weekNum: {
+          jobId: job.id,
+          weekNum: week.weekNum,
+        },
+      },
+      create: {
+        jobId: job.id,
         planId: job.planId,
-        versionNum: (latest?.versionNum ?? 0) + 1,
-        basedOnVersionId: currentVersionId,
-        changeType: "worker_generation",
-        changeSummary: `Generated week ${week.weekNum} of ${job.totalWeeks}`,
-        effectiveFromWeek: week.weekNum,
-        effectiveFromDay: (week.weekNum - 1) * 7 + 1,
-        profileSnapshot: toStoredJson(profileSnapshot),
-        planSnapshot: toStoredJson(nextSnapshot),
+        userId: job.userId,
+        weekNum: week.weekNum,
+        status: "ready",
+        weekSnapshot: toStoredJson(weekSnapshot),
+      },
+      update: {
+        status: "ready",
+        weekSnapshot: toStoredJson(weekSnapshot),
       },
     });
+
+    const generatedRows = await tx.planGenerationWeek.findMany({
+      where: { jobId: job.id },
+      orderBy: { weekNum: "asc" },
+    });
+    const generatedWeeks = generatedRows.length;
+    savedGeneratedWeeks = generatedWeeks;
+    const generatedSnapshot = composePlanSnapshotFromGeneratedWeeks(
+      generatedRows.map((row) => parseWeekSnapshot(row.weekSnapshot)),
+    );
+
+    let finalVersionId: string | undefined;
+    if (nextStatus === "ready") {
+      const latest = await tx.planVersion.findFirst({
+        where: { planId: job.planId },
+        orderBy: { versionNum: "desc" },
+        select: { versionNum: true },
+      });
+
+      const version = await tx.planVersion.create({
+        data: {
+          planId: job.planId,
+          versionNum: (latest?.versionNum ?? 0) + 1,
+          basedOnVersionId: baseVersionId,
+          changeType: "generated",
+          changeSummary: "Initial AI-generated plan",
+          profileSnapshot: toStoredJson(profileSnapshot),
+          planSnapshot: toStoredJson(generatedSnapshot),
+        },
+      });
+      finalVersionId = version.id;
+    }
 
     await tx.plan.update({
       where: { id: job.planId },
       data: {
-        currentVersionId: version.id,
+        ...(finalVersionId ? { currentVersionId: finalVersionId } : {}),
         generationStatus: nextStatus,
         generationError: null,
         generatedWeeks,
@@ -164,7 +196,7 @@ async function saveGeneratedWeek(params: {
   });
 
   console.log(
-    `[plan-worker] saved week plan=${job.planId} job=${job.id} week=${week.weekNum}/${job.totalWeeks} generatedWeeks=${generatedWeeks} nextWeek=${nextWeekNum} nextStatus=${nextStatus}`,
+    `[plan-worker] saved week plan=${job.planId} job=${job.id} week=${week.weekNum}/${job.totalWeeks} generatedWeeks=${savedGeneratedWeeks} nextWeek=${nextWeekNum} nextStatus=${nextStatus}`,
   );
 }
 
@@ -181,6 +213,15 @@ export async function runOnePlanGenerationJob(options: PlanGenerationWorkerOptio
       include: {
         user: { select: { userId: true, age: true } },
         currentVersion: true,
+        generationJobs: {
+          where: { id: job.id },
+          include: {
+            weeks: {
+              orderBy: { weekNum: "asc" },
+            },
+          },
+          take: 1,
+        },
       },
     });
 
@@ -194,8 +235,9 @@ export async function runOnePlanGenerationJob(options: PlanGenerationWorkerOptio
       throw new Error(`Plan ${job.planId} is missing profileSnapshot.planRequest`);
     }
 
-    const currentSnapshot = parsePlanSnapshot(plan.currentVersion.planSnapshot);
-    const existingWeeks = currentSnapshot.weeks.filter((week) => week.weekNum < job.nextWeekNum);
+    const existingWeeks = (plan.generationJobs[0]?.weeks ?? [])
+      .map((row) => parseWeekSnapshot(row.weekSnapshot))
+      .filter((week) => week.weekNum < job.nextWeekNum);
     console.log(
       `[plan-worker] generating plan=${job.planId} job=${job.id} week=${job.nextWeekNum}/${job.totalWeeks} priorWeeks=${existingWeeks.length} sport=${planRequest.sport} user=${plan.user.userId}`,
     );
@@ -212,8 +254,7 @@ export async function runOnePlanGenerationJob(options: PlanGenerationWorkerOptio
     await saveGeneratedWeek({
       job,
       profileSnapshot,
-      currentSnapshot,
-      currentVersionId: plan.currentVersion.id,
+      baseVersionId: plan.currentVersion.id,
       week,
     });
 

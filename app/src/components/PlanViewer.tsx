@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { logExercise } from "@/app/actions";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
@@ -62,6 +62,16 @@ interface GenerationProgress {
   isFailed: boolean;
   isReady: boolean;
   error: string | null;
+}
+
+interface AdjustmentMetadata {
+  affectedDays: Array<{
+    weekNum: number;
+    dayNum: number;
+    planDay: number;
+    dayName: string;
+    summary: string;
+  }>;
 }
 
 const FOCUS_COLORS: Record<string, string> = {
@@ -326,11 +336,13 @@ function DayCard({
   planId,
   day,
   isHighlighted,
+  adjustmentSummary,
   onSelect,
 }: {
   planId: string;
   day: Day;
   isHighlighted: boolean;
+  adjustmentSummary: string | null;
   onSelect: (dayId: string) => void;
 }) {
   const colorClass = FOCUS_COLORS[day.focus] ?? "border-slate-200 bg-slate-100 text-slate-600";
@@ -340,12 +352,17 @@ function DayCard({
     .flatMap((session) => session.exercises)
     .filter((exercise) => exercise.logs[0]?.completed).length;
   const hasProgress = completedExercises > 0;
+  const isAdjusted = Boolean(adjustmentSummary);
 
   return (
     <AccordionItem
       value={day.id}
       className={`mb-2 overflow-hidden rounded-xl border ${
-        isHighlighted ? "border-blue-300 bg-blue-50/50" : "border-slate-200 bg-white"
+        isAdjusted
+          ? "border-amber-300 bg-amber-50/60"
+          : isHighlighted
+            ? "border-blue-300 bg-blue-50/50"
+            : "border-slate-200 bg-white"
       }`}
     >
       <AccordionTrigger
@@ -361,6 +378,11 @@ function DayCard({
           </div>
           <div className="min-w-0 flex-1">
             <span className="text-sm font-semibold text-slate-700">{day.focus}</span>
+            {isAdjusted && (
+              <span className="ml-2 rounded-full border border-amber-200 bg-amber-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-700">
+                Adjusted
+              </span>
+            )}
             {hasProgress && !day.isRest && (
               <span className="ml-2 text-xs text-green-600">{completedExercises}/{totalExercises} done</span>
             )}
@@ -374,6 +396,11 @@ function DayCard({
         </div>
       </AccordionTrigger>
       <AccordionContent className="border-t border-slate-100 px-4 pb-4 pt-3">
+        {adjustmentSummary && (
+          <p className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+            {adjustmentSummary}
+          </p>
+        )}
         {day.sessions.map((session) => (
           <SessionBlock key={session.id} planId={planId} session={session} />
         ))}
@@ -382,7 +409,17 @@ function DayCard({
   );
 }
 
-function WeekCard({ planId, week, initialDayIndex }: { planId: string; week: Week; initialDayIndex: number }) {
+function WeekCard({
+  planId,
+  week,
+  initialDayIndex,
+  adjustmentMetadata,
+}: {
+  planId: string;
+  week: Week;
+  initialDayIndex: number;
+  adjustmentMetadata?: AdjustmentMetadata | null;
+}) {
   const trainingDays = week.days.filter((day) => !day.isRest).length;
   const allExercises = week.days.flatMap((day) => day.sessions.flatMap((session) => session.exercises));
   const completedCount = allExercises.filter((exercise) => exercise.logs[0]?.completed).length;
@@ -390,6 +427,10 @@ function WeekCard({ planId, week, initialDayIndex }: { planId: string; week: Wee
 
   const [openDayIds, setOpenDayIds] = useState<string[]>(() => (initialDayId ? [initialDayId] : []));
   const [highlightedDayId, setHighlightedDayId] = useState<string | null>(initialDayId);
+  const adjustedByDay = useMemo(() => {
+    const entries = adjustmentMetadata?.affectedDays.filter((day) => day.weekNum === week.weekNum) ?? [];
+    return new Map(entries.map((day) => [day.dayNum, day.summary]));
+  }, [adjustmentMetadata?.affectedDays, week.weekNum]);
 
   useEffect(() => {
     setOpenDayIds(initialDayId ? [initialDayId] : []);
@@ -417,6 +458,7 @@ function WeekCard({ planId, week, initialDayIndex }: { planId: string; week: Wee
             planId={planId}
             day={day}
             isHighlighted={highlightedDayId ? day.id === highlightedDayId : index === initialDayIndex}
+            adjustmentSummary={adjustedByDay.get(day.dayNum) ?? null}
             onSelect={setHighlightedDayId}
           />
         ))}
@@ -454,6 +496,7 @@ export default function PlanViewer({
   weeks,
   totalWeeks = weeks.length,
   generation,
+  adjustmentMetadata,
   initialWeekIndex = 0,
   initialDayIndex = 0,
   activeWeekIndex,
@@ -463,6 +506,7 @@ export default function PlanViewer({
   weeks: Week[];
   totalWeeks?: number;
   generation?: GenerationProgress;
+  adjustmentMetadata?: AdjustmentMetadata | null;
   initialWeekIndex?: number;
   initialDayIndex?: number;
   activeWeekIndex?: number;
@@ -508,6 +552,9 @@ export default function PlanViewer({
           const pct = week && allExercises.length ? Math.round((done / allExercises.length) * 100) : 0;
           const isCurrent = index === initialWeekIndex;
           const isMissing = !week;
+          const adjustedCount = week
+            ? adjustmentMetadata?.affectedDays.filter((day) => day.weekNum === week.weekNum).length ?? 0
+            : 0;
 
           return (
             <button
@@ -537,6 +584,11 @@ export default function PlanViewer({
                   {pct}%
                 </span>
               )}
+              {adjustedCount > 0 && (
+                <span className={`mt-0.5 block text-[10px] ${resolvedActiveWeek === index ? "text-blue-100" : "text-amber-600"}`}>
+                  adjusted
+                </span>
+              )}
             </button>
           );
         })}
@@ -547,6 +599,7 @@ export default function PlanViewer({
           planId={planId}
           week={activeWeek}
           initialDayIndex={resolvedActiveWeek === initialWeekIndex ? initialDayIndex : -1}
+          adjustmentMetadata={adjustmentMetadata}
         />
       ) : (
         <MissingWeekCard weekNum={resolvedActiveWeek + 1} generation={resolvedGeneration} />

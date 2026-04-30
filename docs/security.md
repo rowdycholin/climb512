@@ -8,7 +8,7 @@ Date: 2026-04-26
 - a user may only log workouts against exercises inside plans they own
 - a user may only edit weeks or add custom exercises inside plans they own
 - AI generation may only create plans for the authenticated user
-- future-plan adjustment actions may only operate on plans the user owns
+- future-plan adjustment and revert actions may only operate on plans/versions the user owns
 
 ## Current enforcement
 
@@ -21,7 +21,8 @@ Key controls:
 - `upsertExerciseLogForUser()` verifies the submitted `exerciseKey` exists inside the user's current plan snapshot before writing a `WorkoutLog`
 - `saveEditedWeek()` rejects destructive edits to logged weeks and only operates on owned plans
 - logged-week manual additions preserve existing logged exercises and only append new custom work
-- `adjustFuturePlan()` loads plans through ownership-checked helpers and preserves locked history from previous logs
+- adjustment actions load plans through ownership-checked helpers and preserve locked history from previous logs
+- revert verifies the selected historical `PlanVersion` belongs to the authenticated user's plan before creating a new current version
 
 ## AI task boundaries
 
@@ -64,6 +65,7 @@ That login header is not sent to live provider URLs.
 - logged weeks are locked against manual structural edits
 - logged weeks allow additive custom exercises without rewriting old logs
 - future-plan adjustment preserves old logs and keeps the plan under the same `Plan`
+- scoped adjustment validation rejects out-of-scope changes and keeps logged days unchanged
 
 ## Test-only attack harness
 

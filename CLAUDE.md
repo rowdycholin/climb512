@@ -110,7 +110,13 @@ climb512/
 - logged weeks protect existing work but allow additive custom exercises that can be tracked normally
 - AI plan generation is live
 - a `plan-worker` Docker service can generate plan weeks sequentially from `PlanGenerationJob`
-- day-level future plan adjustment is available from the plan page and creates a new `PlanVersion` from the next unlogged plan day forward
+- generated worker weeks are stored in `PlanGenerationWeek`; the worker creates one user-facing generated `PlanVersion` after all weeks are ready
+- while worker generation is in progress, the current version is a hidden operational shell that stores profile/request context
+- the plan page composes `PlanGenerationWeek` rows for partial display, so Week 1 can be viewed while later weeks are still generating
+- interactive future plan adjustment is available from the plan page and creates a new `PlanVersion`
+- adjustment chat infers a small scope (`day_only`, `week_only`, `date_range`, or `future_from_day`), shows it before apply, allows a lightweight override, and server-validates that only approved unlogged days change
+- adjustment highlights are transient immediately after apply; after refresh/login/return, the plan displays normally
+- version history lists user-facing versions and supports revert by creating a new current version copied from the selected version
 - Docker defaults plan generation to the local `simulator` service
 
 ## Current Data Model
@@ -122,6 +128,8 @@ User
      |- completedAt/completionReason/completionNotes
      |- currentVersionId -> PlanVersion
      |- PlanVersion[]
+     |- PlanGenerationJob[]
+     |- PlanGenerationWeek[]
      -> WorkoutLog[]
 ```
 
@@ -136,6 +144,15 @@ User
 
 - `profileSnapshot`
 - `planSnapshot`
+- optional `changeMetadata` for adjustment/revert details
+
+`PlanGenerationJob` stores:
+
+- generation status, total weeks, next week number, lock/error/repair state
+
+`PlanGenerationWeek` stores:
+
+- one generated week snapshot per worker job/week while a plan is being built
 
 `WorkoutLog` stores:
 
@@ -189,12 +206,14 @@ npx playwright test tests/plan-viewer-progress.spec.ts
 - plan calendar/day-count helpers live in `app/src/lib/plan-calendar.ts`
 - snapshot parsing and shaping live in `app/src/lib/plan-snapshot.ts`
 - day-level plan adjustment request helpers live in `app/src/lib/plan-adjustment-request.ts`
+- interactive adjustment chat helpers live in `app/src/components/PlanAdjuster.tsx` and save through `applyConfirmedPlanAdjustment`
 - generic request schema and legacy adapter live in `app/src/lib/plan-request.ts`
 - guided intake template state and parsing lives in `app/src/lib/intake.ts`
 - intake template definitions live in `app/src/lib/intake-templates.ts`
 - onboarding and guided-intake generation requests go through `app/src/lib/ai-plan-generator.ts`
 - manual onboarding still uses legacy `PlanInput`; guided intake uses the `PlanRequest` worker generation path
 - sequential plan-week worker logic lives in `app/src/lib/plan-generation-worker.ts`
+- worker progress display composes `PlanGenerationWeek` rows through `app/src/lib/plan-access.ts`
 - simulator plan generation uses `PlanRequest` fields for sport selection, event vs ongoing themes, strength support, and injury/avoid-exercise substitutions
 - the simulator implements a local OpenAI-compatible backend for plan generation only
 - `docker-compose.dev.yml` overlays the base compose file for bind-mounted development
@@ -210,12 +229,14 @@ npx playwright test tests/plan-viewer-progress.spec.ts
 
 ## Editing Notes
 
-- `PlanEditor` is the main path for precise day edits
+- `PlanEditor` is the main path for precise manual day edits
 - saving edits creates a new `PlanVersion`
 - logged weeks are protected from structural edits
 - rest days can be edited and can receive new exercises
 - add / duplicate / delete controls are icon-driven inside edit mode
-- the future-plan adjuster currently uses deterministic rewriting behind the `PlanAdjustmentRequest` contract; a real AI provider can plug into the same boundary later
+- the adjustment chat currently uses deterministic proposal/scope inference behind the `PlanAdjustmentRequest` contract; a real AI provider can plug into the same boundary later
+- adjustment proposals show an inferred scope and grouped affected days before the user applies changes
+- logged days remain locked even when they fall inside the requested adjustment scope
 
 ## Operational Notes
 
@@ -231,4 +252,5 @@ npx playwright test tests/plan-viewer-progress.spec.ts
 
 - `npm run lint` is not yet the most reliable automation check
 - the simulator is only for plan generation today
+- Playwright uses global setup/teardown cleanup to remove test users (`@example.test` / `Playwright User`) before and after test runs
 - `docker-compose.dev.yml` is for local development; use base `docker-compose.yml` for production-style verification

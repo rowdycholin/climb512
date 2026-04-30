@@ -41,3 +41,13 @@ This file tracks known cleanup, risk, and follow-up items that are not blocking 
 - [x] Keep manual day editing available for additive extra exercises on logged days.
 - [x] Add the future plan adjustment flow that preserves logged workouts and adjusts from the next current unlogged day forward.
 - [ ] Replace the deterministic future-plan adjustment rules with the real AI provider once the provider contract is ready.
+
+## Plan Lifecycle
+
+- [ ] Remove the hidden `worker_generation_started` `PlanVersion` row.
+  - Store generation context somewhere else, then create the first `PlanVersion` only when generation completes.
+  - Add a cleanup path for old hidden shell rows.
+- [ ] Consider archive / soft-delete for plans before adding user-facing delete.
+  - Current database relations use cascade delete, so deleting a `Plan` also deletes its `PlanVersion`, `PlanGenerationJob`, and `WorkoutLog` rows.
+  - A user-facing "delete plan" action would currently be destructive to workout history.
+  - Prefer an archived/hidden state for normal user cleanup, with hard delete reserved for explicit destructive admin/account-removal flows.

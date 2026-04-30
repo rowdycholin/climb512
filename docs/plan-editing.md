@@ -11,7 +11,7 @@ Since this proposal was written, the app has already moved partway in this direc
 - the editor has icon-based add / duplicate / delete controls
 - the detailed edit section includes rest days, and adding an exercise converts that day to training
 - logged weeks protect existing work but allow additive custom exercises
-- the chat icon opens `Adjust Plan` for broader future-plan changes from the next unlogged day forward
+- the chat icon opens `Adjust Plan` for conversational scoped changes to one day, one week, a date range, or future days from a point
 
 What is still not finished:
 
@@ -76,6 +76,7 @@ AI-style adjustment should be optional support for broader plan changes:
 - `Adjust future training after missed time`
 - `Change the rest of the plan for travel`
 - `Shift future work around a new goal`
+- `Move this week's rest day to Saturday`
 
 That makes direct editing the precise tool and plan adjustment the broader coaching tool.
 
@@ -252,7 +253,8 @@ To protect history:
 
 - weeks with existing logs should not allow destructive structural edits by default
 - logged weeks may accept additive custom exercises that can be tracked normally
-- future-plan adjustments should start from the next unlogged day
+- future-plan adjustments should never rewrite logged days
+- scoped adjustments should only change approved days inside the proposal scope
 - prior weeks remain visible through older `PlanVersion` rows and existing `WorkoutLog` rows
 
 This keeps history trustworthy.

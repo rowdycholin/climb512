@@ -9,6 +9,10 @@ export default function PlanWorkspace({
   weeks,
   totalWeeks,
   generation,
+  sport,
+  disciplines,
+  adjustmentMetadata,
+  onAdjustmentApplied,
   activeWeekIndex,
   initialDayIndex,
   editorOpen,
@@ -21,6 +25,10 @@ export default function PlanWorkspace({
   weeks: Parameters<typeof PlanViewer>[0]["weeks"];
   totalWeeks: number;
   generation: Parameters<typeof PlanViewer>[0]["generation"];
+  sport: string;
+  disciplines: string[];
+  adjustmentMetadata: Parameters<typeof PlanViewer>[0]["adjustmentMetadata"];
+  onAdjustmentApplied?: (metadata: NonNullable<Parameters<typeof PlanViewer>[0]["adjustmentMetadata"]>) => void;
   activeWeekIndex: number;
   initialDayIndex: number;
   editorOpen: boolean;
@@ -44,8 +52,12 @@ export default function PlanWorkspace({
           <PlanAdjuster
             planId={planId}
             week={activeWeek}
+            weeks={weeks}
+            sport={sport}
+            disciplines={disciplines}
             isOpen={coachOpen}
             onOpenChange={onCoachOpenChange}
+            onAdjustmentApplied={onAdjustmentApplied}
           />
         </>
       )}
@@ -54,6 +66,7 @@ export default function PlanWorkspace({
         weeks={weeks}
         totalWeeks={totalWeeks}
         generation={generation}
+        adjustmentMetadata={adjustmentMetadata}
         initialWeekIndex={activeWeekIndex}
         initialDayIndex={initialDayIndex}
         activeWeekIndex={activeWeekIndex}

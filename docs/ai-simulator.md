@@ -8,9 +8,11 @@ The simulator is now implemented as a separate top-level service in:
 
 It currently supports **plan generation only**, including the sequential worker's next-week prompts.
 
+Interactive plan-adjustment testing uses deterministic app-side helpers in `app/src/lib/plan-adjustment-chat.ts` and `app/src/app/actions.ts`; it is not handled by this Docker simulator service.
+
 Out of scope for now:
 
-- future-plan adjustment generation
+- remote future-plan adjustment generation
 - remote AI intake responses
 - conversational coaching flows
 
@@ -155,7 +157,7 @@ This keeps plans believable enough for UI testing without pretending to be a rea
 The next reasonable simulator improvements would be:
 
 - more scenarios
-- an adjustment simulator that consumes `PlanAdjustmentRequest`
+- an HTTP adjustment simulator that consumes `PlanAdjustmentRequest`
 - fixture-backed regression cases
 - stronger log visibility and request introspection
 - explicit scenario overrides from tests

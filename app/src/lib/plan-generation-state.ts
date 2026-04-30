@@ -1,4 +1,4 @@
-import type { PlanSnapshot } from "./plan-snapshot";
+import type { PlanSnapshot, WeekSnapshot } from "./plan-snapshot";
 
 export const PLAN_GENERATION_STATUSES = ["pending", "generating", "ready", "failed"] as const;
 
@@ -10,6 +10,14 @@ export function isPlanGenerationStatus(value: string): value is PlanGenerationSt
 
 export function countGeneratedWeeks(snapshot: PlanSnapshot | null | undefined) {
   return snapshot?.weeks?.length ?? 0;
+}
+
+export function composePlanSnapshotFromGeneratedWeeks(weeks: WeekSnapshot[]): PlanSnapshot {
+  return {
+    weeks: weeks
+      .slice()
+      .sort((a, b) => a.weekNum - b.weekNum),
+  };
 }
 
 export function getPlanGenerationProgress(input: {

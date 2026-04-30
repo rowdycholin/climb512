@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { dockerServiceUsesSimulator, registerUser, seedPendingGenerationPlan } from "./helpers";
+import { dockerServiceUsesSimulator, readSqlValue, registerUser, seedPendingGenerationPlan } from "./helpers";
 
 test.skip(
   !dockerServiceUsesSimulator("web") || !dockerServiceUsesSimulator("plan-worker"),
@@ -29,4 +29,18 @@ test("worker generation shows partial progress before completing the plan", asyn
 
   await expect(page.getByText("Generating week")).toHaveCount(0, { timeout: 30_000 });
   await expect(page.getByRole("button", { name: "Complete plan" })).toBeEnabled();
+
+  expect(Number(readSqlValue(`SELECT COUNT(*) FROM "PlanGenerationWeek" WHERE "planId" = '${planId}';`))).toBe(4);
+  expect(Number(readSqlValue(`SELECT COUNT(*) FROM "PlanVersion" WHERE "planId" = '${planId}';`))).toBe(2);
+  expect(
+    Number(
+      readSqlValue(
+        `SELECT COUNT(*) FROM "PlanVersion" WHERE "planId" = '${planId}' AND "changeType" NOT IN ('worker_generation_started', 'worker_generation');`,
+      ),
+    ),
+  ).toBe(1);
+
+  await page.getByRole("button", { name: "Open version history" }).click();
+  await expect(page.getByText("Current v1")).toBeVisible();
+  await expect(page.getByText("Version 1").first()).toBeVisible();
 });

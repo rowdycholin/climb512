@@ -15,6 +15,7 @@ User
      |- currentVersionId -> PlanVersion
      |- PlanVersion (1:many)
      |- PlanGenerationJob (1:many)
+     |- PlanGenerationWeek (1:many)
      -> WorkoutLog (1:many)
 ```
 
@@ -87,6 +88,25 @@ Completed rows remain as durable generation history and debugging context.
 | createdAt | TIMESTAMPTZ | |
 | updatedAt | TIMESTAMPTZ | |
 
+### PlanGenerationWeek
+
+Stores one generated week snapshot while a worker job is still building the plan.
+
+| Column | Type | Notes |
+|---|---|---|
+| id | TEXT/cuid | Primary key |
+| jobId | TEXT | FK -> PlanGenerationJob |
+| planId | TEXT | FK -> Plan |
+| userId | TEXT | FK -> User.id |
+| weekNum | INTEGER | Generated week number |
+| weekSnapshot | JSONB | One normalized generated week |
+| createdAt | TIMESTAMPTZ | |
+| updatedAt | TIMESTAMPTZ | |
+
+Unique constraint: `(jobId, weekNum)`
+
+The plan page composes these rows for partial display while `Plan.generationStatus` is still `generating`. Once every week is ready, the worker creates the first user-facing generated `PlanVersion`.
+
 ### PlanVersion
 
 Stores one full accepted snapshot of the plan and the generation/profile inputs used to create or revise it.
@@ -103,6 +123,7 @@ Stores one full accepted snapshot of the plan and the generation/profile inputs 
 | effectiveFromDay | INTEGER? | Absolute plan day where a day-level adjustment begins |
 | profileSnapshot | JSONB | Generation/profile context, including guided-intake `planRequest` when available |
 | planSnapshot | JSONB | Full week/day/session/exercise snapshot |
+| changeMetadata | JSONB? | Adjustment/revert details such as affected days, approved scope, or selected version |
 | createdAt | TIMESTAMPTZ | |
 
 Unique constraint: `(planId, versionNum)`
@@ -234,7 +255,7 @@ This means a user can:
 - continue on Version 2
 - still review their old Week 1-3 prescribed work and logged performance later
 
-Day-level future adjustments use `PlanVersion.effectiveFromDay`, where day 1 is Week 1 Day 1 and day 8 is Week 2 Day 1. The app validates that logged historical days are not changed by an adjusted version.
+Day-level future adjustments use `PlanVersion.effectiveFromDay`, where day 1 is Week 1 Day 1 and day 8 is Week 2 Day 1. Interactive adjustments also store structured details in `PlanVersion.changeMetadata`, including affected day refs and approved scope. The app validates that logged historical days and out-of-scope days are not changed by an adjusted version.
 
 ## Key Design Rule
 

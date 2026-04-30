@@ -9,14 +9,15 @@ import {
   buildPlanSnapshot,
   createProfileSnapshot,
   type ExerciseSnapshot,
+  type DaySnapshot,
   parsePlanSnapshot,
   parseProfileSnapshot,
   toStoredJson,
-  type DaySnapshot,
   type PlanSnapshot,
   type ProfileSnapshot,
+  type WeekSnapshot,
 } from "@/lib/plan-snapshot";
-import { countGeneratedWeeks } from "@/lib/plan-generation-state";
+import { composePlanSnapshotFromGeneratedWeeks, countGeneratedWeeks } from "@/lib/plan-generation-state";
 import { generatePlanWithAI } from "@/lib/ai-plan-generator";
 import type { PlanInput } from "@/lib/plan-types";
 import { planRequestToLegacyPlanInput, type PlanRequest } from "@/lib/plan-request";
@@ -41,9 +42,15 @@ import {
 import { continuePlanIntakeWithAiContract } from "@/lib/plan-intake-ai";
 import {
   buildPlanAdjustmentRequest,
+  adjustmentScopeSchema,
   findNextUnloggedPlanDay,
   planDayFromWeekDay,
+  scopeContainsPlanDay,
+  scopeStartPlanDay,
+  validateAdjustmentScopeUnchanged,
   validateLockedHistoryUnchanged,
+  weekDayFromPlanDay,
+  type AdjustmentScope,
   type PlanAdjustmentReason,
   type WorkoutLogDayMarker,
 } from "@/lib/plan-adjustment-request";
@@ -62,6 +69,16 @@ export interface FuturePlanAdjustmentResponse {
   ok?: true;
   summary?: string;
   effectiveFrom?: string;
+}
+
+interface ConfirmedPlanAdjustmentInput {
+  planId: string;
+  reason: PlanAdjustmentReason;
+  feedback: string;
+  scope?: AdjustmentScope | null;
+  proposalSummary?: string | null;
+  proposalChanges?: string[];
+  goalChangeConfirmed?: boolean;
 }
 
 interface EditedExerciseInput {
@@ -201,6 +218,7 @@ async function createPlanVersion(params: {
   planSnapshot: PlanSnapshot;
   changeType: string;
   changeSummary?: string | null;
+  changeMetadata?: unknown;
   basedOnVersionId?: string | null;
   effectiveFromWeek?: number | null;
   effectiveFromDay?: number | null;
@@ -211,6 +229,7 @@ async function createPlanVersion(params: {
     planSnapshot,
     changeType,
     changeSummary,
+    changeMetadata,
     basedOnVersionId,
     effectiveFromWeek,
     effectiveFromDay,
@@ -229,6 +248,7 @@ async function createPlanVersion(params: {
       basedOnVersionId: basedOnVersionId ?? null,
       changeType,
       changeSummary: changeSummary ?? null,
+      ...(changeMetadata === undefined ? {} : { changeMetadata: toStoredJson(changeMetadata) }),
       effectiveFromWeek: effectiveFromWeek ?? null,
       effectiveFromDay: effectiveFromDay ?? null,
       profileSnapshot: toStoredJson(profileSnapshot),
@@ -569,8 +589,8 @@ function adjustedExercise(exercise: ExerciseSnapshot, reason: PlanAdjustmentReas
     reps: direction === "easier" ? numberText(exercise.reps, "easier") : exercise.reps,
     duration: durationText(exercise.duration, direction),
     notes: direction === "easier"
-      ? "Adjusted easier; keep effort controlled"
-      : "Adjusted harder; stop before form breaks",
+      ? "Keep effort controlled and stop before form breaks."
+      : "Use the stronger stimulus only while movement quality stays high.",
   };
 }
 
@@ -584,8 +604,8 @@ function adjustedDay(day: DaySnapshot, reason: PlanAdjustmentReason, feedback: s
       ...session,
       duration: reason === "too_easy" ? session.duration + 5 : Math.max(20, session.duration - 5),
       description: reason === "too_easy"
-        ? "Adjusted upward for a stronger training stimulus."
-        : "Adjusted to protect recovery and consistency.",
+        ? "Use a stronger training stimulus while movement quality stays high."
+        : "Protect recovery and keep the session consistent.",
       exercises: session.exercises.map((exercise) => adjustedExercise(exercise, reason, feedback)),
     })),
   };
@@ -596,27 +616,129 @@ function buildAdjustedFutureSnapshot(
   effectiveFromPlanDay: number,
   reason: PlanAdjustmentReason,
   feedback: string,
+  scope?: AdjustmentScope | null,
+  lockedPlanDays = new Set<number>(),
 ) {
   const nextSnapshot = parsePlanSnapshot(JSON.parse(JSON.stringify(currentSnapshot)));
+  const changeStartPlanDay = Math.max(effectiveFromPlanDay, scope ? scopeStartPlanDay(scope) : effectiveFromPlanDay);
 
   nextSnapshot.weeks = nextSnapshot.weeks.map((week) => ({
     ...week,
-    theme: week.days.some((day) => planDayFromWeekDay(week.weekNum, day.dayNum) >= effectiveFromPlanDay)
-      ? `${week.theme} (Adjusted)`
-      : week.theme,
     days: week.days.map((day) => {
       const planDay = planDayFromWeekDay(week.weekNum, day.dayNum);
-      if (planDay < effectiveFromPlanDay) return day;
+      if (planDay < changeStartPlanDay) return day;
+      if (scope && !scopeContainsPlanDay(scope, planDay)) return day;
+      if (lockedPlanDays.has(planDay)) return day;
       return adjustedDay(day, reason, feedback);
     }),
   }));
 
   validateLockedHistoryUnchanged(currentSnapshot, nextSnapshot, effectiveFromPlanDay);
+  if (scope) {
+    validateAdjustmentScopeUnchanged(currentSnapshot, nextSnapshot, scope, changeStartPlanDay);
+  }
   return nextSnapshot;
+}
+
+function validateLoggedDaysUnchanged(original: PlanSnapshot, adjusted: PlanSnapshot, lockedPlanDays: Set<number>) {
+  if (lockedPlanDays.size === 0) return;
+
+  const adjustedDays = new Map<string, DaySnapshot>();
+  for (const week of adjusted.weeks) {
+    for (const day of week.days) {
+      adjustedDays.set(`${week.weekNum}:${day.dayNum}`, day);
+    }
+  }
+
+  for (const week of original.weeks) {
+    for (const day of week.days) {
+      const planDay = planDayFromWeekDay(week.weekNum, day.dayNum);
+      if (!lockedPlanDays.has(planDay)) continue;
+
+      const adjustedDay = adjustedDays.get(`${week.weekNum}:${day.dayNum}`);
+      if (!adjustedDay || JSON.stringify(day) !== JSON.stringify(adjustedDay)) {
+        throw new Error(`Adjusted plan changed logged day week ${week.weekNum} day ${day.dayNum}`);
+      }
+    }
+  }
 }
 
 function formatEffectiveFrom(effectiveFrom: { weekNum: number; dayNum: number; date: string }) {
   return `Week ${effectiveFrom.weekNum}, Day ${effectiveFrom.dayNum} (${effectiveFrom.date})`;
+}
+
+function parseAdjustmentScope(value: FormDataEntryValue | null) {
+  if (typeof value !== "string" || !value.trim()) return null;
+  try {
+    return adjustmentScopeSchema.parse(JSON.parse(value));
+  } catch {
+    return null;
+  }
+}
+
+function parseProposalChanges(value: FormDataEntryValue | null) {
+  if (typeof value !== "string" || !value.trim()) return [];
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((item): item is string => typeof item === "string" && item.trim().length > 0).slice(0, 12);
+  } catch {
+    return [];
+  }
+}
+
+function formatAdjustmentSummary(params: {
+  feedback: string;
+  effectiveLabel: string;
+}) {
+  const feedback = params.feedback.trim().replace(/\s+/g, " ").slice(0, 500);
+  if (feedback) {
+    return `Request: ${feedback}. Effective from ${params.effectiveLabel}.`;
+  }
+
+  return `Adjusted future plan from ${params.effectiveLabel}.`;
+}
+
+function collectChangedDayRefs(original: PlanSnapshot, adjusted: PlanSnapshot, effectiveFromPlanDay: number) {
+  const adjustedDays = new Map<string, DaySnapshot>();
+  for (const week of adjusted.weeks) {
+    for (const day of week.days) {
+      adjustedDays.set(`${week.weekNum}:${day.dayNum}`, day);
+    }
+  }
+
+  const refs: Array<{ weekNum: number; dayNum: number; planDay: number; dayName: string; summary: string }> = [];
+  for (const week of original.weeks) {
+    for (const day of week.days) {
+      const planDay = planDayFromWeekDay(week.weekNum, day.dayNum);
+      if (planDay < effectiveFromPlanDay) continue;
+
+      const adjustedDay = adjustedDays.get(`${week.weekNum}:${day.dayNum}`);
+      if (!adjustedDay || JSON.stringify(day) === JSON.stringify(adjustedDay)) continue;
+
+      refs.push({
+        weekNum: week.weekNum,
+        dayNum: day.dayNum,
+        planDay,
+        dayName: adjustedDay.dayName,
+        summary: `${day.focus} -> ${adjustedDay.focus}`,
+      });
+    }
+  }
+
+  return refs;
+}
+
+function dayRefForPlanDayFromStart(startDate: Date, planDay: number) {
+  const { weekNum, dayNum } = weekDayFromPlanDay(planDay);
+  const date = new Date(startDate);
+  date.setDate(date.getDate() + planDay - 1);
+  return {
+    weekNum,
+    dayNum,
+    planDay,
+    date: date.toISOString().slice(0, 10),
+  };
 }
 
 export async function login(_prevState: unknown, formData: FormData) {
@@ -867,6 +989,53 @@ export async function reopenPlan(formData: FormData) {
   redirect(`/plan/${plan.id}`);
 }
 
+export async function revertPlanVersion(formData: FormData) {
+  const session = await getSession();
+  if (!session.isLoggedIn) redirect("/login");
+
+  const planId = formData.get("planId");
+  const versionId = formData.get("versionId");
+  if (typeof planId !== "string" || typeof versionId !== "string") redirect("/dashboard");
+
+  const plan = await prisma.plan.findFirst({
+    where: { id: planId, userId: session.userId },
+    include: {
+      currentVersion: true,
+      versions: {
+        where: { id: versionId },
+        take: 1,
+      },
+    },
+  });
+
+  const selectedVersion = plan?.versions[0] ?? null;
+  if (!plan?.currentVersion || !selectedVersion) redirect("/dashboard");
+
+  if (plan.currentVersion.id === selectedVersion.id) {
+    redirect(`/plan/${plan.id}`);
+  }
+
+  await createPlanVersion({
+    planId: plan.id,
+    profileSnapshot: parseProfileSnapshot(selectedVersion.profileSnapshot),
+    planSnapshot: parsePlanSnapshot(selectedVersion.planSnapshot),
+    changeType: "revert",
+    changeSummary: selectedVersion.changeSummary,
+    changeMetadata: {
+      type: "revert",
+      revertedToVersionId: selectedVersion.id,
+      revertedToVersionNum: selectedVersion.versionNum,
+      revertedFromVersionId: plan.currentVersion.id,
+      revertedFromVersionNum: plan.currentVersion.versionNum,
+    },
+    basedOnVersionId: plan.currentVersion.id,
+    effectiveFromWeek: null,
+    effectiveFromDay: null,
+  });
+
+  redirect(`/plan/${plan.id}`);
+}
+
 export async function repairPlanGeneration(formData: FormData) {
   const session = await getSession();
   if (!session.isLoggedIn) redirect("/login");
@@ -896,30 +1065,39 @@ export async function repairPlanGeneration(formData: FormData) {
 
   if (!job) redirect(`/plan/${plan.id}`);
 
-  const snapshot = parsePlanSnapshot(plan.currentVersion.planSnapshot);
-  const generatedWeeks = countGeneratedWeeks(snapshot);
+  const generatedRows = await prisma.planGenerationWeek.findMany({
+    where: {
+      jobId: job.id,
+      planId: plan.id,
+      userId: session.userId,
+    },
+    orderBy: { weekNum: "asc" },
+  });
+  const generatedWeeks = generatedRows.length;
 
   if (generatedWeeks >= job.totalWeeks) {
-    await prisma.$transaction([
-      prisma.planGenerationJob.update({
-        where: { id: job.id },
-        data: {
-          status: "ready",
-          lastError: null,
-          lockedAt: null,
-          repairNotes: null,
-        },
-      }),
-      prisma.plan.update({
-        where: { id: plan.id },
-        data: {
-          generationStatus: "ready",
-          generationError: null,
-          generatedWeeks,
-          updatedAt: new Date(),
-        },
-      }),
-    ]);
+    const generatedSnapshot = composePlanSnapshotFromGeneratedWeeks(
+      generatedRows.map((row) => row.weekSnapshot as unknown as WeekSnapshot),
+    );
+
+    await createPlanVersion({
+      planId: plan.id,
+      profileSnapshot: parseProfileSnapshot(plan.currentVersion.profileSnapshot),
+      planSnapshot: generatedSnapshot,
+      changeType: "generated",
+      changeSummary: "Initial AI-generated plan",
+      basedOnVersionId: plan.currentVersion.id,
+    });
+
+    await prisma.planGenerationJob.update({
+      where: { id: job.id },
+      data: {
+        status: "ready",
+        lastError: null,
+        lockedAt: null,
+        repairNotes: null,
+      },
+    });
 
     redirect(`/plan/${plan.id}`);
   }
@@ -928,9 +1106,17 @@ export async function repairPlanGeneration(formData: FormData) {
     job.totalWeeks,
     Math.max(1, job.nextWeekNum, generatedWeeks + 1),
   );
+  const retainedGeneratedWeeks = generatedRows.filter((row) => row.weekNum < resumeWeek).length;
 
-  await prisma.$transaction([
-    prisma.planGenerationJob.update({
+  await prisma.$transaction(async (tx) => {
+    await tx.planGenerationWeek.deleteMany({
+      where: {
+        jobId: job.id,
+        weekNum: { gte: resumeWeek },
+      },
+    });
+
+    await tx.planGenerationJob.update({
       where: { id: job.id },
       data: {
         status: "pending",
@@ -939,17 +1125,18 @@ export async function repairPlanGeneration(formData: FormData) {
         lockedAt: null,
         repairNotes,
       },
-    }),
-    prisma.plan.update({
+    });
+
+    await tx.plan.update({
       where: { id: plan.id },
       data: {
         generationStatus: "generating",
         generationError: null,
-        generatedWeeks,
+        generatedWeeks: retainedGeneratedWeeks,
         updatedAt: new Date(),
       },
-    }),
-  ]);
+    });
+  });
 
   console.log(
     `[web] repaired plan generation plan=${plan.id} job=${job.id} resumeWeek=${resumeWeek}/${job.totalWeeks}`,
@@ -984,18 +1171,14 @@ export async function logExercise(formData: FormData) {
   });
 }
 
-export async function adjustFuturePlan(formData: FormData): Promise<FuturePlanAdjustmentResponse> {
+async function saveConfirmedFutureAdjustment(input: ConfirmedPlanAdjustmentInput): Promise<FuturePlanAdjustmentResponse> {
   const session = await getSession();
   if (!session.isLoggedIn) return { error: "Please sign in again" };
 
-  const planId = formData.get("planId");
-  const feedback = (formData.get("feedback") as string | null)?.trim() ?? "";
-  const reason = parseAdjustmentReason(formData.get("reason"));
+  if (!input.planId) return { error: "Missing plan" };
+  if (!input.feedback) return { error: "Tell the coach what needs to change first" };
 
-  if (typeof planId !== "string") return { error: "Missing plan" };
-  if (!feedback) return { error: "Tell the coach what needs to change first" };
-
-  const plan = await findOwnedPlanWithLogs(planId, session.userId);
+  const plan = await findOwnedPlanWithLogs(input.planId, session.userId);
   if (!plan) return { error: "Plan not found" };
 
   const currentSnapshot = plan.currentVersion.planSnapshot;
@@ -1008,6 +1191,7 @@ export async function adjustFuturePlan(formData: FormData): Promise<FuturePlanAd
     exerciseName: log.exerciseName,
     completed: log.completed,
   }));
+  const lockedPlanDays = new Set(logs.map((log) => planDayFromWeekDay(log.weekNum, log.dayNum)));
 
   const effectiveFrom = findNextUnloggedPlanDay({
     planStartDate: plan.startDate,
@@ -1020,10 +1204,15 @@ export async function adjustFuturePlan(formData: FormData): Promise<FuturePlanAd
     return { error: "There are no unlogged days left to adjust in this plan" };
   }
 
+  const scopedStartPlanDay = input.scope
+    ? Math.max(effectiveFrom.planDay, scopeStartPlanDay(input.scope))
+    : effectiveFrom.planDay;
+  const scopedEffectiveFrom = dayRefForPlanDayFromStart(plan.startDate, scopedStartPlanDay);
+
   const adjustmentRequest = buildPlanAdjustmentRequest({
-    reason,
-    userFeedback: feedback,
-    effectiveFrom,
+    reason: input.reason,
+    userFeedback: input.feedback,
+    effectiveFrom: scopedEffectiveFrom,
     planStartDate: plan.startDate,
     currentVersion: {
       id: plan.currentVersion.id,
@@ -1039,16 +1228,34 @@ export async function adjustFuturePlan(formData: FormData): Promise<FuturePlanAd
       adjustmentRequest.effectiveFrom.planDay,
       adjustmentRequest.reason,
       adjustmentRequest.userFeedback,
+      input.scope,
+      lockedPlanDays,
     );
+    validateLoggedDaysUnchanged(currentSnapshot, nextSnapshot, lockedPlanDays);
     const effectiveLabel = formatEffectiveFrom(adjustmentRequest.effectiveFrom);
-    const summary = `Adjusted future plan from ${effectiveLabel}`;
+    const summary = formatAdjustmentSummary({
+      feedback: input.feedback,
+      effectiveLabel,
+    });
+    const affectedDays = collectChangedDayRefs(
+      currentSnapshot,
+      nextSnapshot,
+      adjustmentRequest.effectiveFrom.planDay,
+    );
 
     await createPlanVersion({
-      planId,
+      planId: input.planId,
       profileSnapshot,
       planSnapshot: nextSnapshot,
-      changeType: "ai_future_adjustment",
+      changeType: "ai_chat_adjustment",
       changeSummary: summary,
+      changeMetadata: {
+        type: "ai_chat_adjustment",
+        summary,
+        changes: input.proposalChanges ?? [],
+        scope: input.scope ?? null,
+        affectedDays,
+      },
       basedOnVersionId: plan.currentVersion.id,
       effectiveFromWeek: adjustmentRequest.effectiveFrom.weekNum,
       effectiveFromDay: adjustmentRequest.effectiveFrom.planDay,
@@ -1062,6 +1269,39 @@ export async function adjustFuturePlan(formData: FormData): Promise<FuturePlanAd
   } catch (error) {
     return { error: (error as Error).message };
   }
+}
+
+export async function applyConfirmedPlanAdjustment(formData: FormData): Promise<FuturePlanAdjustmentResponse> {
+  const planId = formData.get("planId");
+  const feedback = (formData.get("feedback") as string | null)?.trim() ?? "";
+  const proposalSummary = (formData.get("proposalSummary") as string | null)?.trim() ?? null;
+  const goalChangeConfirmed = formData.get("goalChangeConfirmed") === "true";
+
+  if (typeof planId !== "string") return { error: "Missing plan" };
+  if (formData.get("requiresGoalChangeConfirmation") === "true" && !goalChangeConfirmed) {
+    return { error: "Confirm the goal change before applying this adjustment" };
+  }
+
+  return saveConfirmedFutureAdjustment({
+    planId,
+    feedback,
+    reason: parseAdjustmentReason(formData.get("reason")),
+    scope: parseAdjustmentScope(formData.get("adjustmentScope")),
+    proposalSummary,
+    proposalChanges: parseProposalChanges(formData.get("proposalChanges")),
+    goalChangeConfirmed,
+  });
+}
+
+export async function adjustFuturePlan(formData: FormData): Promise<FuturePlanAdjustmentResponse> {
+  const planId = formData.get("planId");
+  if (typeof planId !== "string") return { error: "Missing plan" };
+
+  return saveConfirmedFutureAdjustment({
+    planId,
+    feedback: (formData.get("feedback") as string | null)?.trim() ?? "",
+    reason: parseAdjustmentReason(formData.get("reason")),
+  });
 }
 
 export async function suggestPlanAdjustment(formData: FormData): Promise<PlanAdjustmentResponse> {

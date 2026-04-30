@@ -7,59 +7,81 @@ datasource db {
 }
 
 model User {
-  id             String              @id @default(cuid())
-  userId         String              @unique
-  firstName      String
-  lastName       String
-  email          String              @unique
-  age            Int
-  passwordHash   String
-  createdAt      DateTime            @default(now()) @db.Timestamptz(3)
-  plans          Plan[]
-  workoutLogs    WorkoutLog[]
-  generationJobs PlanGenerationJob[]
+  id              String               @id @default(cuid())
+  userId          String               @unique
+  firstName       String
+  lastName        String
+  email           String               @unique
+  age             Int
+  passwordHash    String
+  createdAt       DateTime             @default(now()) @db.Timestamptz(3)
+  plans           Plan[]
+  workoutLogs     WorkoutLog[]
+  generationJobs  PlanGenerationJob[]
+  generationWeeks PlanGenerationWeek[]
 }
 
 model Plan {
-  id               String              @id @default(cuid())
+  id               String               @id @default(cuid())
   userId           String
-  user             User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user             User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
   title            String?
-  currentVersionId String?             @unique
-  currentVersion   PlanVersion?        @relation("CurrentPlanVersion", fields: [currentVersionId], references: [id], onDelete: SetNull, onUpdate: Cascade)
-  versions         PlanVersion[]       @relation("PlanVersions")
+  currentVersionId String?              @unique
+  currentVersion   PlanVersion?         @relation("CurrentPlanVersion", fields: [currentVersionId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  versions         PlanVersion[]        @relation("PlanVersions")
   generationJobs   PlanGenerationJob[]
+  generationWeeks  PlanGenerationWeek[]
   workoutLogs      WorkoutLog[]
-  startDate        DateTime            @default(now()) @db.Timestamptz(3)
-  generationStatus String              @default("ready")
+  startDate        DateTime             @default(now()) @db.Timestamptz(3)
+  generationStatus String               @default("ready")
   generationError  String?
-  generatedWeeks   Int                 @default(0)
-  completedAt      DateTime?           @db.Timestamptz(3)
+  generatedWeeks   Int                  @default(0)
+  completedAt      DateTime?            @db.Timestamptz(3)
   completionReason String?
   completionNotes  String?
-  createdAt        DateTime            @default(now()) @db.Timestamptz(3)
-  updatedAt        DateTime            @updatedAt @db.Timestamptz(3)
+  createdAt        DateTime             @default(now()) @db.Timestamptz(3)
+  updatedAt        DateTime             @updatedAt @db.Timestamptz(3)
 
   @@index([userId])
   @@index([generationStatus])
 }
 
 model PlanGenerationJob {
-  id          String    @id @default(cuid())
+  id          String               @id @default(cuid())
   planId      String
-  plan        Plan      @relation(fields: [planId], references: [id], onDelete: Cascade)
+  plan        Plan                 @relation(fields: [planId], references: [id], onDelete: Cascade)
   userId      String
-  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  status      String    @default("pending")
+  user        User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  status      String               @default("pending")
   totalWeeks  Int
-  nextWeekNum Int       @default(1)
+  nextWeekNum Int                  @default(1)
   lastError   String?
   repairNotes String?
-  lockedAt    DateTime? @db.Timestamptz(3)
-  createdAt   DateTime  @default(now()) @db.Timestamptz(3)
-  updatedAt   DateTime  @updatedAt @db.Timestamptz(3)
+  lockedAt    DateTime?            @db.Timestamptz(3)
+  createdAt   DateTime             @default(now()) @db.Timestamptz(3)
+  updatedAt   DateTime             @updatedAt @db.Timestamptz(3)
+  weeks       PlanGenerationWeek[]
 
   @@index([status, lockedAt])
+  @@index([planId])
+  @@index([userId])
+}
+
+model PlanGenerationWeek {
+  id           String            @id @default(cuid())
+  jobId        String
+  job          PlanGenerationJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  planId       String
+  plan         Plan              @relation(fields: [planId], references: [id], onDelete: Cascade)
+  userId       String
+  user         User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  weekNum      Int
+  status       String            @default("ready")
+  weekSnapshot Json
+  createdAt    DateTime          @default(now()) @db.Timestamptz(3)
+  updatedAt    DateTime          @updatedAt @db.Timestamptz(3)
+
+  @@unique([jobId, weekNum])
   @@index([planId])
   @@index([userId])
 }
@@ -76,6 +98,7 @@ model PlanVersion {
   changeSummary     String?
   effectiveFromWeek Int?
   effectiveFromDay  Int?
+  changeMetadata    Json?
   profileSnapshot   Json
   planSnapshot      Json
   createdAt         DateTime      @default(now()) @db.Timestamptz(3)

@@ -194,10 +194,11 @@ For ongoing goals, the app should ask for a training block length directly.
 
 Users should be able to adjust a plan mid-plan when it is too hard, too easy, or life changes.
 
-The adjustment should start from the next current unlogged day forward:
+The first adjustment flow starts from the next current unlogged day forward, and the newer interactive flow can narrow that with an approved scope:
 
 - if today has no logged exercises, the revised plan can start today
 - if today has logged exercises, the revised plan should start on the next unlogged day
+- scoped changes can be day-only, week-only, date-range, or future-from-day
 - completed or logged workouts should never be rewritten
 - previous workout logs should remain visible after the plan changes
 - the adjusted plan should remain the same plan in My Plans, not appear as a separate plan
@@ -224,12 +225,14 @@ Planned generation additions:
 - `Plan.generationError`: nullable failure message
 - `Plan.generatedWeeks`: number of completed generated weeks
 - `PlanGenerationJob`: durable job row for sequential week generation
+- `PlanGenerationWeek`: one generated week snapshot per job/week while the worker builds a plan
 
 Implemented schema addition:
 
 - `PlanVersion.effectiveFromDay Int?`
+- `PlanVersion.changeMetadata Json?`
 
-The app also has `effectiveFromWeek`; day-level adjustment now uses absolute plan-day metadata. A later version may add more precise exercise-level metadata, but day-level is enough for the current implementation.
+The app also has `effectiveFromWeek`; day-level adjustment now uses absolute plan-day metadata. Adjustment metadata stores affected day refs, scope, and revert details where useful.
 
 ## Simulator Direction
 
@@ -239,7 +242,7 @@ Recommended simulator modes:
 
 - intake simulator: conversation plus checklist hints plus current draft -> `PlanRequest` draft and next question
 - plan generation simulator: completed `PlanRequest` -> generated plan JSON
-- adjustment simulator: `PlanAdjustmentRequest` plus current plan and logs -> revised future plan JSON
+- adjustment simulator: deterministic scoped proposal/validation behavior for local tests until the real AI adjustment provider is plugged in
 
 This keeps the simulator useful for local development and Playwright tests without forcing sport-specific parsing into production code.
 
@@ -404,12 +407,12 @@ Validation before moving on:
 
 Status: complete for the first day-level adjustment flow. The current implementation uses deterministic adjustment rules behind the `PlanAdjustmentRequest` contract; a later iteration can replace that generator step with the real AI provider without changing the request/validation boundary.
 
-Goal: allow the user to chat about a plan change and create a new version from the next unlogged day forward.
+Goal: allow the user to chat about a plan change and create a new version without rewriting logged history.
 
 Product direction: Phase 6 has two plan-change paths.
 
 - Manual day edits are for precise changes to a specific day. They remain available even after a day has logs, but logged work is protected and only additive custom exercises can be saved.
-- AI plan adjustments are for broader future-plan changes such as too hard, too easy, missed time, injury, travel, schedule changes, or a new goal. These should start from the next unlogged day and preserve locked history.
+- AI plan adjustments are for broader plan changes such as too hard, too easy, missed time, injury, travel, schedule changes, or a new goal. The first flow adjusted from the next unlogged day; Phase 8 adds conversational scope so a proposal can target one day, one week, a date range, or future days from a point.
 
 Recommended flow:
 
@@ -488,6 +491,7 @@ Worker fails while generating a later week
   -> plan page shows the failed week and error summary
   -> user opens an AI repair chat
   -> user can clarify constraints, simplify the plan, or ask the coach to continue differently
+  -> repair guidance stays anchored to the original plan goals, sport, target, schedule, and known constraints
   -> app creates or updates a PlanGenerationJob from the failed week forward
   -> worker resumes sequential generation using prior generated weeks plus repair feedback
   -> plan status returns to generating, then ready
@@ -553,7 +557,7 @@ Recommended schema additions:
 Recommended app work:
 
 - [x] Change guided-intake plan creation to create the plan/job quickly instead of blocking on all weeks.
-- [x] Save a partial `PlanVersion.planSnapshot` as each week is generated.
+- [x] Save each generated worker week in `PlanGenerationWeek` instead of creating one `PlanVersion` per week.
 - [x] Update plan viewer to support partial snapshots.
 - [x] Show generated weeks immediately.
 - [x] Show placeholders for missing future weeks.
@@ -563,6 +567,7 @@ Recommended app work:
 - [x] Show failed week, last error, and a clear repair entry point when generation fails.
 - [x] Add an AI repair chat for failed generation jobs.
 - [x] Let repair chat collect user guidance such as simplify, reduce volume, avoid an exercise, change schedule, or continue from prior weeks.
+- [ ] Ensure failed-week repair continues the same plan goals rather than letting the repair chat redefine the plan.
 - [x] Resume generation from the failed week forward instead of restarting the entire plan.
 - [x] Keep manual onboarding on the current generation path until the worker flow is stable, or explicitly migrate it as a separate step.
 
@@ -573,7 +578,7 @@ Recommended worker work:
 - [x] Worker locks one job at a time.
 - [x] Worker generates exactly one next week per job iteration.
 - [x] Worker passes prior generated week summaries into the next-week prompt.
-- [x] Worker updates the partial snapshot and progress after every generated week.
+- [x] Worker updates `PlanGenerationWeek` rows and progress after every generated week.
 - [x] Worker marks job and plan ready when all weeks are generated.
 - [x] Worker marks job and plan failed with an error message when generation cannot recover automatically.
 - [x] Worker can resume a failed job from `nextWeekNum` after repair feedback is added.
@@ -602,7 +607,211 @@ Validation before moving on:
 - [x] Playwright test that AI repair chat can resume and complete a failed plan.
 - [x] Existing plan viewer, logging, manual edits, and adjustment tests still pass.
 
-## Phase 8: Add More Sports
+## Phase 8: Interactive AI Plan Adjustments
+
+Goal: replace the current restrictive adjustment flow with a more conversational AI chat that can collect specific, nuanced change requests while still preserving locked workout history.
+
+Why this is needed:
+
+- the current adjustment flow is too narrow and mostly reason/category driven
+- users need to describe specific changes in plain language
+- examples include changing one future day, swapping exercises, reducing finger load, adding recovery, changing available days, or adapting around travel
+- the AI should be able to ask follow-up questions before applying changes
+- the app must still protect completed/logged work and keep the adjusted plan as the same saved plan
+- the adjustment chat should visually match the intake chat so users understand it is the same kind of guided AI interaction
+- users need a clear preview of where changes will happen before applying them, especially when a request affects many future days
+
+Target flow:
+
+```text
+User opens Adjust Plan
+  -> AI chat receives current plan summary, original plan goals, locked history, logs, and adjustable future range
+  -> user describes the desired change
+  -> AI infers whether the change is day-only, week-only, a date range, or future-from-day
+  -> AI asks follow-up questions if the request is ambiguous or unsafe
+  -> AI proposes scope, summary, and grouped change preview
+  -> user confirms
+  -> app validates that locked history is unchanged and changes stay inside the approved scope
+  -> app saves a new PlanVersion on the same Plan
+  -> future plan view reflects the adjustment and temporarily highlights affected days/sessions for review
+```
+
+Boundaries:
+
+- adjustments must not edit logged days or completed exercise logs
+- adjustments should default to preserving the original plan goal unless the user explicitly asks to change the goal
+- goal-changing adjustments should be clearly labeled as a goal change before confirmation
+- injury-related changes should bias conservative and may ask for clarification
+- the app should reject or re-ask when the AI output modifies locked history, removes required identifiers, or returns an invalid snapshot
+- the user should see a short summary of what changed before applying it
+- the user should see the inferred scope before applying it
+- scope choices should stay small: `day_only`, `week_only`, `date_range`, or `future_from_day`
+- the UI may offer a scope override, but the main path should be conversational and AI-inferred
+- large changes should be grouped by week/day pattern instead of shown as a long wall of text
+- after applying, the plan viewer should make adjusted areas discoverable for the current review only; after refresh, logout, or returning later, the plan should look normal
+
+Recommended implementation batches:
+
+**Batch 1: Adjustment Chat Contract**
+
+- [x] Define a conversational adjustment state shape.
+- [x] Add message history for the active adjustment session.
+- [x] Include original `PlanRequest`, current `PlanVersion`, locked-history range, workout logs, and adjustable future days in the model context.
+- [x] Add prompt boundaries that keep normal adjustments tied to the original plan goals.
+- [x] Require the model to either ask one follow-up question or return a structured proposal.
+
+**Batch 2: Proposal and Validation**
+
+- [x] Define an adjustment proposal schema with summary, changed weeks/days, effective-from day, and revised future snapshot.
+- [x] Validate that locked historical days are unchanged.
+- [x] Validate that exercise/session/day identifiers remain stable where required.
+- [x] Validate that the proposal does not change the plan goal unless the user explicitly requested a goal change.
+- [x] Store rejected proposal reasons for debugging.
+
+**Batch 2A: AI-Inferred Adjustment Scope**
+
+Goal: let the user describe the adjustment naturally while making the model propose an explicit scope that the app can validate.
+
+Scope contract:
+
+```ts
+type AdjustmentScope =
+  | { type: "day_only"; startWeek: number; startDay: number; endWeek: number; endDay: number }
+  | { type: "week_only"; startWeek: number; endWeek: number }
+  | { type: "date_range"; startWeek: number; startDay: number; endWeek: number; endDay: number }
+  | { type: "future_from_day"; startWeek: number; startDay: number };
+```
+
+Recommended work:
+
+- [x] Add scope to the adjustment proposal schema and saved change metadata.
+- [x] Let the AI infer scope from the user's message, such as "today only", "next week", "while traveling", or "from Friday onward".
+- [x] If scope is unclear, have the AI ask one follow-up question instead of defaulting to the rest of the plan.
+- [x] Show the inferred scope in the proposal before apply, such as "Scope: Week 3 only".
+- [x] Add a lightweight UI override for scope when the AI guesses wrong.
+- [x] Server-validate that the adjusted snapshot only changes days inside the approved scope.
+- [x] Keep logged days locked even when they fall inside the requested scope.
+- [x] Add simulator support for obvious scope phrases so tests can cover day-only, week-only, and future-from-day behavior.
+- [x] Add Playwright coverage that a week-only adjustment does not change later weeks.
+- [x] Add Playwright coverage that a day-only adjustment does not change other days in the same week.
+
+**Batch 3: User Experience**
+
+- [x] Replace or rework the current restrictive Adjust Plan panel.
+- [x] Let users chat freely about the change they want.
+- [x] Show AI follow-up questions inline.
+- [x] Show a confirmation step with a concise change summary.
+- [x] Let users cancel, revise, or apply the proposal.
+- [x] Keep manual day editing available for one-off day-specific edits.
+
+**Batch 4: Save and Versioning**
+
+- [x] Save confirmed adjustments as a new `PlanVersion`.
+- [x] Preserve old workout logs against prior versions.
+- [x] Keep the same `Plan` row in My Plans.
+- [x] Store the latest adjustment summary in version history.
+- [x] Consider adding adjustment-session records if chat history needs to be retained. Decision: defer until chat history needs to persist beyond the active adjustment session.
+
+**Batch 5: Chat Polish and Change Preview**
+
+- [x] Match the adjustment chat input layout to the intake chat, including the right-side arrow/send icon placement.
+- [x] Remove the visually separate large send button once the inline send affordance is in place.
+- [x] Make follow-up and proposal responses feel more conversational, including simulator responses where needed.
+- [x] Add a proposal preview with a verbal summary plus grouped affected weeks/days.
+- [x] Collapse repetitive broad changes into patterns, such as "Weeks 2-8: Thursday rest moved to Saturday."
+- [x] Show expandable detail for users who want to inspect every affected day/session.
+- [x] Add an "Adjusted" badge or subtle highlight on affected future days after apply.
+- [x] Make adjustment highlights transient: visible immediately after apply, but gone after refresh, logout, or returning later.
+- [x] Consider adding `PlanVersion.changeMetadata Json?` to persist exact changed week/day/session refs for reliable post-refresh highlighting. Added `changeMetadata`.
+- [x] Until metadata exists, store the clearest possible grouped summary in `changeSummary`. Metadata now exists, and `changeSummary` still stores a readable grouped summary.
+
+**Batch 6: Version History and Revert**
+
+Status note: pause additional version-history polish until worker generation checkpoints are moved out of `PlanVersion`. `PlanVersion` should represent user-facing plan revisions, not every background week-generation checkpoint.
+
+Chunk 1: Version History List + Revert
+
+- [x] Add a version history entry point on the plan page.
+- [x] List previous `PlanVersion` records with version number, date, change type, summary, and effective-from day/week.
+- [x] Add a revert action that verifies ownership and creates a new `PlanVersion` copied from the selected historical version.
+- [x] Set reverted versions to `changeType = "revert"` and `changeSummary = "Reverted to Version X"` or similar.
+- [x] Update `Plan.currentVersionId` to the newly created revert version instead of mutating the old version.
+- [x] Preserve all existing workout logs; do not delete logs from versions that are no longer current.
+- [x] Ensure new logs after revert attach to the new current version.
+- [ ] Add core tests for ownership checks and deeper log preservation.
+- [x] Add browser coverage for version listing and revert behavior.
+
+Chunk 2: Move Worker Checkpoints Out Of PlanVersion
+
+Goal: keep progressive week-by-week generation while preventing the plan-worker from creating one `PlanVersion` per generated week.
+
+Target model:
+
+```prisma
+model PlanGenerationWeek {
+  id           String            @id @default(cuid())
+  jobId        String
+  job          PlanGenerationJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  planId       String
+  userId       String
+  weekNum      Int
+  status       String            @default("ready")
+  weekSnapshot Json
+  createdAt    DateTime          @default(now()) @db.Timestamptz(3)
+  updatedAt    DateTime          @updatedAt @db.Timestamptz(3)
+
+  @@unique([jobId, weekNum])
+  @@index([planId])
+  @@index([userId])
+}
+```
+
+Implementation steps:
+
+- [x] Add `PlanGenerationWeek` and a `PlanGenerationJob.weeks` relation.
+- [x] Update guided-intake generation to create the plan/job without creating user-facing worker checkpoint versions.
+- [x] Update the worker to save each generated week into `PlanGenerationWeek` instead of creating a new `PlanVersion` for every week.
+- [x] Keep updating `Plan.generatedWeeks`, `generationStatus`, and `generationError` so the plan page can show progress.
+- [x] Compose generated week rows into a temporary display `PlanSnapshot` while generation is in progress or failed.
+- [x] When all weeks are generated, compose the full snapshot and create exactly one user-facing `PlanVersion` with `changeType = "generated"`.
+- [x] Set `Plan.currentVersionId` only when the final generated version is ready, or clearly define how the initial shell version behaves until then.
+- [x] Update failed-week repair to resume from `PlanGenerationWeek` rows and optionally delete/regenerate rows from the failed week forward.
+- [x] Update version history so newly generated plans no longer create worker checkpoint versions; the operational shell and old dev-data worker versions remain hidden.
+- [x] Keep existing dev data as-is unless a cleanup migration is explicitly needed; use the new flow for newly generated plans.
+- [x] Add tests that a generated plan creates one user-facing generated version, not one version per week.
+- [x] Add tests that progressive UI still shows Week 1 before the full plan is complete.
+- [x] Add tests that repair resumes from the failed week using prior generated week rows.
+
+Implementation note: while a plan is still generating, `Plan.currentVersionId` points at a hidden operational shell version that stores the profile/request context. Generated week snapshots live in `PlanGenerationWeek` and are composed for display. When all weeks are ready, the worker creates the first user-facing generated version and makes it current.
+
+Chunk 3: Read-Only Historical Preview
+
+- [ ] Let users preview a previous version in read-only mode using the existing plan viewer where possible.
+- [ ] Clearly label historical previews so users do not confuse them with the active plan.
+- [ ] Disable logging, manual edits, AI adjustments, completion, and revert-from-preview controls when previewing unless explicitly supported.
+- [ ] Decide how old-version workout logs should display, since logs are attached to the version where they were created.
+- [ ] Add Playwright coverage for opening and closing historical preview mode.
+
+**Batch 7: Tests**
+
+- [ ] Unit tests for adjustment prompt/context construction.
+- [ ] Unit tests for proposal validation.
+- [ ] Test that locked history cannot be changed.
+- [ ] Playwright test for a simple future-day exercise swap.
+- [ ] Playwright test for a schedule change across future weeks.
+- [ ] Playwright test for a broad repeated change, such as moving all future Thursday rest days to Saturday.
+- [ ] Playwright test that changed days are summarized/highlighted after apply.
+- [ ] Playwright test for an injury-related conservative adjustment.
+- [ ] Playwright test that a goal change requires explicit confirmation.
+- [ ] Existing logging, manual edit, and plan viewer tests still pass.
+
+Related Phase 7 repair follow-up:
+
+- [ ] Update failed-week repair prompts so repair is framed as completing the existing plan, not creating a new goal or materially changing the plan purpose.
+- [ ] Include original plan goals and generated prior-week summaries in the repair chat visible context.
+- [ ] Add validation or prompt checks that reject repair output that changes the sport, primary goal, target date, target level, or block length unless the user is moved into the full adjustment flow.
+
+## Phase 9: Add More Sports
 
 Do this only after `PlanRequest`, the generator, the adjustment flow, and worker-based generation are stable.
 
