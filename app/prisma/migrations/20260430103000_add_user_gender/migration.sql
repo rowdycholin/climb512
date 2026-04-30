@@ -1,0 +1,2 @@
+ALTER TABLE "User"
+ADD COLUMN IF NOT EXISTS "gender" TEXT NOT NULL DEFAULT 'prefer_not_to_say';

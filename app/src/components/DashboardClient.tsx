@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { Trash2 } from "lucide-react";
 import { deletePlans } from "@/app/actions";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -28,6 +29,15 @@ interface Plan {
 
 export default function DashboardClient({ plans }: { plans: Plan[] }) {
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const planIds = useMemo(() => new Set(plans.map((plan) => plan.id)), [plans]);
+  const selectedPlanIds = useMemo(() => Array.from(selected).filter((id) => planIds.has(id)), [planIds, selected]);
+
+  useEffect(() => {
+    setSelected((previous) => {
+      const next = new Set(Array.from(previous).filter((id) => planIds.has(id)));
+      return next.size === previous.size ? previous : next;
+    });
+  }, [planIds]);
 
   function toggle(id: string) {
     setSelected((previous) => {
@@ -42,22 +52,25 @@ export default function DashboardClient({ plans }: { plans: Plan[] }) {
     <div className="space-y-3">
       <div className="flex items-center justify-between">
         <h2 className="text-lg font-semibold text-slate-900">Saved Plans</h2>
-        {selected.size > 0 && (
+        {selectedPlanIds.length > 0 && (
           <form action={deletePlans}>
-            {Array.from(selected).map((id) => (
+            {selectedPlanIds.map((id) => (
               <input key={id} type="hidden" name="planIds" value={id} />
             ))}
             <Button
               type="submit"
               size="sm"
               variant="destructive"
+              className="gap-2"
               onClick={(event) => {
-                if (!confirm(`Delete ${selected.size} plan${selected.size > 1 ? "s" : ""}?`)) {
+                if (!confirm(`Delete ${selectedPlanIds.length} plan${selectedPlanIds.length > 1 ? "s" : ""}?`)) {
                   event.preventDefault();
+                  return;
                 }
               }}
             >
-              Delete Selected ({selected.size})
+              <Trash2 className="h-4 w-4" />
+              Delete selected plans ({selectedPlanIds.length})
             </Button>
           </form>
         )}

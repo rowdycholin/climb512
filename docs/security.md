@@ -69,4 +69,4 @@ That login header is not sent to live provider URLs.
 
 ## Test-only attack harness
 
-`testing/tests/security.spec.ts` uses the gated `/test-only/plan-action-attacks` route to exercise real server actions with forged cross-user plan IDs. The route is only enabled in local/test conditions and verifies both the action response and that victim plan log/version counts do not change.
+`testing/tests/security.spec.ts` uses the gated `/test-only/plan-action-attacks` route to exercise real server actions with forged cross-user plan IDs. The route is only enabled in local/test conditions and verifies both the action response and that victim plan log/version counts do not change. Because the fixture creates plans, this spec is simulator-gated and must not run against the live AI backend.

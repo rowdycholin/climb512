@@ -1,18 +1,26 @@
 import { redirect } from "next/navigation";
 import { getSession } from "@/lib/session";
+import { prisma } from "@/lib/prisma";
 import AppHeader from "@/components/AppHeader";
 import PlanIntakeChat from "@/components/PlanIntakeChat";
 
 export default async function IntakePage() {
   const session = await getSession();
   if (!session.isLoggedIn) redirect("/login");
+  const user = await prisma.user.findUnique({
+    where: { id: session.userId },
+    select: { gender: true },
+  });
+  if (!user) redirect("/login");
+
+  const coachName = user.gender === "female" ? "Alix" : "Alex";
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-100 to-slate-50">
       <AppHeader
         eyebrow="Plan Intake"
         title="Climb512"
-        subtitle="Tell me what you are training for, and I will help shape a plan around your goals."
+        subtitle={`${coachName} is your personal training coach. Tell me what you are training for, and we will shape a plan around your goals.`}
       />
 
       <main className="mx-auto max-w-5xl p-4 py-8">
@@ -24,7 +32,7 @@ export default async function IntakePage() {
           </p>
         </div>
 
-        <PlanIntakeChat />
+        <PlanIntakeChat coachName={coachName} />
       </main>
     </div>
   );

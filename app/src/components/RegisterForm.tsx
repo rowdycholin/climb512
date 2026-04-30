@@ -58,6 +58,21 @@ export default function RegisterForm() {
           </div>
 
           <div className="space-y-2">
+            <Label htmlFor="gender">Gender</Label>
+            <select
+              id="gender"
+              name="gender"
+              required
+              defaultValue="prefer_not_to_say"
+              className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+            >
+              <option value="male">Male</option>
+              <option value="female">Female</option>
+              <option value="prefer_not_to_say">Prefer not to say</option>
+            </select>
+          </div>
+
+          <div className="space-y-2">
             <Label htmlFor="userId">User ID</Label>
             <Input id="userId" name="userId" placeholder="8+ characters, email is okay" required minLength={8} autoComplete="username" />
           </div>

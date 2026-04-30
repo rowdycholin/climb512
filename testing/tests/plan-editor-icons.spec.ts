@@ -1,5 +1,7 @@
 import { expect, test } from "@playwright/test";
-import { createPlanFromOnboarding, registerUser } from "./helpers";
+import { createPlanFromOnboarding, registerUser, skipIfWebIsNotSimulator } from "./helpers";
+
+skipIfWebIsNotSimulator(test);
 
 async function registerAndCreatePlan(page: import("@playwright/test").Page) {
   const userId = `pw-icons-${Date.now()}`;

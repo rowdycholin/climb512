@@ -28,7 +28,7 @@ ANTHROPIC_MODEL="anthropic/claude-haiku-4-5"
 ANTHROPIC_MAX_TOKENS="5000"
 ```
 
-In Docker, `docker-compose.yml` overrides the AI base URL so the app talks to the local simulator by default.
+In Docker, `web` and `plan-worker` read backend AI settings from `app/.env`. To switch modes, copy `app/.env-simulator` or `app/.env-aibackend` to `app/.env`, then recreate `web` and `plan-worker`. Editing `app/.env` alone does not change the already-running container process environment.
 
 ## Running The App
 
@@ -64,11 +64,11 @@ scripts\start-dev.bat --build
 The dev override:
 
 - uses `docker-compose.yml` plus `docker-compose.dev.yml`
-- bind-mounts `./app` into `/app`
-- keeps `/app/node_modules` in the `web_node_modules` Docker volume
+- bind-mounts `./app` into `/app` for both `web` and `plan-worker`
+- keeps `/app/node_modules` in Docker volumes for both services
 - keeps `/app/.next` in the `web_next_cache` Docker volume
 - runs `npm run dev -- --hostname 0.0.0.0 --port 8080`
-- keeps the `plan-worker` service on the image-built worker target unless you override it separately
+- runs the `plan-worker` from mounted source so worker code changes are picked up in development
 
 Useful dev commands:
 
@@ -76,7 +76,7 @@ Useful dev commands:
 bash scripts/stop-dev.sh
 bash scripts/start-dev.sh --fresh
 docker compose -f docker-compose.yml -f docker-compose.dev.yml logs web -f
-docker compose logs -f web plan-worker simulator
+docker compose -f docker-compose.yml -f docker-compose.dev.yml logs -f web plan-worker simulator
 ```
 
 `--fresh` removes Postgres data plus the dev dependency/cache volumes.
@@ -208,8 +208,9 @@ If using `scripts/start-dev.sh`, `./app` is bind-mounted and changes should flow
 Check:
 
 ```bash
-docker compose logs web --tail=100
-docker compose logs simulator --tail=100
+docker compose -f docker-compose.yml -f docker-compose.dev.yml logs web --tail=100
+docker compose -f docker-compose.yml -f docker-compose.dev.yml logs plan-worker --tail=100
+docker compose -f docker-compose.yml -f docker-compose.dev.yml logs simulator --tail=100
 ```
 
 Typical causes:
@@ -218,6 +219,20 @@ Typical causes:
 - malformed JSON from the current AI backend
 - DB write failure after generation
 - stale Prisma client after a schema change
+
+### Env var change is visible in the file but not in `printenv`
+
+Docker injects env vars when the container starts. If you edit `app/.env`, recreate the affected containers:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --force-recreate web plan-worker
+```
+
+Then verify without printing secrets:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.dev.yml exec web printenv ANTHROPIC_MODEL ANTHROPIC_BASE_URL
+```
 
 ### Old session survives longer than expected
 
@@ -247,6 +262,8 @@ npx playwright test tests/plan-editor-icons.spec.ts
 npx playwright test tests/security.spec.ts
 ```
 
+AI-backed Playwright tests must run only against the simulator-backed Docker stack. Any test that creates a plan through guided intake, manual onboarding, the plan worker, or another path that could call the configured AI backend must use `skipIfWebIsNotSimulator(test)` or `skipIfWorkerStackIsNotSimulator(test)` from `testing/tests/helpers.ts`. Do not let automated tests call the live AI provider.
+
 Current focused regressions include:
 
 - auth and registration
@@ -259,7 +276,8 @@ Current focused regressions include:
 - plan editor icon actions
 - additive custom exercises on logged days
 - future plan adjustment from today or the next unlogged day
-- cross-user plan access denial
+- version history preview and revert behavior
+- cross-user plan access, preview, mutation, and revert denial
 
 Global teardown removes generated test users with prefixes such as `pw-*`, `dashplan-*`, `onboard-*`, `progress-*`, `startdate-*`, `intake-*`, and `adjust-*`.
 

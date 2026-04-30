@@ -14,8 +14,8 @@ Next.js 14 App Router              <- Docker service: web
        |- iron-session cookie auth
        |- Prisma 7 + pg adapter -> PostgreSQL 16   <- Docker service: postgres
        \- OpenAI-compatible chat completions
-            |- simulator in Docker by default       <- Docker service: simulator
-            \- live provider when explicitly configured
+            |- simulator when app/.env points local <- Docker service: simulator
+            \- live provider when app/.env points remote
 
 Plan generation worker                 <- Docker service: plan-worker
   |- polls PlanGenerationJob
@@ -29,7 +29,7 @@ Plan generation worker                 <- Docker service: plan-worker
 ### Registration And Login
 
 1. New users open `/register`.
-2. `register()` validates first name, last name, email, user ID, age, password, and password confirmation.
+2. `register()` validates first name, last name, email, user ID, age, gender, password, and password confirmation.
 3. `User.id` is system generated.
 4. `User.userId` and `User.email` are unique.
 5. Login uses `userId` + password.
@@ -55,7 +55,7 @@ Plan generation worker                 <- Docker service: plan-worker
    - `profileSnapshot`
    - `planSnapshot`
 10. A `Plan` row is created with `startDate`.
-11. Guided intake creates a hidden operational shell `PlanVersion` so the worker has profile/request context while the plan is still generating.
+11. Guided intake stores profile/request context on `PlanGenerationJob.profileSnapshot` while the plan is still generating.
 12. Guided intake stores each generated worker week in `PlanGenerationWeek`.
 13. When all weeks are ready, the worker creates the first user-facing generated `PlanVersion` and updates `Plan.currentVersionId`.
 
@@ -72,6 +72,7 @@ Plan generation worker                 <- Docker service: plan-worker
 8. If the user explicitly marks the plan complete, `Plan.completedAt` and optional completion notes are used for completion messaging.
 9. `PlanPageShell` renders summary actions, the shared menu, completion messaging, and `PlanWorkspace`.
 10. `PlanWorkspace` renders the editor, future-plan adjuster, and viewer.
+11. If the URL includes a historical `version` query parameter, the plan page rebuilds the view from that version's snapshot, filters logs to that version, and renders the workspace in read-only preview mode.
 
 ### Workout Logging
 
@@ -107,21 +108,22 @@ Current editor behavior:
 ### Future Plan Adjustment
 
 1. User opens `Adjust Plan` from the plan summary.
-2. `PlanAdjuster` collects conversational feedback and proposes a scoped adjustment.
+2. `PlanAdjuster` collects conversational feedback and sends it through the server-backed adjustment chat path.
 3. The proposal shows the inferred scope before apply, such as a single day, one week, a date range, or future days from a selected point.
-4. `applyConfirmedPlanAdjustment()` loads the owned plan, current version, and workout logs.
-5. The app builds a `PlanAdjustmentRequest` with:
+4. Live-provider mode asks the configured AI backend for follow-up questions or a structured proposal; simulator/local mode uses deterministic fixtures for repeatable testing.
+5. `applyConfirmedPlanAdjustment()` loads the owned plan, current version, and workout logs.
+6. The app builds context with:
    - original plan request/profile context
    - locked logged-day markers
    - current plan snapshot
    - user feedback
    - approved adjustment scope
-6. The next unlogged plan day and approved scope determine which days may change.
-7. Future days inside scope are rewritten, while locked history and out-of-scope days are validated as unchanged.
-8. A new `PlanVersion` is created with `changeType = "ai_chat_adjustment"`, `effectiveFromWeek`, `effectiveFromDay`, and `changeMetadata`.
-9. `Plan.currentVersionId` advances, old logs remain tied to their original version, and affected days are highlighted only for the immediate post-apply view.
+7. The next unlogged plan day and approved scope determine which days may change.
+8. Future days inside scope are rewritten, while locked history and out-of-scope days are validated as unchanged.
+9. A new `PlanVersion` is created with `changeType = "ai_chat_adjustment"`, `effectiveFromWeek`, `effectiveFromDay`, and `changeMetadata`.
+10. `Plan.currentVersionId` advances, old logs remain tied to their original version, and affected days are highlighted only for the immediate post-apply view.
 
-The current implementation uses deterministic proposal and rewrite rules behind the day-level request/validation contract. A real AI provider can later plug into the same boundary without changing the persistence model.
+The current implementation uses live AI proposals when configured for a remote backend and deterministic proposal/rewrite fixtures when configured for simulator/local testing. Server validation remains the final authority in both modes.
 
 ## Data Model Strategy
 
@@ -134,7 +136,7 @@ The app intentionally stores plans as versioned JSON documents:
   - `profileSnapshot` JSON
   - `planSnapshot` JSON
   - optional `changeMetadata` JSON for adjustment/revert details
-- `PlanGenerationJob` stores worker progress and failure/repair state
+- `PlanGenerationJob` stores worker progress, failure/repair state, and generation profile/request context
 - `PlanGenerationWeek` stores one generated week snapshot per worker job/week while generation is in progress
 - `WorkoutLog` stores immutable user history tied to a specific version and exercise key
 
@@ -207,5 +209,5 @@ This keeps revision history intact and avoids the complexity of mutating a deep 
 - guided intake refreshes the session on each chat exchange and before plan creation so long active chats do not expire mid-flow
 - the `migrate` service must succeed before `web` starts
 - migrations are raw SQL files tracked in `_app_migrations`
-- Docker defaults the app to the local simulator for plan generation
+- Docker reads AI backend settings from `app/.env`; copy `app/.env-simulator` or `app/.env-aibackend` to switch modes, then recreate `web` and `plan-worker`
 - `docker-compose.dev.yml` overlays the base compose file for local bind-mounted development

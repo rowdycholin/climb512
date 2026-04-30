@@ -17,6 +17,19 @@ services:
       - web_node_modules:/app/node_modules
       - web_next_cache:/app/.next
 
+  plan-worker:
+    build:
+      context: ./app
+      target: deps
+    command: >
+      sh -c "if [ ! -x node_modules/.bin/tsx ]; then npm ci; fi;
+      npx prisma generate;
+      npm run worker:plan-generation"
+    volumes:
+      - ./app:/app
+      - plan_worker_node_modules:/app/node_modules
+
 volumes:
   web_node_modules:
   web_next_cache:
+  plan_worker_node_modules:

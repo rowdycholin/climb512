@@ -1,10 +1,10 @@
 import { NextResponse } from "next/server";
-import { adjustFuturePlan, logExercise, saveEditedWeek } from "@/app/actions";
+import { adjustFuturePlan, logExercise, revertPlanVersion, saveEditedWeek } from "@/app/actions";
 import { prisma } from "@/lib/prisma";
 import { getSession } from "@/lib/session";
 import { parsePlanSnapshot } from "@/lib/plan-snapshot";
 
-type AttackAction = "logExercise" | "saveEditedWeek" | "adjustFuturePlan";
+type AttackAction = "logExercise" | "saveEditedWeek" | "adjustFuturePlan" | "revertPlanVersion";
 
 function testRoutesEnabled() {
   const explicitlyEnabled = process.env.ENABLE_TEST_ROUTES === "1";
@@ -68,6 +68,18 @@ async function buildAttackFormData(action: AttackAction, planId: string) {
     return { formData };
   }
 
+  if (action === "revertPlanVersion") {
+    const version = await prisma.planVersion.findFirst({
+      where: { planId },
+      orderBy: { versionNum: "asc" },
+      select: { id: true },
+    });
+    if (!version) return { error: "No version found for attack fixture" };
+
+    formData.set("versionId", version.id);
+    return { formData };
+  }
+
   formData.set("reason", "too_easy");
   formData.set("feedback", "Make the stolen plan much harder.");
   return { formData };
@@ -87,7 +99,7 @@ export async function POST(request: Request) {
   const action = body?.action;
   const planId = body?.planId;
 
-  if (action !== "logExercise" && action !== "saveEditedWeek" && action !== "adjustFuturePlan") {
+  if (action !== "logExercise" && action !== "saveEditedWeek" && action !== "adjustFuturePlan" && action !== "revertPlanVersion") {
     return NextResponse.json({ error: "Unsupported attack action" }, { status: 400 });
   }
 
@@ -95,18 +107,31 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Missing planId" }, { status: 400 });
   }
 
+  const before = await getPlanCounts(planId);
   const formBuild = await buildAttackFormData(action, planId);
   if ("error" in formBuild) {
-    return NextResponse.json({ error: formBuild.error }, { status: 400 });
+    const after = await getPlanCounts(planId);
+    return NextResponse.json({
+      action,
+      result: { error: formBuild.error },
+      before,
+      after,
+    });
   }
 
-  const before = await getPlanCounts(planId);
-  const result =
-    action === "logExercise"
-      ? await logExercise(formBuild.formData)
-      : action === "saveEditedWeek"
-        ? await saveEditedWeek(formBuild.formData)
-        : await adjustFuturePlan(formBuild.formData);
+  let result: unknown;
+  try {
+    result =
+      action === "logExercise"
+        ? await logExercise(formBuild.formData)
+        : action === "saveEditedWeek"
+          ? await saveEditedWeek(formBuild.formData)
+          : action === "adjustFuturePlan"
+            ? await adjustFuturePlan(formBuild.formData)
+            : await revertPlanVersion(formBuild.formData);
+  } catch (error) {
+    result = { error: error instanceof Error ? error.message : String(error) };
+  }
   const after = await getPlanCounts(planId);
 
   return NextResponse.json({

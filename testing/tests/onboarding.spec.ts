@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { registerUser } from "./helpers";
+import { registerUser, skipIfWebIsNotSimulator } from "./helpers";
 
 async function login(page: import("@playwright/test").Page) {
   await registerUser(page, `onboard-${Date.now()}`);
@@ -39,6 +39,8 @@ test.describe("Onboarding form", () => {
   });
 
   test("generates a plan end-to-end", async ({ page }) => {
+    skipIfWebIsNotSimulator(test);
+
     await page.locator('label:has(input[name="goals"][value="send-project"])').click();
     await page.check('input[name="discipline"][value="bouldering"]');
     await page.selectOption('select[name="currentGrade"]', "V4");

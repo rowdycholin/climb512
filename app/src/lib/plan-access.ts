@@ -14,7 +14,7 @@ function parseWeekSnapshot(raw: unknown): WeekSnapshot {
 }
 
 function snapshotForGenerationState(params: {
-  currentSnapshot: PlanSnapshot;
+  currentSnapshot: PlanSnapshot | null;
   generationStatus: string;
   generationJobs: Array<{
     weeks: Array<{
@@ -23,7 +23,7 @@ function snapshotForGenerationState(params: {
   }>;
 }) {
   const rows = params.generationJobs[0]?.weeks ?? [];
-  if (rows.length === 0) return params.currentSnapshot;
+  if (rows.length === 0) return params.currentSnapshot ?? { weeks: [] };
 
   const generatedSnapshot = composePlanSnapshotFromGeneratedWeeks(
     rows.map((row) => parseWeekSnapshot(row.weekSnapshot)),
@@ -31,6 +31,7 @@ function snapshotForGenerationState(params: {
 
   if (
     params.generationStatus === "ready" &&
+    params.currentSnapshot &&
     params.currentSnapshot.weeks.length >= generatedSnapshot.weeks.length
   ) {
     return params.currentSnapshot;
@@ -87,19 +88,36 @@ export async function findOwnedPlanWithLogs(planId: string, userId: string) {
     },
   });
 
-  if (!plan || !plan.currentVersion) return null;
+  if (!plan) return null;
+
+  const latestGenerationJob = plan.generationJobs[0] ?? null;
+  if (!plan.currentVersion && !latestGenerationJob) return null;
 
   const snapshot = snapshotForGenerationState({
-    currentSnapshot: parsePlanSnapshot(plan.currentVersion.planSnapshot),
+    currentSnapshot: plan.currentVersion ? parsePlanSnapshot(plan.currentVersion.planSnapshot) : null,
     generationStatus: plan.generationStatus,
     generationJobs: plan.generationJobs,
   });
   const view = buildPlanView(snapshot, plan.workoutLogs);
+  const displayCurrentVersion = plan.currentVersion ?? {
+    id: "__generating__",
+    planId: plan.id,
+    versionNum: 0,
+    basedOnVersionId: null,
+    changeType: "generating",
+    changeSummary: "Generating initial plan",
+    effectiveFromWeek: null,
+    effectiveFromDay: null,
+    changeMetadata: null,
+    profileSnapshot: latestGenerationJob!.profileSnapshot,
+    planSnapshot: snapshot,
+    createdAt: plan.createdAt,
+  };
 
   return {
     ...plan,
     currentVersion: {
-      ...plan.currentVersion,
+      ...displayCurrentVersion,
       planSnapshot: snapshot,
     },
     planView: view,

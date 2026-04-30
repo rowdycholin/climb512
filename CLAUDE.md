@@ -10,7 +10,7 @@ Production-style Docker:
 docker compose up --build -d
 ```
 
-Development Docker with bind-mounted app source and Next dev mode:
+Development Docker with bind-mounted app source, Next dev mode, and a source-mounted plan worker:
 
 ```bash
 bash scripts/start-dev.sh --build
@@ -77,13 +77,16 @@ climb512/
 
 - registration is a dedicated `/register` page
 - users have a generated primary key plus unique `userId` and unique `email`
-- registration captures first name, last name, email, user ID, age, and password
+- registration captures first name, last name, email, user ID, age, gender, and password
 - login and root-page entry route users by plan state: active plan -> `/plan/[id]`, no plans -> `/intake`, plans without an active current version -> `/dashboard`
 - registration still lands on `/intake` because new users have no plans
 - guided chat intake is available at `/intake`
 - manual onboarding remains available at `/onboarding`
 - manual onboarding captures goals, discipline, grades, start date, schedule, and equipment
 - guided intake builds a generic `PlanRequest` with goals, disciplines, levels, schedule, equipment, strength focus, and injuries/limitations
+- guided intake stores detailed day-by-day or structural preferences in `PlanRequest.planStructureNotes` so generation can honor specifics from the chat
+- guided intake preserves nuanced sport/goal context from detailed answers and guards against live AI turns that re-ask already collected fields
+- guided intake uses coach name Alix for female users and Alex for male or prefer-not-to-say users
 - guided intake currently has templates for climbing plus strength, running, strength training, and a generic fallback
 - guided intake does not show the old Plan Draft/manual setup panel; it keeps the structured draft hidden and chat-driven
 - `PlanRequest` is still adapted to legacy `PlanInput` for compatibility snapshots, but guided-intake generation uses the generic request directly
@@ -111,13 +114,15 @@ climb512/
 - AI plan generation is live
 - a `plan-worker` Docker service can generate plan weeks sequentially from `PlanGenerationJob`
 - generated worker weeks are stored in `PlanGenerationWeek`; the worker creates one user-facing generated `PlanVersion` after all weeks are ready
-- while worker generation is in progress, the current version is a hidden operational shell that stores profile/request context
+- while worker generation is in progress, `Plan.currentVersionId` is empty and `PlanGenerationJob.profileSnapshot` stores profile/request context
 - the plan page composes `PlanGenerationWeek` rows for partial display, so Week 1 can be viewed while later weeks are still generating
 - interactive future plan adjustment is available from the plan page and creates a new `PlanVersion`
 - adjustment chat infers a small scope (`day_only`, `week_only`, `date_range`, or `future_from_day`), shows it before apply, allows a lightweight override, and server-validates that only approved unlogged days change
+- live AI adjustment responses get one JSON repair attempt before the app returns a concise retry/narrowing error
 - adjustment highlights are transient immediately after apply; after refresh/login/return, the plan displays normally
 - version history lists user-facing versions and supports revert by creating a new current version copied from the selected version
-- Docker defaults plan generation to the local `simulator` service
+- Docker reads AI backend settings from `app/.env`; copy `app/.env-simulator` or `app/.env-aibackend` to switch modes, then recreate `web` and `plan-worker`
+- richer generated coaching detail is planned but not implemented; current snapshots still focus on compact trackable fields
 
 ## Current Data Model
 
@@ -138,6 +143,7 @@ User
 - generated `id` primary key
 - unique `userId`
 - `firstName`, `lastName`, unique `email`, `age`
+- `gender` for intake coach-name personalization
 - `passwordHash`
 
 `PlanVersion` stores:
@@ -148,7 +154,7 @@ User
 
 `PlanGenerationJob` stores:
 
-- generation status, total weeks, next week number, lock/error/repair state
+- generation status, total weeks, next week number, lock/error/repair state, and profile/request context
 
 `PlanGenerationWeek` stores:
 
@@ -221,10 +227,9 @@ npx playwright test tests/plan-viewer-progress.spec.ts
 ## AI Notes
 
 - the app uses plain `fetch` to an OpenAI-compatible `/v1/chat/completions` endpoint
-- `/intake` is a guided intake chat; Docker currently forces deterministic local intake, while non-Docker or live-provider mode can use the model-backed `PlanIntakeAiResponse` contract
+- `/intake` is a guided intake chat; live-provider mode uses the model-backed `PlanIntakeAiResponse` contract, while simulator/local mode can use deterministic extraction
 - AI intake responses are validated in `app/src/lib/plan-intake-ai.ts` before the UI receives draft changes
-- in Docker, `ANTHROPIC_BASE_URL` defaults to `http://simulator:8787`
-- outside Docker, `app/.env` may still point to OpenRouter
+- in Docker, `web` and `plan-worker` receive `ANTHROPIC_*` values from `app/.env` at container startup
 - the simulator logging header uses the session login ID and is only sent to simulator-like local base URLs
 
 ## Editing Notes
@@ -234,7 +239,7 @@ npx playwright test tests/plan-viewer-progress.spec.ts
 - logged weeks are protected from structural edits
 - rest days can be edited and can receive new exercises
 - add / duplicate / delete controls are icon-driven inside edit mode
-- the adjustment chat currently uses deterministic proposal/scope inference behind the `PlanAdjustmentRequest` contract; a real AI provider can plug into the same boundary later
+- the adjustment chat uses the live AI backend when configured for a remote provider and deterministic fixtures when configured for simulator/local testing
 - adjustment proposals show an inferred scope and grouped affected days before the user applies changes
 - logged days remain locked even when they fall inside the requested adjustment scope
 
@@ -253,4 +258,5 @@ npx playwright test tests/plan-viewer-progress.spec.ts
 - `npm run lint` is not yet the most reliable automation check
 - the simulator is only for plan generation today
 - Playwright uses global setup/teardown cleanup to remove test users (`@example.test` / `Playwright User`) before and after test runs
-- `docker-compose.dev.yml` is for local development; use base `docker-compose.yml` for production-style verification
+- Playwright tests that can trigger AI-backed intake/generation must be simulator-gated with `skipIfWebIsNotSimulator(test)` or `skipIfWorkerStackIsNotSimulator(test)`
+- `docker-compose.dev.yml` is for local development; it overlays bind mounts and dev commands for `web` and `plan-worker` while base `docker-compose.yml` remains the production/integration-style stack

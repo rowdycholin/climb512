@@ -13,7 +13,7 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 
 function hasRequiredDraftFields(draft: PartialIntakeDraft) {
-  return planRequestSchema.safeParse(draft).success;
+  return planRequestSchema.safeParse(draft).success && Boolean(draft.finalIntakeReviewAsked);
 }
 
 function localIsoDate() {
@@ -24,7 +24,11 @@ function localIsoDate() {
   return `${year}-${month}-${day}`;
 }
 
-export default function PlanIntakeChat() {
+interface PlanIntakeChatProps {
+  coachName: string;
+}
+
+export default function PlanIntakeChat({ coachName }: PlanIntakeChatProps) {
   const messagesContainerRef = useRef<HTMLDivElement | null>(null);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const entryRef = useRef<HTMLTextAreaElement | null>(null);
@@ -32,7 +36,7 @@ export default function PlanIntakeChat() {
   const [messages, setMessages] = useState<IntakeMessage[]>([
     {
       role: "assistant",
-      content: "For what sport or discipline would you like to create a training plan?",
+      content: `Hi, I'm ${coachName}, your personal training coach. I’ll use what you tell me to build a plan that fits your goals, schedule, experience, equipment, and recovery needs. The more specific you can be about what you like, what you want to avoid, and any limitations, the better the plan will be. What sport or discipline would you like to train for?`,
     },
   ]);
   const [entry, setEntry] = useState("");
@@ -86,6 +90,7 @@ export default function PlanIntakeChat() {
           draft,
           userMessage,
           messages: nextMessages,
+          coachName,
           clientToday: localIsoDate(),
           clientTimeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
         });

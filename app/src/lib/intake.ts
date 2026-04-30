@@ -26,6 +26,9 @@ const intakeStepSchema = z.enum([
 export const intakeDraftSchema = partialPlanRequestSchema.extend({
   intakeStep: intakeStepSchema.optional(),
   intakeTemplateId: z.string().optional(),
+  preferredWorkoutDaysAsked: z.boolean().optional(),
+  preferredRestDaysAsked: z.boolean().optional(),
+  finalIntakeReviewAsked: z.boolean().optional(),
 });
 
 export const partialIntakeDraftSchema = intakeDraftSchema.partial();

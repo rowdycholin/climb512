@@ -16,6 +16,7 @@ interface ClaimedGenerationJob {
   totalWeeks: number;
   nextWeekNum: number;
   repairNotes: string | null;
+  profileSnapshot: unknown;
 }
 
 export interface PlanGenerationWorkerOptions {
@@ -49,6 +50,7 @@ async function claimNextGenerationJob(lockTimeoutMs = DEFAULT_LOCK_TIMEOUT_MS) {
       totalWeeks: true,
       nextWeekNum: true,
       repairNotes: true,
+      profileSnapshot: true,
     },
   });
 
@@ -108,7 +110,7 @@ async function failGenerationJob(job: ClaimedGenerationJob, error: unknown) {
 async function saveGeneratedWeek(params: {
   job: ClaimedGenerationJob;
   profileSnapshot: ProfileSnapshot;
-  baseVersionId: string;
+  baseVersionId?: string | null;
   week: WeekData;
 }) {
   const { job, profileSnapshot, baseVersionId, week } = params;
@@ -162,7 +164,7 @@ async function saveGeneratedWeek(params: {
         data: {
           planId: job.planId,
           versionNum: (latest?.versionNum ?? 0) + 1,
-          basedOnVersionId: baseVersionId,
+          basedOnVersionId: baseVersionId ?? null,
           changeType: "generated",
           changeSummary: "Initial AI-generated plan",
           profileSnapshot: toStoredJson(profileSnapshot),
@@ -225,11 +227,11 @@ export async function runOnePlanGenerationJob(options: PlanGenerationWorkerOptio
       },
     });
 
-    if (!plan?.currentVersion) {
-      throw new Error(`Plan ${job.planId} does not have a current version`);
+    if (!plan) {
+      throw new Error(`Plan ${job.planId} was not found`);
     }
 
-    const profileSnapshot = parseProfileSnapshot(plan.currentVersion.profileSnapshot);
+    const profileSnapshot = parseProfileSnapshot(job.profileSnapshot);
     const planRequest = profileSnapshot.planRequest;
     if (!planRequest) {
       throw new Error(`Plan ${job.planId} is missing profileSnapshot.planRequest`);
@@ -254,7 +256,7 @@ export async function runOnePlanGenerationJob(options: PlanGenerationWorkerOptio
     await saveGeneratedWeek({
       job,
       profileSnapshot,
-      baseVersionId: plan.currentVersion.id,
+      baseVersionId: plan.currentVersion?.id ?? null,
       week,
     });
 

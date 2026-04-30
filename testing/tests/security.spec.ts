@@ -1,5 +1,7 @@
 import { expect, test } from "@playwright/test";
-import { createPlanFromOnboarding, registerUser } from "./helpers";
+import { createPlanFromOnboarding, readSqlValue, registerUser, skipIfWebIsNotSimulator } from "./helpers";
+
+skipIfWebIsNotSimulator(test);
 
 test("does not allow another authenticated user to view a snapshot plan", async ({ page }) => {
   const suffix = `${Date.now()}-${test.info().workerIndex}`;
@@ -11,6 +13,8 @@ test("does not allow another authenticated user to view a snapshot plan", async 
 
   const ownerPlanUrl = page.url();
   expect(ownerPlanUrl).toMatch(/\/plan\//);
+  const planId = ownerPlanUrl.split("/plan/")[1];
+  const versionId = readSqlValue(`SELECT "currentVersionId" FROM "Plan" WHERE "id" = '${planId}';`);
 
   await page.getByRole("button", { name: /Open menu/i }).click();
   await page.getByRole("button", { name: "Logout" }).click();
@@ -21,6 +25,9 @@ test("does not allow another authenticated user to view a snapshot plan", async 
 
   expect(response?.status()).toBe(404);
   await expect(page).not.toHaveURL(/\/login/);
+
+  const previewResponse = await page.goto(`/plan/${planId}?version=${versionId}`);
+  expect(previewResponse?.status()).toBe(404);
 });
 
 test("does not allow another authenticated user to mutate a snapshot plan", async ({ page }) => {
@@ -41,7 +48,7 @@ test("does not allow another authenticated user to mutate a snapshot plan", asyn
 
   await registerUser(page, intruder);
 
-  for (const action of ["logExercise", "saveEditedWeek", "adjustFuturePlan"] as const) {
+  for (const action of ["logExercise", "saveEditedWeek", "adjustFuturePlan", "revertPlanVersion"] as const) {
     const response = await page.evaluate(
       async ({ action, planId }) => {
         const result = await fetch("/test-only/plan-action-attacks", {
@@ -59,7 +66,7 @@ test("does not allow another authenticated user to mutate a snapshot plan", asyn
     );
 
     expect(response.status).toBe(200);
-    expect(response.body.result.error).toMatch(/not authorized|plan not found/i);
+    expect(response.body.result.error).toMatch(/not authorized|plan not found|NEXT_REDIRECT/i);
     expect(response.body.after).toEqual(response.body.before);
   }
 });

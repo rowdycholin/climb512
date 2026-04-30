@@ -44,9 +44,10 @@ This file tracks known cleanup, risk, and follow-up items that are not blocking 
 
 ## Plan Lifecycle
 
-- [ ] Remove the hidden `worker_generation_started` `PlanVersion` row.
-  - Store generation context somewhere else, then create the first `PlanVersion` only when generation completes.
-  - Add a cleanup path for old hidden shell rows.
+- [x] Remove the hidden `worker_generation_started` `PlanVersion` row.
+  - Generation context now lives on `PlanGenerationJob.profileSnapshot`.
+  - The first user-facing `PlanVersion` is created only when generation completes.
+  - Added a migration cleanup path for old hidden shell rows without workout logs.
 - [ ] Consider archive / soft-delete for plans before adding user-facing delete.
   - Current database relations use cascade delete, so deleting a `Plan` also deletes its `PlanVersion`, `PlanGenerationJob`, and `WorkoutLog` rows.
   - A user-facing "delete plan" action would currently be destructive to workout history.

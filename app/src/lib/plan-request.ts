@@ -16,6 +16,7 @@ export const planRequestSchema = z.object({
   startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   equipment: z.array(z.string().trim().min(1)).default([]),
   trainingFocus: z.array(z.string().trim().min(1)).default([]),
+  planStructureNotes: z.string().trim().min(1).max(2000).optional(),
   constraints: z
     .object({
       injuries: z.array(z.string().trim().min(1)).default([]),
@@ -51,6 +52,7 @@ function describeGoal(request: PlanRequest) {
     request.goalType !== "ongoing" ? `Goal type: ${request.goalType}` : null,
     request.targetDate ? `Target date: ${request.targetDate}` : null,
     request.trainingFocus.length ? `Focus: ${request.trainingFocus.join(", ")}` : null,
+    request.planStructureNotes ? `Plan structure: ${request.planStructureNotes}` : null,
     request.strengthTraining.include
       ? `Include strength training${request.strengthTraining.focusAreas.length ? ` for ${request.strengthTraining.focusAreas.join(", ")}` : ""}`
       : null,

@@ -1,5 +1,7 @@
 import { expect, test } from "@playwright/test";
-import { registerUser } from "./helpers";
+import { registerUser, skipIfWorkerStackIsNotSimulator } from "./helpers";
+
+skipIfWorkerStackIsNotSimulator(test);
 
 test("guided intake refuses unsafe unrelated prompts and keeps intake usable", async ({ page }) => {
   await registerUser(page, `intake-guard-${Date.now()}`);
@@ -38,7 +40,7 @@ test("guided intake builds a hidden structured draft and generates a plan", asyn
   await registerUser(page, `intake-${Date.now()}`);
   await page.goto("/intake");
 
-  await expect(page.getByText("For what sport or discipline would you like to create a training plan?")).toBeVisible();
+  await expect(page.getByText(/Hi, I'm Alex, your personal training coach/i)).toBeVisible();
 
   await page.getByLabel("Plan intake message").fill("Climbing");
   await page.getByRole("button", { name: "Send intake message" }).click();
@@ -78,6 +80,13 @@ test("guided intake builds a hidden structured draft and generates a plan", asyn
 
   await page.getByRole("button", { name: "Generate Training Plan" }).click();
   await expect(page).toHaveURL(/\/plan\//, { timeout: 60_000 });
+});
+
+test("guided intake uses Alix as the coach name for female users", async ({ page }) => {
+  await registerUser(page, `female-intake-${Date.now()}`, undefined, "female");
+  await page.goto("/intake");
+
+  await expect(page.getByText(/Hi, I'm Alix, your personal training coach/i)).toBeVisible();
 });
 
 test("guided intake uses the running template", async ({ page }) => {

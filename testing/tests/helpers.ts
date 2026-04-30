@@ -4,13 +4,14 @@ import path from "node:path";
 
 export const TEST_PASSWORD = "Climb512!!";
 
-export async function registerUser(page: Page, userId: string, password = TEST_PASSWORD) {
+export async function registerUser(page: Page, userId: string, password = TEST_PASSWORD, gender = "prefer_not_to_say") {
   await page.goto("/register");
   await page.fill('input[name="firstName"]', "Playwright");
   await page.fill('input[name="lastName"]', "User");
   await page.fill('input[name="email"]', `${userId}@example.test`);
   await page.fill('input[name="userId"]', userId);
   await page.fill('input[name="age"]', "28");
+  await page.selectOption('select[name="gender"]', gender);
   await page.fill('input[name="password"]', password);
   await page.fill('input[name="verifyPassword"]', password);
   await page.click('button[type="submit"]');
@@ -101,6 +102,20 @@ export function dockerServiceUsesSimulator(service: "web" | "plan-worker") {
   }
 }
 
+export function skipIfWebIsNotSimulator(test: { skip: (condition: boolean, description: string) => void }) {
+  test.skip(
+    !dockerServiceUsesSimulator("web"),
+    "AI-backed plan-generation tests run only when the web service uses the simulator backend.",
+  );
+}
+
+export function skipIfWorkerStackIsNotSimulator(test: { skip: (condition: boolean, description: string) => void }) {
+  test.skip(
+    !dockerServiceUsesSimulator("web") || !dockerServiceUsesSimulator("plan-worker"),
+    "Worker-generation tests run only when web and plan-worker use the simulator backend.",
+  );
+}
+
 function buildGenerationProfileSnapshot() {
   return {
     goals: ["Send a V6 boulder with steady progression"],
@@ -184,10 +199,8 @@ function buildGeneratedWeeksSnapshot(weekNums: number[]) {
 
 export function seedPendingGenerationPlan(userId: string, suffix: string) {
   const planId = `pw-generation-plan-${suffix}`;
-  const versionId = `pw-generation-version-${suffix}`;
   const jobId = `pw-generation-job-${suffix}`;
   const profileSnapshot = buildGenerationProfileSnapshot();
-  const planSnapshot = { weeks: [] };
 
   const sql = `
     INSERT INTO "Plan" (
@@ -199,24 +212,13 @@ export function seedPendingGenerationPlan(userId: string, suffix: string) {
     FROM "User"
     WHERE "userId" = '${userId}';
 
-    INSERT INTO "PlanVersion" (
-      "id", "planId", "versionNum", "changeType", "changeSummary", "profileSnapshot", "planSnapshot"
-    )
-    VALUES (
-      '${versionId}', '${planId}', 1, 'worker_generation_started', 'Initial plan shell from test seed',
-      '${JSON.stringify(profileSnapshot).replace(/'/g, "''")}'::jsonb,
-      '${JSON.stringify(planSnapshot).replace(/'/g, "''")}'::jsonb
-    );
-
-    UPDATE "Plan"
-    SET "currentVersionId" = '${versionId}', "updatedAt" = CURRENT_TIMESTAMP
-    WHERE "id" = '${planId}';
-
     INSERT INTO "PlanGenerationJob" (
-      "id", "planId", "userId", "status", "totalWeeks", "nextWeekNum", "lastError", "lockedAt", "createdAt", "updatedAt"
+      "id", "planId", "userId", "status", "totalWeeks", "nextWeekNum", "lastError", "repairNotes", "profileSnapshot", "lockedAt", "createdAt", "updatedAt"
     )
     SELECT
-      '${jobId}', '${planId}', "id", 'pending', 4, 1, NULL, NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+      '${jobId}', '${planId}', "id", 'pending', 4, 1, NULL, NULL,
+      '${JSON.stringify(profileSnapshot).replace(/'/g, "''")}'::jsonb,
+      NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
     FROM "User"
     WHERE "userId" = '${userId}';
   `;
@@ -225,17 +227,14 @@ export function seedPendingGenerationPlan(userId: string, suffix: string) {
 
   return {
     planId,
-    versionId,
     jobId,
   };
 }
 
 export function seedFailedGenerationPlan(userId: string, suffix: string) {
   const planId = `pw-repair-plan-${suffix}`;
-  const versionId = `pw-repair-version-${suffix}`;
   const jobId = `pw-repair-job-${suffix}`;
   const profileSnapshot = buildGenerationProfileSnapshot();
-  const planSnapshot = { weeks: [] };
   const generatedWeeks = buildGeneratedWeeksSnapshot([1, 2]).weeks;
 
   const sql = `
@@ -248,24 +247,13 @@ export function seedFailedGenerationPlan(userId: string, suffix: string) {
     FROM "User"
     WHERE "userId" = '${userId}';
 
-    INSERT INTO "PlanVersion" (
-      "id", "planId", "versionNum", "changeType", "changeSummary", "profileSnapshot", "planSnapshot"
-    )
-    VALUES (
-      '${versionId}', '${planId}', 1, 'worker_generation_started', 'Initial plan shell from test seed',
-      '${JSON.stringify(profileSnapshot).replace(/'/g, "''")}'::jsonb,
-      '${JSON.stringify(planSnapshot).replace(/'/g, "''")}'::jsonb
-    );
-
-    UPDATE "Plan"
-    SET "currentVersionId" = '${versionId}', "updatedAt" = CURRENT_TIMESTAMP
-    WHERE "id" = '${planId}';
-
     INSERT INTO "PlanGenerationJob" (
-      "id", "planId", "userId", "status", "totalWeeks", "nextWeekNum", "lastError", "lockedAt", "createdAt", "updatedAt"
+      "id", "planId", "userId", "status", "totalWeeks", "nextWeekNum", "lastError", "repairNotes", "profileSnapshot", "lockedAt", "createdAt", "updatedAt"
     )
     SELECT
-      '${jobId}', '${planId}', "id", 'failed', 4, 3, 'Simulated AI failure', NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+      '${jobId}', '${planId}', "id", 'failed', 4, 3, 'Simulated AI failure', NULL,
+      '${JSON.stringify(profileSnapshot).replace(/'/g, "''")}'::jsonb,
+      NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
     FROM "User"
     WHERE "userId" = '${userId}';
 
@@ -294,7 +282,6 @@ export function seedFailedGenerationPlan(userId: string, suffix: string) {
 
   return {
     planId,
-    versionId,
     jobId,
   };
 }

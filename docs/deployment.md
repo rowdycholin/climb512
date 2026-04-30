@@ -96,9 +96,11 @@ curl -I http://localhost:8080/login
 | `ANTHROPIC_BASE_URL` | AI backend base URL |
 | `ANTHROPIC_MODEL` | model name |
 | `ANTHROPIC_MAX_TOKENS` | output cap |
+| `ANTHROPIC_INTAKE_MAX_TOKENS` | guided-intake output cap |
+| `ANTHROPIC_ADJUSTMENT_MAX_TOKENS` | adjustment-chat output cap |
 | `PLAN_WORKER_STEP_DELAY_MS` | optional pause between sequential week generations so partial progress is visible |
 
-In Docker, the `web` and `plan-worker` services currently pin `ANTHROPIC_BASE_URL` to `http://simulator:8787` and `AI_INTAKE_MODE` to `local`, so local testing does not call the live AI provider. To test against the live provider, remove or change those Compose overrides and restart the services.
+In Docker, the `web` and `plan-worker` services read backend AI settings from `app/.env`. Copy `app/.env-simulator` or `app/.env-aibackend` to `app/.env`, then recreate `web` and `plan-worker` to switch modes. Do not print or commit real provider API keys.
 
 ### Simulator service
 
@@ -144,3 +146,4 @@ This removes Postgres data plus the dev `node_modules` and `.next` volumes.
 - session behavior is intentionally short-lived today: cookies are boot-scoped and expire after 30 minutes of inactivity
 - guided intake refreshes the session during active chat exchanges and before plan creation; expired intake sessions redirect back to login
 - a real production deployment should explicitly decide whether plan generation points to the simulator or a live provider
+- live AI adjustment can produce large JSON responses; choose a model/token cap that can reliably return the full structured proposal or move to a patch-based contract before production scale

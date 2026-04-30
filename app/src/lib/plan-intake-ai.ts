@@ -40,6 +40,7 @@ export interface PlanIntakeAiInput {
   draft: PartialIntakeDraft;
   userMessage: string;
   messages: IntakeMessage[];
+  coachName?: string;
   clientToday?: string;
   clientTimeZone?: string;
 }
@@ -51,8 +52,11 @@ ROLE:
 - Help collect only the information needed to create a structured training plan request.
 - Run a flexible coach-led interview, not a rigid form.
 - Ask exactly one concise question when more information is needed.
-- Do not combine two questions with "and", commas, semicolons, or multiple question marks.
-- You may ask follow-up questions about constraints, preferences, training history, session length, recovery, equipment details, disliked exercises, and schedule nuance when they would materially improve the plan.
+- Ask about exactly one topic per turn.
+- Do not combine multiple questions with "and", commas, semicolons, slashes, lists, or multiple question marks.
+- A good question is "Do you have any injuries or pain I should account for?"
+- A bad question is "Do you have injuries, limitations, or exercises you want to avoid?"
+- You should ask follow-up questions about constraints, preferences, training history, session length, recovery, equipment details, disliked exercises, and schedule nuance when they would materially improve the plan.
 
 TASK BOUNDARY:
 - You only help create training plans.
@@ -72,6 +76,8 @@ OUTPUT:
 - Do not include extra fields.
 - For unknown draft fields, omit the field instead of using null, 0, empty strings, or empty arrays.
 - The planRequestDraft must preserve previously collected valid details unless the user explicitly changes them.
+- Store day-by-day workout preferences and structural details in planRequestDraft.planStructureNotes.
+- Do not mark injuries, limitations, or avoid-exercise constraints as answered with empty arrays unless the user has actually said they have none.
 - Do not ask again about injuries, limitations, pain, or exercises to avoid after constraints are present in the current draft.`;
 
 const INTAKE_REFUSAL_MESSAGE =
@@ -82,6 +88,13 @@ export const INTAKE_VALIDATION_FALLBACK_MESSAGE =
 
 export const INTAKE_READY_MESSAGE =
   "I have enough information to build your plan. Click the magic wand button to generate it.";
+
+export const FINAL_INTAKE_REVIEW_QUESTION =
+  "Is there anything else I should know about you or your goals before I am ready to generate the plan?";
+export const PREFERRED_WORKOUT_DAYS_QUESTION =
+  "Are there specific days you like to work out?";
+export const PREFERRED_REST_DAYS_QUESTION =
+  "Are there specific days you would prefer as rest days?";
 
 const TEST_INVALID_AI_OUTPUT_MESSAGE = "__test_invalid_ai_output__";
 
@@ -157,6 +170,14 @@ function latestAssistantMessage(messages: IntakeMessage[]) {
   return [...messages].reverse().find((message) => message.role === "assistant")?.content ?? "";
 }
 
+function appendPlanStructureNote(draft: PartialIntakeDraft, note: string) {
+  const trimmed = note.trim();
+  if (!trimmed) return;
+  const existing = draft.planStructureNotes ?? "";
+  if (existing.toLowerCase().includes(trimmed.toLowerCase())) return;
+  draft.planStructureNotes = [existing, trimmed].filter(Boolean).join(" | ");
+}
+
 function withDirectAnswerHints(input: PlanIntakeAiInput): PlanIntakeAiInput {
   const previousPrompt = latestAssistantMessage(input.messages);
   const answer = input.userMessage.trim();
@@ -170,6 +191,36 @@ function withDirectAnswerHints(input: PlanIntakeAiInput): PlanIntakeAiInput {
   if (!draft.startDate && /when would you like to start|start/i.test(previousPrompt)) {
     const startDate = cleanDate(answer, input.clientToday);
     if (startDate) draft.startDate = startDate;
+  }
+
+  if (/\b(?:freerider|el cap|big\s*wall|big-wall|multi[-\s]?pitch|free climb)\b/i.test(answer)) {
+    draft.sport = "climbing";
+    const disciplines = new Set([...(draft.disciplines ?? [])]);
+    disciplines.add("trad");
+    disciplines.add("big wall");
+    draft.disciplines = Array.from(disciplines);
+    appendPlanStructureNote(draft, answer);
+  }
+
+  if (previousPrompt.trim() === PREFERRED_WORKOUT_DAYS_QUESTION) {
+    draft.preferredWorkoutDaysAsked = true;
+    if (answer && !/\b(no|nope|none|no preference|any day|flexible)\b/i.test(answer)) {
+      appendPlanStructureNote(draft, `Preferred workout days: ${answer}`);
+    }
+  }
+
+  if (previousPrompt.trim() === PREFERRED_REST_DAYS_QUESTION) {
+    draft.preferredRestDaysAsked = true;
+    if (answer && !/\b(no|nope|none|no preference|any day|flexible)\b/i.test(answer)) {
+      appendPlanStructureNote(draft, `Preferred rest days: ${answer}`);
+    }
+  }
+
+  if (previousPrompt.trim() === FINAL_INTAKE_REVIEW_QUESTION) {
+    draft.finalIntakeReviewAsked = true;
+    if (answer && !/\b(no|nope|nothing|that's all|that is all|done)\b/i.test(answer)) {
+      appendPlanStructureNote(draft, answer);
+    }
   }
 
   return { ...input, draft };
@@ -191,6 +242,39 @@ export function firstQuestionOnly(message: string) {
 }
 
 function toIntakeResponse(response: PlanIntakeAiResponse): IntakeResponse {
+  if (planRequestSchema.safeParse(response.planRequestDraft).success && !response.planRequestDraft.preferredWorkoutDaysAsked) {
+    return {
+      draft: {
+        ...response.planRequestDraft,
+        preferredWorkoutDaysAsked: true,
+      },
+      ready: false,
+      assistantMessage: PREFERRED_WORKOUT_DAYS_QUESTION,
+    };
+  }
+
+  if (planRequestSchema.safeParse(response.planRequestDraft).success && !response.planRequestDraft.preferredRestDaysAsked) {
+    return {
+      draft: {
+        ...response.planRequestDraft,
+        preferredRestDaysAsked: true,
+      },
+      ready: false,
+      assistantMessage: PREFERRED_REST_DAYS_QUESTION,
+    };
+  }
+
+  if (response.status === "ready" && !response.planRequestDraft.finalIntakeReviewAsked) {
+    return {
+      draft: {
+        ...response.planRequestDraft,
+        finalIntakeReviewAsked: true,
+      },
+      ready: false,
+      assistantMessage: FINAL_INTAKE_REVIEW_QUESTION,
+    };
+  }
+
   const assistantMessage = response.status === "needs_more_info" ? nextNonDuplicateQuestion(response) : INTAKE_READY_MESSAGE;
 
   return {
@@ -220,6 +304,12 @@ function todayIsoDate(clientToday?: string) {
 
 function formatIsoDate(year: number, month: number, day: number) {
   return `${year.toString().padStart(4, "0")}-${month.toString().padStart(2, "0")}-${day.toString().padStart(2, "0")}`;
+}
+
+function addDaysIso(isoDate: string, days: number) {
+  const parsed = new Date(`${isoDate}T00:00:00Z`);
+  parsed.setUTCDate(parsed.getUTCDate() + days);
+  return parsed.toISOString().slice(0, 10);
 }
 
 function rollForwardIfPast(isoDate: string, clientToday?: string) {
@@ -270,11 +360,51 @@ function monthNumber(value: string) {
   return months[value.toLowerCase()];
 }
 
+function weekdayNumber(value: string) {
+  const weekdays: Record<string, number> = {
+    sun: 0,
+    sunday: 0,
+    mon: 1,
+    monday: 1,
+    tue: 2,
+    tues: 2,
+    tuesday: 2,
+    wed: 3,
+    wednesday: 3,
+    thu: 4,
+    thur: 4,
+    thurs: 4,
+    thursday: 4,
+    fri: 5,
+    friday: 5,
+    sat: 6,
+    saturday: 6,
+  };
+  return weekdays[value.toLowerCase()];
+}
+
+function nextWeekdayDate(value: string, clientToday?: string) {
+  const weekdayMatch = value.match(/^(?:(?:this|coming|next)\s+)?(sun(?:day)?|mon(?:day)?|tue(?:s|sday|day)?|wed(?:nesday)?|thu(?:r|rs|rsday|rday|day)?|fri(?:day)?|sat(?:urday)?)$/i);
+  if (!weekdayMatch) return undefined;
+
+  const target = weekdayNumber(weekdayMatch[1]);
+  if (target === undefined) return undefined;
+
+  const today = todayIsoDate(clientToday);
+  const parsedToday = new Date(`${today}T00:00:00Z`);
+  const current = parsedToday.getUTCDay();
+  let delta = (target - current + 7) % 7;
+  if (delta === 0 || /\bnext\b/i.test(value)) delta += 7;
+  return addDaysIso(today, delta);
+}
+
 function cleanDate(value: unknown, clientToday?: string) {
   const text = cleanString(value);
   if (!text) return undefined;
   if (/^\d{4}-\d{2}-\d{2}$/.test(text)) return rollForwardIfPast(text, clientToday);
   if (/^(today|now|asap|as soon as possible)$/i.test(text)) return todayIsoDate(clientToday);
+  const weekdayDate = nextWeekdayDate(text, clientToday);
+  if (weekdayDate) return weekdayDate;
 
   const slash = text.match(/^(\d{1,2})\/(\d{1,2})(?:\/(\d{2}|\d{4}))?$/);
   if (slash) {
@@ -367,6 +497,10 @@ function normalizeAiDraft(rawDraft: unknown, clientToday?: string) {
     startDate: cleanDate(draft.startDate, clientToday),
     equipment: cleanStringArray(draft.equipment),
     trainingFocus: cleanStringArray(draft.trainingFocus),
+    planStructureNotes: cleanString(draft.planStructureNotes),
+    preferredWorkoutDaysAsked: cleanBoolean(draft.preferredWorkoutDaysAsked),
+    preferredRestDaysAsked: cleanBoolean(draft.preferredRestDaysAsked),
+    finalIntakeReviewAsked: cleanBoolean(draft.finalIntakeReviewAsked),
     constraints: hasConstraints ? cleanedConstraints : undefined,
     strengthTraining: Object.keys(cleanedStrengthTraining).length ? cleanedStrengthTraining : undefined,
     intakeStep: cleanIntakeStep(draft.intakeStep),
@@ -392,6 +526,10 @@ function mergeDrafts(previous: PartialIntakeDraft, next: PartialIntakeDraft): Pa
           focusAreas: next.strengthTraining.focusAreas ?? previous.strengthTraining?.focusAreas ?? [],
         }
       : previous.strengthTraining,
+    planStructureNotes: next.planStructureNotes ?? previous.planStructureNotes,
+    preferredWorkoutDaysAsked: next.preferredWorkoutDaysAsked ?? previous.preferredWorkoutDaysAsked,
+    preferredRestDaysAsked: next.preferredRestDaysAsked ?? previous.preferredRestDaysAsked,
+    finalIntakeReviewAsked: next.finalIntakeReviewAsked ?? previous.finalIntakeReviewAsked,
   };
 }
 
@@ -403,8 +541,37 @@ function asksAboutConstraints(message: string) {
   return /\b(injur|injuries|hurt|pain|limitation|limitations|avoid|exercise(?:s)? to avoid|movement limitation)\b/i.test(message);
 }
 
+function asksAboutCompletedField(message: string, draft: PartialIntakeDraft) {
+  const normalized = message.toLowerCase();
+  const checks: Array<[boolean, RegExp]> = [
+    [Boolean(draft.sport), /\b(sport|discipline)\b/],
+    [Boolean(draft.goalDescription), /\b(main goal|goal|training for|want to train|hoping to accomplish)\b/],
+    [Boolean(draft.goalType), /\b(specific event|ongoing training|event or ongoing)\b/],
+    [Boolean(draft.blockLengthWeeks), /\b(how many weeks|training block|block length|week plan)\b/],
+    [Boolean(draft.daysPerWeek), /\b(days per week|per week|weekly schedule|how many days)\b/],
+    [Boolean(draft.startDate), /\b(when would you like to start|start date|start this|start the plan)\b/],
+    [Boolean(draft.currentLevel), /\b(current level|current grade|climbing grade|training level)\b/],
+    [Boolean(draft.equipment?.length), /\b(equipment|access to|home wall|gym membership|outdoor crags)\b/],
+    [Boolean(draft.constraints), /\b(injur|injuries|pain|limitations|exercises? to avoid|movements? to avoid)\b/],
+  ];
+
+  return checks.some(([isComplete, pattern]) => isComplete && pattern.test(normalized));
+}
+
 function nextNonDuplicateQuestion(response: PlanIntakeAiResponse) {
   const message = firstQuestionOnly(response.message);
+  if (
+    message === PREFERRED_WORKOUT_DAYS_QUESTION ||
+    message === PREFERRED_REST_DAYS_QUESTION ||
+    message === FINAL_INTAKE_REVIEW_QUESTION
+  ) {
+    return message;
+  }
+
+  if (asksAboutCompletedField(message, response.planRequestDraft)) {
+    return nextQuestionForDraft(response.planRequestDraft);
+  }
+
   if (!constraintsAnswered(response.planRequestDraft) || !asksAboutConstraints(message)) return message;
 
   const fallback = nextQuestionForDraft(response.planRequestDraft);
@@ -417,9 +584,13 @@ function normalizeAiResponse(response: unknown, clientToday?: string) {
   if (!response || typeof response !== "object") return response;
   const raw = response as Record<string, unknown>;
   const planRequestDraft = normalizeAiDraft(raw.planRequestDraft, clientToday);
+  const message = cleanString(raw.message) ?? nextQuestionForDraft(planRequestDraft);
+  if (message.trim() === FINAL_INTAKE_REVIEW_QUESTION) {
+    planRequestDraft.finalIntakeReviewAsked = true;
+  }
   return {
     ...raw,
-    message: cleanString(raw.message) ?? nextQuestionForDraft(planRequestDraft),
+    message,
     planRequestDraft,
   };
 }
@@ -461,13 +632,26 @@ function buildCoachIntakePrompt(input: PlanIntakeAiInput) {
   const missing = requiredFieldStatus(input.draft);
   const recentMessages = input.messages.slice(-12);
   const today = todayIsoDate(input.clientToday);
+  const coachName = input.coachName?.trim() || "Alex";
 
   return `TODAY:
 ${today}
 ${input.clientTimeZone ? `\nCLIENT_TIME_ZONE:\n${input.clientTimeZone}` : ""}
 
+COACH_NAME:
+${coachName}
+
 CURRENT_PLAN_REQUEST_DRAFT_JSON:
 ${JSON.stringify(input.draft)}
+
+FINAL_INTAKE_REVIEW_ASKED:
+${input.draft.finalIntakeReviewAsked ? "yes" : "no"}
+
+PREFERRED_WORKOUT_DAYS_ASKED:
+${input.draft.preferredWorkoutDaysAsked ? "yes" : "no"}
+
+PREFERRED_REST_DAYS_ASKED:
+${input.draft.preferredRestDaysAsked ? "yes" : "no"}
 
 MISSING_REQUIRED_FIELDS:
 ${missing.length ? missing.join(", ") : "none"}
@@ -481,12 +665,29 @@ ${input.userMessage}
 Return a PlanIntakeAiResponse JSON object.
 
 COACHING INSTRUCTIONS:
+- You are ${coachName}, the user's personal training coach.
+- Keep the tone personal, practical, and concise.
 - Extract every useful training-plan detail from the user's latest message and conversation.
 - Preserve existing draft fields unless the user changes them.
+- If CURRENT_PLAN_REQUEST_DRAFT_JSON already has sport, goalDescription, schedule, level, startDate, equipment, or constraints, do not ask for that same field again unless the user explicitly says they want to change it.
+- If the user gives a nuanced goal that differs from the initial discipline, reconcile it instead of resetting the interview. For example, bouldering as training for a big wall climb should stay sport "climbing" and preserve the big wall goal/details in goalDescription and planStructureNotes.
+- Preserve specific day-by-day requests, preferred session order, workout details, and "do X on Monday" style instructions in planStructureNotes.
+- If planStructureNotes already exists, append or update it with new relevant preferences instead of replacing useful details.
 - Do not force a fixed question order.
 - Ask exactly one natural follow-up question that would most improve the plan.
 - Never ask for two fields in one response. If several fields are missing, choose one.
-- If enough required fields are present but important nuance is missing, you may ask one extra useful coach question.
+- Before marking ready, make sure the user has had a clear chance to mention injuries, pain, movements to avoid, exercises they like, and exercises they dislike.
+- Do not invent empty constraints. Only set constraints to empty arrays after the user answers that they have no injuries, limitations, pain, or exercises to avoid.
+- If constraints are missing, ask one narrow safety question such as: "Do you have any injuries or pain I should account for?"
+- If injuries are answered but movements to avoid are unclear, ask one narrow avoid-list question such as: "Are there any exercises or movements you want me to avoid?"
+- If constraints are answered but exercise preferences are unclear, ask one narrow preference question such as: "Are there workouts or exercises you especially want included?"
+- After daysPerWeek is known and PREFERRED_WORKOUT_DAYS_ASKED is "no", ask exactly: "${PREFERRED_WORKOUT_DAYS_QUESTION}"
+- After preferred workout days are answered and PREFERRED_REST_DAYS_ASKED is "no", ask exactly: "${PREFERRED_REST_DAYS_QUESTION}"
+- If the required fields and specific safety/preferences are covered and FINAL_INTAKE_REVIEW_ASKED is "no", ask exactly this final question: "${FINAL_INTAKE_REVIEW_QUESTION}"
+- When required fields are present, ask one useful refinement question if it would materially improve the plan, especially about weekly structure, preferred days, session types, recovery, or exercises to include/avoid.
+- Do not ask more than two optional refinement questions after all required fields are present.
+- If FINAL_INTAKE_REVIEW_ASKED is "yes" and required fields are valid, capture the user's final details in planStructureNotes and mark status "ready".
+- Never mark status "ready" while FINAL_INTAKE_REVIEW_ASKED is "no".
 - Do not ask again about injuries, limitations, pain, or exercises to avoid after constraints are present in CURRENT_PLAN_REQUEST_DRAFT_JSON, even when those arrays are empty.
 - Mark status "ready" only when planRequestDraft validates as a complete PlanRequest.
 - For ongoing goals, set targetDate to null and ask for or infer a practical blockLengthWeeks.
@@ -496,12 +697,13 @@ COACHING INSTRUCTIONS:
 - Never output a startDate or targetDate before TODAY. If the user gives a month/day without a year, choose the next future occurrence.
 - If the user has injuries, limitations, or exercises to avoid, preserve them in constraints.
 - If the user wants strength training, preserve it in strengthTraining and trainingFocus.
+- If the user specifies what should happen on named days, preserve those instructions verbatim or near-verbatim in planStructureNotes.
 
 REQUIRED PlanRequest fields before ready:
 sport, goalType, goalDescription, blockLengthWeeks, daysPerWeek, startDate, currentLevel, equipment, constraints, strengthTraining.
 
 JSON SHAPE:
-{"status":"needs_more_info","message":"<one concise coach question>","planRequestDraft":{...}}`;
+{"status":"needs_more_info","message":"<one concise coach question>","planRequestDraft":{"planStructureNotes":"<optional day-by-day or structural preferences>", "...":"..."}}`;
 }
 
 function extractJsonObject(text: string) {
@@ -605,7 +807,7 @@ export async function continuePlanIntakeWithAiContract(input: PlanIntakeAiInput)
       : simulatePlanIntakeAiResponse(hintedInput);
     return toIntakeResponse({
       ...response,
-      planRequestDraft: mergeDrafts(input.draft, response.planRequestDraft),
+      planRequestDraft: mergeDrafts(hintedInput.draft, response.planRequestDraft),
     });
   } catch (error) {
     console.warn(`[ai-intake] Falling back after invalid or failed intake response: ${(error as Error).message}`);

@@ -58,7 +58,7 @@ In Docker, the `web` and `plan-worker` services point `ANTHROPIC_BASE_URL` at:
 http://simulator:8787
 ```
 
-So guided-intake plan generation uses the simulator by default unless you explicitly override the base URL. `web` creates the generation job, and `plan-worker` sends the sequential week prompts to the simulator.
+So guided-intake plan generation uses the simulator when `app/.env` points `ANTHROPIC_BASE_URL` at `http://simulator:8787`. `web` creates the generation job, and `plan-worker` sends the sequential week prompts to the simulator. To switch between simulator and a live backend, copy the appropriate env file to `app/.env` and recreate `web` plus `plan-worker`.
 
 ## Runtime controls
 
@@ -151,6 +151,10 @@ This keeps plans believable enough for UI testing without pretending to be a rea
 - plan-page and editor UI tests that should avoid paid generation calls
 - manual testing of the plan-generation path
 - parser and error-handling checks
+
+## Test guard rule
+
+Any Playwright test that can trigger AI-backed generation must be simulator-gated. Use `skipIfWebIsNotSimulator(test)` when only the web service can call the backend, and `skipIfWorkerStackIsNotSimulator(test)` when the plan worker is involved. This keeps automated tests from accidentally spending live-provider tokens or depending on nondeterministic model output.
 
 ## Future improvements
 

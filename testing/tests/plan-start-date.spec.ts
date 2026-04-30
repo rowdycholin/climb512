@@ -1,5 +1,7 @@
 import { expect, test } from "@playwright/test";
-import { createPlanFromOnboarding, registerUser } from "./helpers";
+import { createPlanFromOnboarding, registerUser, skipIfWebIsNotSimulator } from "./helpers";
+
+skipIfWebIsNotSimulator(test);
 
 function dateInputDaysAgo(daysAgo: number) {
   const date = new Date();

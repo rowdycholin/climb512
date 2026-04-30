@@ -7,6 +7,8 @@ out/
 
 # env files
 .env
+.env-simulator
+.env-aibackend
 .env.local
 .env.*.local
 

@@ -42,6 +42,7 @@ Stores registered app users.
 | lastName | TEXT | |
 | email | TEXT | Unique |
 | age | INTEGER | Captured at registration and reused for plan generation |
+| gender | TEXT | `male`, `female`, or `prefer_not_to_say`; used only to choose the intake coach name |
 | passwordHash | TEXT | bcrypt hash |
 | createdAt | TIMESTAMPTZ | |
 
@@ -84,6 +85,7 @@ Completed rows remain as durable generation history and debugging context.
 | nextWeekNum | INTEGER | Next week the worker should generate |
 | lastError | TEXT? | Last unrecovered generation error |
 | repairNotes | TEXT? | Future repair-chat guidance |
+| profileSnapshot | JSONB | Generation/profile context, including guided-intake `planRequest` while the first version is being generated |
 | lockedAt | TIMESTAMPTZ? | Worker lock timestamp |
 | createdAt | TIMESTAMPTZ | |
 | updatedAt | TIMESTAMPTZ | |
@@ -109,7 +111,7 @@ The plan page composes these rows for partial display while `Plan.generationStat
 
 ### PlanVersion
 
-Stores one full accepted snapshot of the plan and the generation/profile inputs used to create or revise it.
+Stores one full accepted snapshot of the plan and the profile inputs used to create or revise it.
 
 | Column | Type | Notes |
 |---|---|---|
@@ -121,7 +123,7 @@ Stores one full accepted snapshot of the plan and the generation/profile inputs 
 | changeSummary | TEXT? | Human-readable summary |
 | effectiveFromWeek | INTEGER? | First week affected by the revision |
 | effectiveFromDay | INTEGER? | Absolute plan day where a day-level adjustment begins |
-| profileSnapshot | JSONB | Generation/profile context, including guided-intake `planRequest` when available |
+| profileSnapshot | JSONB | Profile/request context for the accepted version |
 | planSnapshot | JSONB | Full week/day/session/exercise snapshot |
 | changeMetadata | JSONB? | Adjustment/revert details such as affected days, approved scope, or selected version |
 | createdAt | TIMESTAMPTZ | |
@@ -177,7 +179,7 @@ JSON copy of the plan-generation inputs:
 Notes:
 
 - `age` comes from the registered user record, not the onboarding or guided-intake form.
-- guided intake now builds a generic `PlanRequest` and stores that request in `profileSnapshot.planRequest`.
+- guided intake builds a generic `PlanRequest`; while worker generation is in progress it lives on `PlanGenerationJob.profileSnapshot.planRequest`, then moves into the first generated `PlanVersion.profileSnapshot.planRequest`.
 - manual onboarding still stores the legacy input shape for compatibility.
 - `PlanRequest` includes fields such as sport, disciplines, goal type, goal description, target date, strength training, and injuries/limitations.
 - `startDate` is stored on `Plan`, not in `profileSnapshot`.
@@ -226,6 +228,13 @@ Full plan content for one accepted version:
   ]
 }
 ```
+
+Planned rich coaching detail:
+
+- The current snapshot shape is intentionally compact and trackable.
+- Future optional fields may include `week.summary`, `week.progressionNote`, `day.coachNotes`, `session.objective`, `session.intensity`, `session.warmup`, `session.cooldown`, and `exercise.modifications`.
+- These fields should remain optional so old snapshots continue to parse.
+- Rich coaching text should stay separate from trackable logging fields such as sets, reps, duration, rest, and exercise keys.
 
 ## Calendar Position
 

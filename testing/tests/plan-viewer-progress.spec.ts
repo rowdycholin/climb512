@@ -1,5 +1,7 @@
 import { expect, test } from "@playwright/test";
-import { registerUser } from "./helpers";
+import { registerUser, skipIfWebIsNotSimulator } from "./helpers";
+
+skipIfWebIsNotSimulator(test);
 
 async function registerAndCreateThreeDayPlan(page: import("@playwright/test").Page) {
   const userId = `progress-${Date.now()}`;

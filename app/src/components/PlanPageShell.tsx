@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { CheckCircle2, History, MessageCircle, PencilLine, RotateCcw, WandSparkles } from "lucide-react";
+import { CheckCircle2, Eye, History, MessageCircle, PencilLine, RotateCcw, WandSparkles } from "lucide-react";
 import { completePlan, reopenPlan, repairPlanGeneration, revertPlanVersion } from "@/app/actions";
 import PlanWorkspace from "@/components/PlanWorkspace";
 import { Button } from "@/components/ui/button";
@@ -49,6 +49,9 @@ interface PlanPageShellProps {
       changeType: string;
       changeSummary: string | null;
       effectiveFromDay: number | null;
+      isPreview: boolean;
+      previewCreatedAtLabel: string | null;
+      currentVersionNum: number;
       changeMetadata: {
         affectedDays: Array<{
           weekNum: number;
@@ -69,6 +72,7 @@ interface PlanPageShellProps {
       effectiveFromDay: number | null;
       createdAtLabel: string;
       isCurrent: boolean;
+      isPreview: boolean;
     }>;
     generation: {
       status: string;
@@ -119,6 +123,7 @@ export default function PlanPageShell({
     [activeWeek],
   );
   const completionDisabled = !summary.generation.isReady;
+  const planActionsDisabled = !summary.generation.isReady || summary.version.isPreview;
 
   useEffect(() => {
     if (!summary.generation.isGenerating) return;
@@ -173,6 +178,20 @@ export default function PlanPageShell({
                 Congratulations! {summary.completion.isUserCompleted ? "You marked this training plan complete." : "You reached the end of this training plan."}
               </p>
             )}
+            {summary.version.isPreview && (
+              <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+                <p className="font-semibold">Previewing Version {summary.version.versionNum}</p>
+                <p className="mt-1 text-amber-800">
+                  Read-only historical view. Logs, edits, adjustments, completion, and revert actions are disabled.
+                </p>
+                <a
+                  href={`/plan/${planId}`}
+                  className="mt-2 inline-flex rounded-md border border-amber-200 bg-white px-3 py-1.5 text-xs font-semibold text-amber-800 transition hover:bg-amber-100"
+                >
+                  Return to current version
+                </a>
+              </div>
+            )}
           </div>
           <div className="flex items-center gap-2">
             <Button
@@ -181,6 +200,7 @@ export default function PlanPageShell({
               aria-label={versionHistoryOpen ? "Close version history" : "Open version history"}
               title="Version history"
               onClick={() => setVersionHistoryOpen((value) => !value)}
+              disabled={summary.versions.length === 0}
               className={`gap-2 ${versionHistoryOpen ? "shadow-sm" : "border-white/80 bg-white/80 backdrop-blur"}`}
             >
               <History className="h-4 w-4" />
@@ -192,7 +212,7 @@ export default function PlanPageShell({
               aria-label={editorOpen ? "Close day editor" : "Open day editor"}
               title={activeWeekLocked ? "Add exercises without changing logged work" : "Edit this week"}
               onClick={toggleEditor}
-              disabled={!activeWeek}
+              disabled={!activeWeek || planActionsDisabled}
               className={`gap-2 ${editorOpen ? "shadow-sm" : "border-white/80 bg-white/80 backdrop-blur"}`}
             >
               <PencilLine className="h-4 w-4" />
@@ -204,7 +224,7 @@ export default function PlanPageShell({
               aria-label={coachOpen ? "Close plan adjustment" : "Open plan adjustment"}
               title="Adjust future plan"
               onClick={toggleCoach}
-              disabled={!activeWeek}
+              disabled={!activeWeek || planActionsDisabled}
               className={`gap-2 ${coachOpen ? "shadow-sm" : "border-white/80 bg-white/80 backdrop-blur"}`}
             >
               <MessageCircle className="h-4 w-4" />
@@ -218,6 +238,7 @@ export default function PlanPageShell({
                   variant="outline"
                   aria-label="Reopen plan"
                   title="Reopen plan"
+                  disabled={planActionsDisabled}
                   className="gap-2 border-white/80 bg-white/80 backdrop-blur"
                 >
                   <RotateCcw className="h-4 w-4" />
@@ -231,7 +252,7 @@ export default function PlanPageShell({
                 aria-label="Complete plan"
                 title={completionDisabled ? "Plan generation must finish first" : "Complete plan"}
                 onClick={() => setCompletionPanelOpen((value) => !value)}
-                disabled={completionDisabled}
+                disabled={completionDisabled || summary.version.isPreview}
                 className={`gap-2 ${completionPanelOpen ? "shadow-sm" : "border-white/80 bg-white/80 backdrop-blur"}`}
               >
                 <CheckCircle2 className="h-4 w-4" />
@@ -242,7 +263,13 @@ export default function PlanPageShell({
         </div>
 
         <div className="mt-4 flex flex-wrap gap-3 text-sm text-slate-700">
-          <span>Version {summary.version.versionNum}</span>
+          <span>
+            {summary.version.isPreview
+              ? `Preview Version ${summary.version.versionNum}`
+              : summary.generation.isReady
+                ? `Version ${summary.version.versionNum}`
+                : "Generating initial plan"}
+          </span>
           <span>&middot;</span>
           <span>Goals: {summary.goals.join(", ")}</span>
           <span>&middot;</span>
@@ -275,7 +302,9 @@ export default function PlanPageShell({
                 </p>
               </div>
               <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-xs text-slate-600">
-                Current v{summary.version.versionNum}
+                {summary.version.isPreview
+                  ? `Preview v${summary.version.versionNum}`
+                  : `Current v${summary.version.versionNum}`}
               </span>
             </div>
             <div className="mt-3 max-h-80 space-y-2 overflow-y-auto pr-1">
@@ -297,6 +326,11 @@ export default function PlanPageShell({
                             Current
                           </span>
                         )}
+                        {version.isPreview && (
+                          <span className="rounded-full border border-amber-200 bg-amber-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-700">
+                            Preview
+                          </span>
+                        )}
                         <span className="text-xs text-slate-500">{version.createdAtLabel}</span>
                       </div>
                       <p className="mt-1 text-xs font-medium text-slate-500">
@@ -308,30 +342,45 @@ export default function PlanPageShell({
                       )}
                     </div>
                     {!version.isCurrent && (
-                      <form
-                        action={revertPlanVersion}
-                        onSubmit={(event) => {
-                          if (
-                            !window.confirm(
-                              `Revert to Version ${version.versionNum}? This creates a new current version and keeps workout logs.`,
-                            )
-                          ) {
-                            event.preventDefault();
-                          }
-                        }}
-                      >
-                        <input type="hidden" name="planId" value={planId} />
-                        <input type="hidden" name="versionId" value={version.id} />
-                        <Button
-                          type="submit"
-                          variant="outline"
-                          size="sm"
-                          aria-label={`Revert to Version ${version.versionNum}`}
-                          title={`Revert to Version ${version.versionNum}`}
-                        >
-                          Revert
-                        </Button>
-                      </form>
+                      <div className="flex flex-wrap gap-2">
+                        {!version.isPreview && (
+                          <a
+                            href={`/plan/${planId}?version=${version.id}`}
+                            className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-xs font-medium text-slate-700 transition hover:bg-slate-50"
+                            aria-label={`Preview Version ${version.versionNum}`}
+                            title={`Preview Version ${version.versionNum}`}
+                          >
+                            <Eye className="h-3.5 w-3.5" />
+                            Preview
+                          </a>
+                        )}
+                        {!summary.version.isPreview && (
+                          <form
+                            action={revertPlanVersion}
+                            onSubmit={(event) => {
+                              if (
+                                !window.confirm(
+                                  `Revert to Version ${version.versionNum}? This creates a new current version and keeps workout logs.`,
+                                )
+                              ) {
+                                event.preventDefault();
+                              }
+                            }}
+                          >
+                            <input type="hidden" name="planId" value={planId} />
+                            <input type="hidden" name="versionId" value={version.id} />
+                            <Button
+                              type="submit"
+                              variant="outline"
+                              size="sm"
+                              aria-label={`Revert to Version ${version.versionNum}`}
+                              title={`Revert to Version ${version.versionNum}`}
+                            >
+                              Revert
+                            </Button>
+                          </form>
+                        )}
+                      </div>
                     )}
                   </div>
                 </div>
@@ -481,6 +530,7 @@ export default function PlanPageShell({
           setEditorOpen(false);
           setCoachOpen(false);
         }}
+        readOnly={summary.version.isPreview}
       />
     </>
   );

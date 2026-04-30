@@ -143,6 +143,10 @@ export interface AdjustmentChatContext {
     id: string;
     versionNum: number;
   };
+  activeView?: {
+    weekNum: number;
+    dayNum: number | null;
+  };
   effectiveFrom: AdjustmentDayRef | null;
   lockedHistory: {
     throughPlanDay: number;
@@ -231,6 +235,10 @@ export function buildAdjustmentChatContext(params: {
     profileSnapshot: ProfileSnapshot;
     planSnapshot: PlanSnapshot;
   };
+  activeView?: {
+    weekNum: number;
+    dayNum?: number | null;
+  };
   logs: WorkoutLogDayMarker[];
 }): AdjustmentChatContext {
   const currentDate = params.currentDate ?? new Date();
@@ -253,6 +261,12 @@ export function buildAdjustmentChatContext(params: {
       id: params.currentVersion.id,
       versionNum: params.currentVersion.versionNum,
     },
+    activeView: params.activeView
+      ? {
+          weekNum: params.activeView.weekNum,
+          dayNum: params.activeView.dayNum ?? null,
+        }
+      : undefined,
     effectiveFrom,
     lockedHistory: {
       throughPlanDay: Math.max(0, effectiveFromPlanDay - 1),
@@ -291,6 +305,10 @@ Boundaries:
 - If there is enough information, return a structured proposal.
 - Do not create a brand-new plan. Adjust the existing plan only.
 - Keep injury-related changes conservative and ask one follow-up question when risk is unclear.
+- When returning a proposal, revisedPlanSnapshot must be the complete plan snapshot with every original week and day included.
+- Keep all locked days unchanged.
+- Keep stable keys for existing weeks, days, sessions, and exercises. New sessions or exercises may use new unique keys.
+- Declare every changed day in changedDays and every changed week in changedWeeks.
 
 Return JSON only.`;
 }
@@ -308,6 +326,13 @@ ${JSON.stringify(params.state.messages)}
 RESPONSE OPTIONS:
 1. Ask exactly one follow-up question if you need more detail.
 2. Return a proposal if you have enough detail.
+
+IMPORTANT PROPOSAL RULES:
+- revisedPlanSnapshot must include every week from the current plan, not just changed weeks.
+- Unchanged weeks and days must still be present.
+- Locked history and logged exercise days must be byte-for-byte unchanged.
+- changedDays must list every day whose snapshot changed.
+- If the user wants to change sport, goal, target level/date, event, block length, or training days per week, set requiresGoalChangeConfirmation to true.
 
 FOLLOW_UP SHAPE:
 {

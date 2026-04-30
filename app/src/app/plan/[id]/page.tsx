@@ -1,9 +1,10 @@
 import { notFound, redirect } from "next/navigation";
 import { getSession } from "@/lib/session";
+import { prisma } from "@/lib/prisma";
 import { findOwnedPlanWithLogs } from "@/lib/plan-access";
 import { getPlanCalendarStatus } from "@/lib/plan-calendar";
 import { countGeneratedWeeks, getPlanGenerationProgress } from "@/lib/plan-generation-state";
-import { parseProfileSnapshot } from "@/lib/plan-snapshot";
+import { buildPlanView, parsePlanSnapshot, parseProfileSnapshot } from "@/lib/plan-snapshot";
 import AppHeader from "@/components/AppHeader";
 import PlanPageShell from "@/components/PlanPageShell";
 
@@ -51,18 +52,49 @@ function isUserFacingVersion(changeType: string) {
   ].includes(changeType);
 }
 
-export default async function PlanPage({ params }: { params: { id: string } }) {
+export default async function PlanPage({
+  params,
+  searchParams,
+}: {
+  params: { id: string };
+  searchParams?: { version?: string };
+}) {
   const session = await getSession();
   if (!session.isLoggedIn) redirect("/login");
 
   const plan = await findOwnedPlanWithLogs(params.id, session.userId);
   if (!plan) notFound();
 
-  const profile = parseProfileSnapshot(plan.currentVersion.profileSnapshot);
-  const weeks = plan.planView.weeks;
+  const previewVersionId = typeof searchParams?.version === "string" ? searchParams.version : null;
+  const previewVersion = previewVersionId
+    ? await prisma.planVersion.findFirst({
+        where: {
+          id: previewVersionId,
+          planId: plan.id,
+          changeType: { notIn: ["worker_generation_started", "worker_generation"] },
+          plan: { userId: session.userId },
+        },
+      })
+    : null;
+  const isPreview = Boolean(previewVersion);
+  const displayVersion = previewVersion ?? plan.currentVersion;
+  const profile = parseProfileSnapshot(displayVersion.profileSnapshot);
+  const previewSnapshot = previewVersion ? parsePlanSnapshot(previewVersion.planSnapshot) : null;
+  const previewLogs = previewVersion
+    ? plan.workoutLogs.filter((log) => log.planVersionId === previewVersion.id)
+    : null;
+  const planView = previewSnapshot && previewLogs
+    ? buildPlanView(previewSnapshot, previewLogs)
+    : plan.planView;
+  const weeks = planView.weeks;
   const totalWeeks = Math.max(profile.weeksDuration, weeks.length);
-  const generatedWeeks = countGeneratedWeeks(plan.currentVersion.planSnapshot);
-  const generation = getPlanGenerationProgress({
+  const generatedWeeks = countGeneratedWeeks(previewSnapshot ?? plan.currentVersion.planSnapshot);
+  const generation = isPreview ? getPlanGenerationProgress({
+    status: "ready",
+    generatedWeeks: weeks.length,
+    totalWeeks,
+    error: null,
+  }) : getPlanGenerationProgress({
     status: plan.generationStatus,
     generatedWeeks: plan.generatedWeeks || generatedWeeks,
     totalWeeks,
@@ -102,6 +134,9 @@ export default async function PlanPage({ params }: { params: { id: string } }) {
       .map((version, index) => [version.id, index + 1]),
   );
   const currentDisplayVersionNum = displayVersionById.get(plan.currentVersion.id) ?? visibleVersions.length;
+  const previewDisplayVersionNum = previewVersion
+    ? displayVersionById.get(previewVersion.id) ?? previewVersion.versionNum
+    : null;
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-100 to-slate-50">
@@ -139,12 +174,15 @@ export default async function PlanPage({ params }: { params: { id: string } }) {
               notes: plan.completionNotes,
             },
             version: {
-              id: plan.currentVersion.id,
-              versionNum: currentDisplayVersionNum,
-              changeType: plan.currentVersion.changeType,
-              changeSummary: plan.currentVersion.changeSummary,
-              effectiveFromDay: plan.currentVersion.effectiveFromDay,
-              changeMetadata: parseAdjustmentMetadata(plan.currentVersion.changeMetadata),
+              id: displayVersion.id,
+              versionNum: previewDisplayVersionNum ?? currentDisplayVersionNum,
+              changeType: displayVersion.changeType,
+              changeSummary: displayVersion.changeSummary,
+              effectiveFromDay: displayVersion.effectiveFromDay,
+              changeMetadata: isPreview ? null : parseAdjustmentMetadata(displayVersion.changeMetadata),
+              isPreview,
+              previewCreatedAtLabel: previewVersion ? versionDateFormatter.format(previewVersion.createdAt) : null,
+              currentVersionNum: currentDisplayVersionNum,
             },
             versions: visibleVersions
               .map((version) => ({
@@ -157,6 +195,7 @@ export default async function PlanPage({ params }: { params: { id: string } }) {
                 effectiveFromDay: version.effectiveFromDay,
                 createdAtLabel: versionDateFormatter.format(version.createdAt),
                 isCurrent: version.id === plan.currentVersion.id,
+                isPreview: version.id === previewVersion?.id,
               })),
             generation,
             generationJob: latestGenerationJob

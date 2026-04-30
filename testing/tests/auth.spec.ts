@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { TEST_PASSWORD, createPlanFromOnboarding, registerUser } from "./helpers";
+import { TEST_PASSWORD, createPlanFromOnboarding, registerUser, skipIfWebIsNotSimulator } from "./helpers";
 
 test.beforeAll(async ({ browser }) => {
   const page = await browser.newPage();
@@ -43,6 +43,8 @@ test.describe("Authentication", () => {
   });
 
   test("logs in with an active plan and lands on that plan", async ({ page }) => {
+    skipIfWebIsNotSimulator(test);
+
     const userId = `loginplan-${Date.now()}`;
     await registerUser(page, userId);
     await createPlanFromOnboarding(page);

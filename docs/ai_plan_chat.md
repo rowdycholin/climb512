@@ -17,9 +17,11 @@ The goal is to move carefully:
 - [x] Guided intake exists at `/intake`.
 - [x] Guided intake asks one question at a time.
 - [x] Guided intake builds a generic `PlanRequest`.
+- [x] Guided intake opens with a named personal training coach: Alix for female users, Alex otherwise.
 - [x] Guided intake includes event goals and ongoing goals.
 - [x] Guided intake includes injuries, limitations, and exercises to avoid.
 - [x] Guided intake includes weight training as part of a climbing-support plan.
+- [x] Guided intake preserves specific day-by-day or structural preferences in `planStructureNotes` and passes them to generation.
 - [x] Guided intake creates a `PlanGenerationJob` from `PlanRequest` and the worker generates the plan.
 - [x] Manual onboarding still uses the legacy climbing-shaped `PlanInput`.
 - [x] Playwright regression exists for guided intake and plan generation.
@@ -82,6 +84,14 @@ The intake prompt includes the browser's local date and time zone, and the date 
 
 The guided intake screen no longer shows an editable manual draft form or a visible Plan Draft panel. It submits the structured draft behind the scenes once enough information has been collected. The magic-wand generate button stays disabled until the draft passes the full `PlanRequest` schema, and the assistant tells the user to click the magic wand when the plan can be generated.
 
+The intake should feel like a professional coach conversation. The opening message introduces Alex/Alix as the user's personal training coach and explains that more detailed information leads to a better plan. The assistant should ask only one question and one topic at a time. Before marking the intake ready, the live AI prompt should give the user a clear chance to mention injuries, pain, exercises to avoid, and exercises or workout styles they especially want included. After asking how many training days per week the user wants, it must ask whether there are specific days they like to work out and whether there are specific days they prefer as rest days. It must always ask this final open-ended review question before it can mark the draft ready: "Is there anything else I should know about you or your goals before I am ready to generate the plan?" The generate button stays disabled until that final review question has been asked.
+
+Detailed preferences from the chat, such as "do intervals on Wednesday" or "keep long sessions on Saturday", are stored in `PlanRequest.planStructureNotes`. The worker generation prompt includes those notes for each week and instructs the model to respect named-day preferences unless they conflict with safety, recovery, or the requested training-day count.
+
+The intake server keeps direct-answer hints and merged draft state after each turn, so detailed answers such as "bouldering for Freerider on El Cap" are retained as climbing/big-wall context. If a live AI response tries to ask again for an already collected field like sport, goal, start date, schedule, level, equipment, or constraints, the app replaces that stale prompt with the next missing intake question.
+
+Live AI adjustment responses are parsed and validated on the server before the user can apply them. If the provider returns malformed JSON, the app makes one repair attempt through the AI backend and then returns a concise retry/narrowing message instead of exposing a raw parser error.
+
 ### Separate Intake From Plan Generation
 
 Plan generation should be a separate step from the chat.
@@ -123,6 +133,8 @@ The app should treat `PlanRequest` as:
 - a place to store broadly useful context
 
 It should not prevent sport- or activity-specific context from being carried forward. A future version may add an `activityContext` or `customFields` object so unusual sports can preserve richer details without forcing everything into generic fields.
+
+Current escape hatch: `planStructureNotes` carries freeform but bounded structural preferences from intake into generation. This is intentionally broader than the required fields so conversational details are not lost before the worker builds the plan.
 
 It should represent:
 
@@ -405,7 +417,7 @@ Validation before moving on:
 
 ## Phase 6: AI-Assisted Plan Adjustment
 
-Status: complete for the first day-level adjustment flow. The current implementation uses deterministic adjustment rules behind the `PlanAdjustmentRequest` contract; a later iteration can replace that generator step with the real AI provider without changing the request/validation boundary.
+Status: complete for the first day-level adjustment flow and live AI-backed adjustment chat. Live-provider mode can ask the configured AI backend for follow-up questions or structured proposals; simulator/local mode uses deterministic fixtures behind the same validation boundary.
 
 Goal: allow the user to chat about a plan change and create a new version without rewriting logged history.
 
@@ -774,7 +786,7 @@ Implementation steps:
 - [x] Keep updating `Plan.generatedWeeks`, `generationStatus`, and `generationError` so the plan page can show progress.
 - [x] Compose generated week rows into a temporary display `PlanSnapshot` while generation is in progress or failed.
 - [x] When all weeks are generated, compose the full snapshot and create exactly one user-facing `PlanVersion` with `changeType = "generated"`.
-- [x] Set `Plan.currentVersionId` only when the final generated version is ready, or clearly define how the initial shell version behaves until then.
+- [x] Set `Plan.currentVersionId` only when the final generated version is ready; generation context lives on `PlanGenerationJob` until then.
 - [x] Update failed-week repair to resume from `PlanGenerationWeek` rows and optionally delete/regenerate rows from the failed week forward.
 - [x] Update version history so newly generated plans no longer create worker checkpoint versions; the operational shell and old dev-data worker versions remain hidden.
 - [x] Keep existing dev data as-is unless a cleanup migration is explicitly needed; use the new flow for newly generated plans.
@@ -782,28 +794,116 @@ Implementation steps:
 - [x] Add tests that progressive UI still shows Week 1 before the full plan is complete.
 - [x] Add tests that repair resumes from the failed week using prior generated week rows.
 
-Implementation note: while a plan is still generating, `Plan.currentVersionId` points at a hidden operational shell version that stores the profile/request context. Generated week snapshots live in `PlanGenerationWeek` and are composed for display. When all weeks are ready, the worker creates the first user-facing generated version and makes it current.
+Implementation note: while a plan is still generating, `Plan.currentVersionId` remains empty and `PlanGenerationJob.profileSnapshot` stores the profile/request context. Generated week snapshots live in `PlanGenerationWeek` and are composed for display. When all weeks are ready, the worker creates the first user-facing generated version and makes it current.
 
-Chunk 3: Read-Only Historical Preview
+Chunk 3: Plan Lifecycle Cleanup Before Preview
 
-- [ ] Let users preview a previous version in read-only mode using the existing plan viewer where possible.
-- [ ] Clearly label historical previews so users do not confuse them with the active plan.
-- [ ] Disable logging, manual edits, AI adjustments, completion, and revert-from-preview controls when previewing unless explicitly supported.
-- [ ] Decide how old-version workout logs should display, since logs are attached to the version where they were created.
-- [ ] Add Playwright coverage for opening and closing historical preview mode.
+Goal: remove the last operational `PlanVersion` artifact before adding more version-history UI. Version history should show user-facing revisions only.
+
+- [x] Move generation context out of the hidden `worker_generation_started` `PlanVersion` row.
+- [x] Store generation context on `PlanGenerationJob.profileSnapshot`.
+- [x] Update plan loading so in-progress generation can still render composed `PlanGenerationWeek` rows without a shell version.
+- [x] Create the first `PlanVersion` only after the worker completes the full generated plan.
+- [x] Add a cleanup path for old hidden shell rows in development data.
+- [x] Confirm new generated plans show Version 1 as the first user-facing version.
+- [x] Confirm version history no longer needs to filter out new operational shell versions.
+
+Chunk 4: Read-Only Historical Preview
+
+- [x] Let users preview a previous version in read-only mode using the existing plan viewer where possible.
+- [x] Clearly label historical previews so users do not confuse them with the active plan.
+- [x] Disable logging, manual edits, AI adjustments, completion, and revert-from-preview controls when previewing unless explicitly supported.
+- [x] Decide how old-version workout logs should display, since logs are attached to the version where they were created. Decision: preview only shows logs attached to the previewed version.
+- [x] Add Playwright coverage for opening and closing historical preview mode.
 
 **Batch 7: Tests**
 
-- [ ] Unit tests for adjustment prompt/context construction.
-- [ ] Unit tests for proposal validation.
-- [ ] Test that locked history cannot be changed.
-- [ ] Playwright test for a simple future-day exercise swap.
-- [ ] Playwright test for a schedule change across future weeks.
-- [ ] Playwright test for a broad repeated change, such as moving all future Thursday rest days to Saturday.
-- [ ] Playwright test that changed days are summarized/highlighted after apply.
-- [ ] Playwright test for an injury-related conservative adjustment.
-- [ ] Playwright test that a goal change requires explicit confirmation.
-- [ ] Existing logging, manual edit, and plan viewer tests still pass.
+Recommended order:
+
+- [x] Unit/browser regression that generated plans create no hidden operational `PlanVersion` after lifecycle cleanup.
+- [x] Unit/browser regression that generated plans start at user-facing Version 1.
+- [x] Audit Playwright tests so AI-backed generation paths are simulator-gated.
+- [x] Document that future AI-backed tests must use simulator guards.
+- [x] Unit/browser tests for version ownership checks, including listing, previewing, and reverting.
+- [x] Unit/browser tests for deeper log preservation across adjustment and revert.
+- [x] Unit tests for adjustment prompt/context construction.
+- [x] Unit tests for proposal validation.
+- [x] Test that locked history cannot be changed.
+- [x] Playwright test for historical preview open/close behavior.
+- [x] Playwright test that historical preview disables logging, editing, AI adjustment, completion, and active-plan controls.
+- [x] Playwright test for a simple future-day exercise swap.
+- [x] Playwright test for a schedule change across future weeks.
+- [x] Playwright test for a broad repeated change, such as moving all future Thursday rest days to Saturday.
+- [x] Playwright test that changed days are summarized/highlighted after apply.
+- [x] Playwright test for an injury-related conservative adjustment.
+- [x] Playwright test that a goal change requires explicit confirmation.
+- [x] Existing logging, manual edit, plan viewer, worker-generation, and version-history tests still pass.
+
+**Batch 7A: Deterministic Adjustment Fixtures For Remaining Tests**
+
+Goal: finish the remaining Batch 7 tests without calling the live AI provider. The app-side deterministic adjustment layer should support a small set of explicit fixture behaviors that mirror the future AI provider contract closely enough for repeatable Playwright coverage.
+
+Why this is needed:
+
+- The remaining tests require concrete plan transformations, not just a valid proposal shell.
+- The live AI provider should not be used by automated tests.
+- The simulator currently covers plan generation; interactive adjustment is deterministic app-side logic.
+- Adding fixture-quality deterministic adjustment behavior gives us honest tests now and a stable contract for the future AI adjustment provider later.
+
+Proposed fixture behaviors:
+
+- [x] Future-day exercise swap
+  - Recognize requests like "swap Wednesday's max hangs for easier repeaters".
+  - Infer a `day_only` or explicit date/day scope.
+  - Replace or rename the targeted exercise only inside the approved unlogged day.
+  - Preserve session/day identifiers where the validation contract requires them.
+  - Produce change metadata for the affected day.
+
+- [x] Schedule change across future weeks
+  - Recognize requests like "move next week's Tuesday workout to Wednesday" or "shift training later next week".
+  - Apply only to unlogged days inside the inferred week/date-range scope.
+  - Keep logged days locked even if they fall inside the requested range.
+  - Summarize the moved days clearly in the proposal and version history.
+
+- [x] Repeated broad schedule pattern
+  - Recognize requests like "move all future Thursday rest days to Saturday".
+  - Apply a repeated pattern across future unlogged weeks.
+  - Collapse the proposal summary into a pattern such as "Weeks 2-8: Thursday rest moved to Saturday."
+  - Keep expandable affected-day detail for inspection.
+
+- [x] Injury-related conservative adjustment
+  - Recognize injury/limitation wording such as elbow pain, shoulder irritation, or avoiding a named movement.
+  - Substitute safer exercise names and reduce volume/intensity for affected future days.
+  - Preserve the plan's original sport, goal, target date, target level, and block length.
+  - Include the injury rationale in the proposal summary.
+
+- [x] Goal-change confirmation
+  - Detect requests that materially change the plan goal, sport, target level, target date, or block length.
+  - Return a proposal that requires explicit confirmation before apply.
+  - Keep non-goal-changing adjustments on the normal apply path.
+  - Add Playwright coverage that apply is blocked until the user confirms.
+
+Implementation notes:
+
+- Keep these fixtures behind the current deterministic adjustment boundary; do not spread one-off parsing throughout UI components.
+- Prefer helper functions that can later be replaced by an AI provider response using the same proposal schema.
+- Every fixture must still pass server validation for approved scope, locked history, stable identifiers, and declared affected days.
+- These tests must remain simulator-gated when they create plans, even though the adjustment fixture itself does not call the simulator.
+
+**Batch 8: Real AI-Backed Adjustment Chat**
+
+Goal: replace the current deterministic adjustment proposal/rewrite path with the same kind of AI-backed conversational experience used by guided intake.
+
+- [x] Send the current plan, selected week/day, locked workout history, current `PlanRequest`, and full adjustment conversation to the configured AI backend.
+- [x] Let the AI ask clarifying questions before proposing changes instead of relying on local keyword/scope inference only.
+- [x] Require the AI to return a structured proposal with summary, affected days, and revised future snapshot.
+- [x] Keep server-side validation as the final authority: no logged history changes, no undeclared affected days, and explicit confirmation for goal changes.
+- [x] Make the adjustment chat visually match guided intake and avoid form-like headers.
+- [x] Keep deterministic fixtures for simulator-gated tests, but use the live provider when the app is pointed at the AI backend.
+- [ ] Browser-test the live AI adjustment flow and tune prompt/validation based on real provider behavior.
+- [ ] Add simulator-gated Playwright coverage for the server-backed adjustment chat path.
+
+Current note: the adjustment panel now uses the intake-style chat layout and calls the server-backed adjustment chat path. In live-provider mode, the server sends the plan context and conversation to the AI backend; in simulator mode, it keeps using deterministic fixture behavior for repeatable tests.
 
 Related Phase 7 repair follow-up:
 
@@ -811,7 +911,72 @@ Related Phase 7 repair follow-up:
 - [ ] Include original plan goals and generated prior-week summaries in the repair chat visible context.
 - [ ] Add validation or prompt checks that reject repair output that changes the sport, primary goal, target date, target level, or block length unless the user is moved into the full adjustment flow.
 
-## Phase 9: Add More Sports
+## Phase 9: Rich Coaching Detail In Generated Plans
+
+Goal: preserve more of the high-quality coaching detail that strong models can produce without making workout logging messy or unstructured.
+
+Why this matters:
+
+- Direct model playground output can include useful coaching context that the current compact schema drops.
+- Users benefit from knowing why a week/day/session exists, not only what to log.
+- Plan adjustments work better when the model and user can see the intent behind the original programming.
+- Trackable prescription fields should stay separate from richer coaching explanation so logging remains simple.
+
+Recommended snapshot additions:
+
+- `week.summary`: short explanation of the week's purpose.
+- `week.progressionNote`: how this week relates to the previous/next week.
+- `day.coachNotes`: day-level intent, pacing, or safety note.
+- `session.objective`: what the athlete should accomplish in the session.
+- `session.intensity`: optional RPE, effort, grade range, or intensity guidance.
+- `session.warmup`: optional concise warmup guidance.
+- `session.cooldown`: optional concise cooldown or mobility guidance.
+- `exercise.modifications`: optional easier/harder substitutions or safety modifications.
+
+Implementation batches:
+
+**Batch 1: Schema And Compatibility**
+
+- [ ] Extend snapshot parsing/types to allow optional rich coaching fields while preserving old snapshots.
+- [ ] Keep existing required trackable fields unchanged: sets, reps, duration, rest, notes, and exercise keys.
+- [ ] Add unit coverage that old compact snapshots still parse and render.
+- [ ] Add unit coverage that rich snapshots parse without losing optional fields.
+
+**Batch 2: Generation Prompt And Normalization**
+
+- [ ] Update plan-generation prompts to request concise rich coaching fields.
+- [ ] Update normalization to trim rich fields and cap overly long model text.
+- [ ] Update simulator output with representative rich fields so local testing can show the new UI.
+- [ ] Ensure worker-generated weeks preserve rich fields in `PlanGenerationWeek` and final `PlanVersion`.
+
+**Batch 3: Plan Viewer UI**
+
+- [ ] Display week summary/progression notes near the week header.
+- [ ] Display day coach notes inside each day without crowding logging controls.
+- [ ] Display session objective/intensity/warmup/cooldown in a compact, scannable layout.
+- [ ] Display exercise modifications behind an expandable detail or subtle secondary text.
+- [ ] Keep the logging path visually dominant for users who just want to complete exercises.
+
+**Batch 4: Adjustment And Versioning**
+
+- [ ] Include rich coaching fields in adjustment context so the AI understands the original programming intent.
+- [ ] Validate that adjustments preserve or intentionally update rich fields on changed days.
+- [ ] Show changed rich coaching notes in the adjustment preview when they materially change.
+- [ ] Confirm historical preview and revert preserve rich fields exactly.
+
+**Batch 5: Tests And Docs**
+
+- [ ] Add simulator-gated Playwright coverage for rich generated plan display.
+- [ ] Add regression coverage that logging still works with rich snapshots.
+- [ ] Update `docs/data-model.md`, `docs/ai-integration.md`, and `CLAUDE.md` once implemented.
+
+Open questions:
+
+- Should rich fields be plain strings only, or allow small structured arrays for warmups/modifications?
+- Should exercise-level notes remain short while `modifications` carries longer substitutions?
+- Should the plan viewer show rich coaching text by default or collapse it for dense plans?
+
+## Phase 10: Add More Sports
 
 Do this only after `PlanRequest`, the generator, the adjustment flow, and worker-based generation are stable.
 

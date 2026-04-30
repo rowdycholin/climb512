@@ -21,15 +21,21 @@ export default async function DashboardPage() {
 
   const plans = await prisma.plan.findMany({
     where: { userId: session.userId },
-    include: { currentVersion: true },
+    include: {
+      currentVersion: true,
+      generationJobs: {
+        orderBy: { updatedAt: "desc" },
+        take: 1,
+      },
+    },
     orderBy: { createdAt: "desc" },
   });
 
   const planCards = plans
-    .filter((plan) => plan.currentVersion)
+    .filter((plan) => plan.currentVersion || plan.generationJobs[0])
     .map((plan) => {
-      const profile = parseProfileSnapshot(plan.currentVersion!.profileSnapshot);
-      const snapshot = parsePlanSnapshot(plan.currentVersion!.planSnapshot);
+      const profile = parseProfileSnapshot(plan.currentVersion?.profileSnapshot ?? plan.generationJobs[0]!.profileSnapshot);
+      const snapshot = plan.currentVersion ? parsePlanSnapshot(plan.currentVersion.planSnapshot) : { weeks: [] };
       const calendar = getPlanCalendarStatus({
         startDate: plan.startDate,
         totalWeeks: snapshot.weeks.length || profile.weeksDuration,

@@ -21,6 +21,7 @@ const request: PlanRequest = {
   startDate: "2026-05-04",
   equipment: ["hangboard", "weights"],
   trainingFocus: ["power", "finger strength"],
+  planStructureNotes: "Monday limit bouldering, Wednesday strength, Friday technique volume.",
   constraints: {
     injuries: ["mild elbow irritation"],
     limitations: [],
@@ -125,6 +126,8 @@ describe("ai plan generator sequential core", () => {
     expect(prompt).toContain("PREVIOUS_WEEK_SUMMARIES_JSON");
     expect(prompt).toContain("\"weekNum\":1");
     expect(prompt).toContain("Progress volume, intensity, exercise difficulty, or specificity gradually.");
+    expect(prompt).toContain("Athlete requested structure");
+    expect(prompt).toContain("Wednesday strength");
     expect(prompt).toContain("Reduce elbow stress");
     expect(prompt).toContain("mild elbow irritation");
     expect(prompt).toContain("campus board");

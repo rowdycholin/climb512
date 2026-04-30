@@ -20,6 +20,7 @@ export default function PlanWorkspace({
   coachOpen,
   onCoachOpenChange,
   onActiveWeekChange,
+  readOnly = false,
 }: {
   planId: string;
   weeks: Parameters<typeof PlanViewer>[0]["weeks"];
@@ -36,12 +37,13 @@ export default function PlanWorkspace({
   coachOpen: boolean;
   onCoachOpenChange: (open: boolean) => void;
   onActiveWeekChange: (index: number) => void;
+  readOnly?: boolean;
 }) {
   const activeWeek = weeks[activeWeekIndex] ?? null;
 
   return (
     <>
-      {activeWeek && (
+      {activeWeek && !readOnly && (
         <>
           <PlanEditor
             planId={planId}
@@ -71,6 +73,7 @@ export default function PlanWorkspace({
         initialDayIndex={initialDayIndex}
         activeWeekIndex={activeWeekIndex}
         onActiveWeekChange={onActiveWeekChange}
+        readOnly={readOnly}
       />
     </>
   );

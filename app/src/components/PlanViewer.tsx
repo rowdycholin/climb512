@@ -83,7 +83,7 @@ const FOCUS_COLORS: Record<string, string> = {
   "Rest & Recovery": "bg-slate-100 text-slate-500 border-slate-200",
 };
 
-function ExerciseRow({ planId, exercise }: { planId: string; exercise: Exercise }) {
+function ExerciseRow({ planId, exercise, readOnly = false }: { planId: string; exercise: Exercise; readOnly?: boolean }) {
   const log = exercise.logs[0] ?? null;
   const [completed, setCompleted] = useState(log?.completed ?? false);
   const [open, setOpen] = useState(false);
@@ -110,6 +110,7 @@ function ExerciseRow({ planId, exercise }: { planId: string; exercise: Exercise 
   }
 
   function toggleComplete() {
+    if (readOnly) return;
     const next = !completed;
     setCompleted(next);
     const formData = createBaseFormData();
@@ -144,7 +145,7 @@ function ExerciseRow({ planId, exercise }: { planId: string; exercise: Exercise 
         <button
           type="button"
           onClick={toggleComplete}
-          disabled={pending}
+          disabled={pending || readOnly}
           aria-label={`${completed ? "Mark incomplete" : "Mark complete"}: ${exercise.name}`}
           className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded border-2 transition-colors disabled:opacity-60 ${
             completed ? "border-green-500 bg-green-500" : "border-slate-300 hover:border-green-400"
@@ -216,16 +217,18 @@ function ExerciseRow({ planId, exercise }: { planId: string; exercise: Exercise 
           )}
         </div>
 
-        <button
-          type="button"
-          onClick={() => setOpen((value) => !value)}
-          className="shrink-0 rounded-lg border border-slate-300 px-2.5 py-1 text-xs text-slate-500 transition-colors hover:border-slate-400 hover:text-slate-700"
-        >
-          {open ? "Close" : log?.setsCompleted || log?.weightUsed ? "Edit log" : "Log"}
-        </button>
+        {!readOnly && (
+          <button
+            type="button"
+            onClick={() => setOpen((value) => !value)}
+            className="shrink-0 rounded-lg border border-slate-300 px-2.5 py-1 text-xs text-slate-500 transition-colors hover:border-slate-400 hover:text-slate-700"
+          >
+            {open ? "Close" : log?.setsCompleted || log?.weightUsed ? "Edit log" : "Log"}
+          </button>
+        )}
       </div>
 
-      {open && (
+      {open && !readOnly && (
         <form onSubmit={handleSubmit} className="border-t border-slate-100 bg-slate-50 px-3 pb-3 pt-3">
           <input type="hidden" name="planId" value={planId} />
           <input type="hidden" name="exerciseId" value={exercise.id} />
@@ -296,7 +299,7 @@ function ExerciseRow({ planId, exercise }: { planId: string; exercise: Exercise 
   );
 }
 
-function SessionBlock({ planId, session }: { planId: string; session: DaySession }) {
+function SessionBlock({ planId, session, readOnly = false }: { planId: string; session: DaySession; readOnly?: boolean }) {
   return (
     <div className="mb-4 last:mb-0">
       <div className="mb-2 flex items-center gap-2 px-1">
@@ -309,7 +312,7 @@ function SessionBlock({ planId, session }: { planId: string; session: DaySession
       <p className="mb-2 px-1 text-xs italic text-slate-500">{session.description}</p>
       <div>
         {session.exercises.map((exercise) => (
-          <ExerciseRow key={exercise.id} planId={planId} exercise={exercise} />
+          <ExerciseRow key={exercise.id} planId={planId} exercise={exercise} readOnly={readOnly} />
         ))}
       </div>
     </div>
@@ -338,12 +341,14 @@ function DayCard({
   isHighlighted,
   adjustmentSummary,
   onSelect,
+  readOnly,
 }: {
   planId: string;
   day: Day;
   isHighlighted: boolean;
   adjustmentSummary: string | null;
   onSelect: (dayId: string) => void;
+  readOnly?: boolean;
 }) {
   const colorClass = FOCUS_COLORS[day.focus] ?? "border-slate-200 bg-slate-100 text-slate-600";
   const totalDuration = day.sessions.reduce((sum, session) => sum + session.duration, 0);
@@ -402,7 +407,7 @@ function DayCard({
           </p>
         )}
         {day.sessions.map((session) => (
-          <SessionBlock key={session.id} planId={planId} session={session} />
+          <SessionBlock key={session.id} planId={planId} session={session} readOnly={readOnly} />
         ))}
       </AccordionContent>
     </AccordionItem>
@@ -414,11 +419,13 @@ function WeekCard({
   week,
   initialDayIndex,
   adjustmentMetadata,
+  readOnly,
 }: {
   planId: string;
   week: Week;
   initialDayIndex: number;
   adjustmentMetadata?: AdjustmentMetadata | null;
+  readOnly?: boolean;
 }) {
   const trainingDays = week.days.filter((day) => !day.isRest).length;
   const allExercises = week.days.flatMap((day) => day.sessions.flatMap((session) => session.exercises));
@@ -460,6 +467,7 @@ function WeekCard({
             isHighlighted={highlightedDayId ? day.id === highlightedDayId : index === initialDayIndex}
             adjustmentSummary={adjustedByDay.get(day.dayNum) ?? null}
             onSelect={setHighlightedDayId}
+            readOnly={readOnly}
           />
         ))}
       </Accordion>
@@ -501,6 +509,7 @@ export default function PlanViewer({
   initialDayIndex = 0,
   activeWeekIndex,
   onActiveWeekChange,
+  readOnly = false,
 }: {
   planId: string;
   weeks: Week[];
@@ -511,6 +520,7 @@ export default function PlanViewer({
   initialDayIndex?: number;
   activeWeekIndex?: number;
   onActiveWeekChange?: (index: number) => void;
+  readOnly?: boolean;
 }) {
   const [internalActiveWeek, setInternalActiveWeek] = useState(initialWeekIndex);
   const weekScrollRef = useRef<HTMLDivElement>(null);
@@ -600,6 +610,7 @@ export default function PlanViewer({
           week={activeWeek}
           initialDayIndex={resolvedActiveWeek === initialWeekIndex ? initialDayIndex : -1}
           adjustmentMetadata={adjustmentMetadata}
+          readOnly={readOnly}
         />
       ) : (
         <MissingWeekCard weekNum={resolvedActiveWeek + 1} generation={resolvedGeneration} />

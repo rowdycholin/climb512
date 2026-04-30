@@ -13,6 +13,7 @@ model User {
   lastName        String
   email           String               @unique
   age             Int
+  gender          String               @default("prefer_not_to_say")
   passwordHash    String
   createdAt       DateTime             @default(now()) @db.Timestamptz(3)
   plans           Plan[]
@@ -57,6 +58,7 @@ model PlanGenerationJob {
   nextWeekNum Int                  @default(1)
   lastError   String?
   repairNotes String?
+  profileSnapshot Json
   lockedAt    DateTime?            @db.Timestamptz(3)
   createdAt   DateTime             @default(now()) @db.Timestamptz(3)
   updatedAt   DateTime             @updatedAt @db.Timestamptz(3)

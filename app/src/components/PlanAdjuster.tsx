@@ -2,11 +2,9 @@
 
 import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Check, ChevronDown, MessageCircle, Send, WandSparkles, X } from "lucide-react";
-import { applyConfirmedPlanAdjustment } from "@/app/actions";
+import { Check, ChevronDown, Send, WandSparkles, X } from "lucide-react";
+import { applyConfirmedPlanAdjustment, continuePlanAdjustmentChat } from "@/app/actions";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 
 interface Week {
@@ -42,6 +40,7 @@ interface Proposal {
     focus: string;
     summary: string;
   }>;
+  rawProposal?: string;
 }
 
 type AdjustmentScope =
@@ -143,7 +142,10 @@ function isVague(text: string) {
 }
 
 function mentionsGoalChange(text: string) {
-  return /\b(new|different|change|switch|replace)\s+(goal|target|event|race|objective)\b/i.test(text);
+  return (
+    /\b(new|different|change|switch|replace)\b.*\b(goal|target|event|race|objective|sport|level|grade|date|block)\b/i.test(text) ||
+    /\b(goal|target|event|race|objective|sport|level|grade|date|block)\b.*\b(new|different|change|switch|replace)\b/i.test(text)
+  );
 }
 
 function detectSchedulePattern(text: string) {
@@ -174,7 +176,7 @@ function inferScope(text: string, activeWeekNum: number): AdjustmentScope {
     return { type: "day_only", startWeek: activeWeekNum, startDay: 1, endWeek: activeWeekNum, endDay: 1 };
   }
 
-  if (dayNum && /\bonly|just|single day|one day\b/.test(normalized)) {
+  if (dayNum && (/\bonly|just|single day|one day\b/.test(normalized) || /\bswap|replace|substitute|change\b/.test(normalized))) {
     return { type: "day_only", startWeek: targetWeek, startDay: dayNum, endWeek: targetWeek, endDay: dayNum };
   }
 
@@ -186,7 +188,8 @@ function inferScope(text: string, activeWeekNum: number): AdjustmentScope {
 }
 
 function hasScopeCue(text: string) {
-  return /\b(rest of|remaining|from now|from today|going forward|onward|future|today only|this day only|day only|only today|only|just|single day|one day|this week|next week|week only|traveling next week|travelling next week)\b/i.test(text);
+  return /\b(rest of|remaining|from now|from today|going forward|onward|future|today only|this day only|day only|only today|only|just|single day|one day|this week|next week|week only|traveling next week|travelling next week)\b/i.test(text) ||
+    (mentionedDayNum(text) !== null && /\bswap|replace|substitute|change\b/i.test(text));
 }
 
 function asksForScope(message: ChatMessage) {
@@ -378,6 +381,56 @@ function planDayFromWeekDay(weekNum: number, dayNum: number) {
   return (weekNum - 1) * 7 + dayNum;
 }
 
+function weekDayFromPlanDay(planDay: number) {
+  return {
+    weekNum: Math.floor((planDay - 1) / 7) + 1,
+    dayNum: ((planDay - 1) % 7) + 1,
+  };
+}
+
+function aiProposalFromRaw(rawProposal: string, feedback: string, weeks: Week[]): Proposal {
+  const parsed = JSON.parse(rawProposal) as {
+    summary: string;
+    changes: string[];
+    changedWeeks: number[];
+    changedDays: Array<{ weekNum: number; dayNum: number; planDay: number; summary: string }>;
+    effectiveFromPlanDay: number;
+    requiresGoalChangeConfirmation: boolean;
+  };
+  const effective = weekDayFromPlanDay(parsed.effectiveFromPlanDay);
+  const dayNameByRef = new Map<string, { dayName: string; focus: string }>();
+  for (const week of weeks) {
+    for (const day of week.days) {
+      dayNameByRef.set(`${week.weekNum}:${day.dayNum}`, { dayName: day.dayName, focus: day.focus });
+    }
+  }
+
+  return {
+    summary: parsed.summary,
+    changes: parsed.changes,
+    feedback,
+    reason: inferReason(feedback),
+    scope: { type: "future_from_day", startWeek: effective.weekNum, startDay: effective.dayNum },
+    scopeLabel: `From Week ${effective.weekNum}, Day ${effective.dayNum} through plan end`,
+    requiresGoalChangeConfirmation: parsed.requiresGoalChangeConfirmation,
+    previewGroups: [
+      `Changed ${parsed.changedDays.length} day${parsed.changedDays.length === 1 ? "" : "s"} across ${parsed.changedWeeks.length} week${parsed.changedWeeks.length === 1 ? "" : "s"}.`,
+      "Logged days stay protected; exact changed days are highlighted after apply.",
+    ],
+    previewDetails: parsed.changedDays.map((day) => {
+      const original = dayNameByRef.get(`${day.weekNum}:${day.dayNum}`);
+      return {
+        weekNum: day.weekNum,
+        dayNum: day.dayNum,
+        dayName: original?.dayName ?? `Day ${day.dayNum}`,
+        focus: original?.focus ?? "Adjusted",
+        summary: day.summary,
+      };
+    }),
+    rawProposal,
+  };
+}
+
 export default function PlanAdjuster({
   planId,
   week,
@@ -398,6 +451,7 @@ export default function PlanAdjuster({
   ]);
   const [draft, setDraft] = useState("");
   const [proposal, setProposal] = useState<Proposal | null>(null);
+  const [goalChangeConfirmed, setGoalChangeConfirmed] = useState(false);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<{ summary: string; effectiveFrom: string } | null>(null);
@@ -429,6 +483,7 @@ export default function PlanAdjuster({
     ]);
     setDraft("");
     setProposal(null);
+    setGoalChangeConfirmed(false);
     setDetailsOpen(false);
     setError(null);
     setResult(null);
@@ -462,35 +517,44 @@ export default function PlanAdjuster({
     setError(null);
     setResult(null);
     setProposal(null);
+    setGoalChangeConfirmed(false);
     setDetailsOpen(false);
 
-    const isScopeAnswer = messages.some(asksForScope);
-    if (!isScopeAnswer && isVague(content)) {
-      addAssistant(
-        "What specifically should change: intensity, schedule, exercises, equipment, recovery, or the goal?",
-        nextMessages,
-      );
-      return;
-    }
+    const formData = new FormData();
+    formData.set("planId", planId);
+    formData.set("activeWeekNum", String(week.weekNum));
+    formData.set("messages", JSON.stringify(nextMessages.map(({ role, content }) => ({ role, content }))));
 
-    if (!isScopeAnswer && !hasScopeCue(content)) {
-      addAssistant(
-        "Should this apply only to this week, only to one day, or to the rest of the plan?",
-        nextMessages,
-      );
-      return;
-    }
+    startTransition(async () => {
+      const response = await continuePlanAdjustmentChat(formData);
+      if (response.error) {
+        setError(response.error);
+        setMessages(nextMessages);
+        return;
+      }
 
-    const nextProposal = buildProposal(messages, content, weeks, week.weekNum);
-    setMessages([
-      ...nextMessages,
-      {
-        id: messageId(),
-        role: "assistant",
-        content: "I have enough to propose a scoped adjustment. Review the affected areas below before applying it.",
-      },
-    ]);
-    setProposal(nextProposal);
+      if (response.responseType === "follow_up" && response.assistantMessage) {
+        addAssistant(response.assistantMessage, nextMessages);
+        return;
+      }
+
+      if (response.responseType === "proposal" && response.proposal) {
+        const userFeedback = nextMessages
+          .filter((message) => message.role === "user")
+          .map((message) => message.content)
+          .join("\n");
+        setMessages([
+          ...nextMessages,
+          {
+            id: messageId(),
+            role: "assistant",
+            content: response.assistantMessage ?? "I have enough to propose an adjustment. Review it before applying.",
+          },
+        ]);
+        setProposal(aiProposalFromRaw(response.proposal, userFeedback, weeks));
+        setGoalChangeConfirmed(false);
+      }
+    });
   }
 
   function loadPrompt(prompt: string) {
@@ -498,6 +562,7 @@ export default function PlanAdjuster({
     setError(null);
     setResult(null);
     setProposal(null);
+    setGoalChangeConfirmed(false);
     setDetailsOpen(false);
   }
 
@@ -515,7 +580,8 @@ export default function PlanAdjuster({
     formData.set("proposalSummary", proposal.summary);
     formData.set("proposalChanges", JSON.stringify([...proposal.changes, ...proposal.previewGroups]));
     formData.set("requiresGoalChangeConfirmation", proposal.requiresGoalChangeConfirmation ? "true" : "false");
-    formData.set("goalChangeConfirmed", proposal.requiresGoalChangeConfirmation ? "true" : "false");
+    formData.set("goalChangeConfirmed", goalChangeConfirmed ? "true" : "false");
+    if (proposal.rawProposal) formData.set("proposal", proposal.rawProposal);
 
     startTransition(async () => {
       const response = await applyConfirmedPlanAdjustment(formData);
@@ -548,36 +614,26 @@ export default function PlanAdjuster({
   }
 
   return (
-    <Card className="mb-6 border-slate-200 bg-white shadow-sm">
-      <CardHeader>
-        <div className="flex items-start justify-between gap-3">
-          <div>
-            <CardTitle role="heading" aria-level={3} className="flex items-center gap-2 text-slate-800">
-              <MessageCircle className="h-4 w-4" />
-              Adjust Future Plan
-            </CardTitle>
-            <CardDescription>
-              Chat through a change, review the proposal, then apply it to future unlogged days.
-            </CardDescription>
-          </div>
+    <section className="mb-6 rounded-[1.4rem] border border-white/70 bg-white/90 p-4 shadow-[0_20px_50px_rgba(15,23,42,0.08)]">
+      <div className="space-y-4">
+        <div className="flex justify-end">
           <Button type="button" variant="outline" onClick={() => setOpen(false)} disabled={pending}>
             Close
           </Button>
         </div>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        <div className="space-y-3 rounded-lg border border-slate-200 bg-slate-50 p-3">
-          <div className="max-h-72 space-y-2 overflow-y-auto pr-1">
+
+        <div className="space-y-3">
+          <div className="max-h-72 space-y-3 overflow-y-auto pr-1">
             {visibleMessages.map((message) => (
               <div
                 key={message.id}
-                className={`flex ${message.role === "user" ? "justify-end" : "justify-start"}`}
+                className={message.role === "user" ? "ml-auto max-w-[85%]" : "mr-auto max-w-[88%]"}
               >
                 <p
-                  className={`max-w-[85%] rounded-lg px-3 py-2 text-sm ${
+                  className={`rounded-2xl px-4 py-3 text-sm ${
                     message.role === "user"
                       ? "bg-slate-900 text-white"
-                      : "border border-slate-200 bg-white text-slate-700"
+                      : "border border-slate-200 bg-slate-50 text-slate-700"
                   }`}
                 >
                   {message.content}
@@ -586,11 +642,11 @@ export default function PlanAdjuster({
             ))}
           </div>
 
-          <div className="space-y-2">
-            <Label htmlFor="adjust-chat-message">Adjustment request</Label>
+          <div>
             <div className="flex gap-2">
               <Textarea
                 id="adjust-chat-message"
+                aria-label="Adjustment request"
                 value={draft}
                 onChange={(event) => {
                   setDraft(event.target.value);
@@ -603,8 +659,8 @@ export default function PlanAdjuster({
                     handleSend();
                   }
                 }}
-                placeholder="Example: My schedule changed. Move future Thursday rest days to Saturday."
-                className="min-h-20 resize-none bg-white"
+                placeholder="Tell me what you would like to change..."
+                className="min-h-20 resize-none"
               />
               <Button
                 type="button"
@@ -659,6 +715,7 @@ export default function PlanAdjuster({
                 </li>
               ))}
             </ul>
+            {!proposal.rawProposal && (
             <div className="mt-3 rounded-lg border border-sky-200 bg-white/70 px-3 py-2">
               <p className="text-xs font-semibold uppercase tracking-[0.12em] text-sky-700">Scope override</p>
               <div className="mt-2 flex flex-wrap gap-2">
@@ -678,6 +735,7 @@ export default function PlanAdjuster({
                 ))}
               </div>
             </div>
+            )}
             {proposal.previewDetails.length > 0 && (
               <div className="mt-3 rounded-lg border border-sky-200 bg-white/70">
                 <button
@@ -700,12 +758,25 @@ export default function PlanAdjuster({
               </div>
             )}
             {proposal.requiresGoalChangeConfirmation && (
-              <p className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-amber-800">
-                This looks like a goal change. Applying it will still protect logged history, but review it carefully before continuing.
-              </p>
+              <label className="mt-3 flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-amber-900">
+                <input
+                  type="checkbox"
+                  checked={goalChangeConfirmed}
+                  onChange={(event) => setGoalChangeConfirmed(event.target.checked)}
+                  className="mt-0.5"
+                />
+                <span>
+                  I understand this changes the plan goal or target, and I want to apply that goal change.
+                </span>
+              </label>
             )}
             <div className="mt-4 flex flex-wrap gap-2">
-              <Button type="button" onClick={applyProposal} disabled={pending} className="gap-2">
+              <Button
+                type="button"
+                onClick={applyProposal}
+                disabled={pending || (proposal.requiresGoalChangeConfirmation && !goalChangeConfirmed)}
+                className="gap-2"
+              >
                 <Check className="h-4 w-4" />
                 {pending ? "Applying..." : "Apply proposal"}
               </Button>
@@ -732,7 +803,7 @@ export default function PlanAdjuster({
             <p className="mt-1">Changes begin at {result.effectiveFrom}. Previous logs remain attached to the older version.</p>
           </div>
         )}
-      </CardContent>
-    </Card>
+      </div>
+    </section>
   );
 }

@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { TEST_PASSWORD, createPlanFromOnboarding, registerUser } from "./helpers";
+import { TEST_PASSWORD, createPlanFromOnboarding, registerUser, skipIfWebIsNotSimulator } from "./helpers";
 
 async function login(page: import("@playwright/test").Page) {
   await registerUser(page, "climber1").catch(async () => {
@@ -34,6 +34,8 @@ test.describe("Dashboard", () => {
   });
 
   test("existing plans link through to plan viewer", async ({ page }) => {
+    skipIfWebIsNotSimulator(test);
+
     const userId = `dashplan-${Date.now()}`;
     await registerUser(page, userId);
     await createPlanFromOnboarding(page);

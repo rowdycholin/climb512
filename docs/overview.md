@@ -17,7 +17,7 @@ Users can:
 - log workouts by week and day
 - edit a selected week directly, including adding extra trackable exercises after a day has logs
 - adjust the plan through a conversational proposal flow that can target one day, one week, a date range, or future days from a point
-- review plan version history and revert by creating a new current version from an older accepted version
+- review plan version history, preview older versions in read-only mode, and revert by creating a new current version from an older accepted version
 - move around authenticated screens from a shared menu
 - use a shared vertical icon+label menu, with a chat bubble for AI/chat flows and a wrench for manual setup or editing
 - preserve history when plans change later
@@ -38,7 +38,7 @@ The current backend is designed around revision-safe plans:
 - plans are versioned
 - logs stay attached to the version they came from
 - future edits create new `PlanVersion` rows instead of mutating history
-- worker generation stores in-progress weeks in `PlanGenerationWeek` and creates one generated user-facing version when complete
+- worker generation stores request context on `PlanGenerationJob`, stores in-progress weeks in `PlanGenerationWeek`, and creates one generated user-facing version when complete
 - calendar position comes from `Plan.startDate`, not completion state
 - broad plan adjustments preserve previous workout logs and validate that only approved unlogged days change
 
@@ -47,8 +47,10 @@ The preferred UX direction is:
 - direct editing for day and exercise changes
 - mobile-friendly interactions
 - coach-led AI intake focused on producing a generic `PlanRequest`
+- personalized intake coach naming: Alix for female users, Alex for male or prefer-not-to-say users
 - AI focused on plan generation from validated inputs
-- AI-assisted plan adjustment through a scoped day-level request contract; the current implementation uses deterministic proposal/rewrite behavior until the real AI provider is plugged in
+- AI-assisted plan adjustment through a scoped day-level request contract; live-provider mode can call the AI backend, while simulator/local mode keeps deterministic fixtures for repeatable testing
+- richer generated coaching detail is planned so week/day/session intent can be shown separately from trackable workout fields
 
 Current editing behavior:
 
@@ -74,8 +76,8 @@ Current editing behavior:
 
 ## Important Operational Notes
 
-In Docker, the app and plan worker currently override AI settings to use the local simulator, so local demos and tests do not call the live provider. Remove or change the Compose AI overrides when deliberately testing against the live provider.
+In Docker, the app and plan worker read backend AI settings from `app/.env`. Copy `app/.env-simulator` or `app/.env-aibackend` to `app/.env`, then recreate `web` and `plan-worker` to switch backends.
 
-For local development, `docker-compose.dev.yml` bind-mounts `./app` into the web container and runs `next dev`.
+For local development, `docker-compose.dev.yml` bind-mounts `./app` into the web and plan-worker containers, runs `next dev` for web, and runs the worker from mounted source.
 
 Sessions are boot-scoped and currently expire after 30 minutes.

@@ -24,6 +24,10 @@ const completeDraft = {
   startDate: "2026-04-28",
   equipment: ["hangboard", "gym"],
   trainingFocus: ["strength"],
+  planStructureNotes: "Monday limit bouldering, Wednesday strength, Friday volume.",
+  preferredWorkoutDaysAsked: true,
+  preferredRestDaysAsked: true,
+  finalIntakeReviewAsked: true,
   constraints: {
     injuries: ["previous pulley tweak"],
     limitations: [],
@@ -113,6 +117,19 @@ describe("plan intake AI contract", () => {
     });
   });
 
+  test("preserves day-by-day preferences in plan structure notes", () => {
+    const response = validatePlanIntakeAiResponse({
+      status: "ready",
+      message: "Ready to generate.",
+      planRequestDraft: {
+        ...completeDraft,
+        planStructureNotes: "Monday easy run, Wednesday intervals, Saturday long run.",
+      },
+    });
+
+    expect(response.planRequestDraft.planStructureNotes).toBe("Monday easy run, Wednesday intervals, Saturday long run.");
+  });
+
   test("drops invalid live-model internal intake step values", () => {
     const response = validatePlanIntakeAiResponse({
       status: "needs_more_info",
@@ -170,6 +187,32 @@ describe("plan intake AI contract", () => {
     });
 
     expect(response.draft.startDate).toBe("2026-04-28");
+  });
+
+  test("uses the client local date for coming weekday start answers", async () => {
+    const draft = {
+      ...createInitialIntakeDraft(),
+      sport: "climbing",
+      goalType: "ongoing" as const,
+      goalDescription: "Build endurance",
+      blockLengthWeeks: 4,
+      daysPerWeek: 5,
+      currentLevel: "5.12a",
+      equipment: ["gym"],
+      constraints: { injuries: [], limitations: [], avoidExercises: [] },
+      strengthTraining: { include: false, focusAreas: [] },
+      intakeStep: "start" as const,
+    };
+
+    const response = await continuePlanIntakeWithAiContract({
+      draft,
+      userMessage: "This coming Monday",
+      messages: [{ role: "assistant", content: "When would you like to start this 4-week trial plan?" }],
+      clientToday: "2026-04-30",
+      clientTimeZone: "America/New_York",
+    });
+
+    expect(response.draft.startDate).toBe("2026-05-04");
   });
 
   test("uses the next future occurrence for month-name start dates", () => {
@@ -305,11 +348,99 @@ describe("plan intake AI contract", () => {
     expect(response.assistantMessage).not.toMatch(/trouble reading/i);
   });
 
+  test("preserves nuanced big-wall goal context from detailed answers", async () => {
+    const response = await continuePlanIntakeWithAiContract({
+      draft: {
+        ...createInitialIntakeDraft(),
+        sport: "climbing",
+        disciplines: ["bouldering"],
+        intakeStep: "goal" as const,
+      },
+      userMessage: "I want to free climb Freerider on El Cap. Have you heard of that?",
+      messages: [
+        {
+          role: "assistant",
+          content:
+            "What's your main goal with bouldering right now—are you training for a specific competition, working toward certain grades or skills, or just climbing consistently for fitness and fun?",
+        },
+      ],
+    });
+
+    expect(response.draft.sport).toBe("climbing");
+    expect(response.draft.disciplines).toContain("bouldering");
+    expect(response.draft.disciplines).toContain("trad");
+    expect(response.draft.disciplines).toContain("big wall");
+    expect(response.draft.goalDescription).toContain("Freerider");
+    expect(response.draft.planStructureNotes).toContain("Freerider");
+  });
+
   test("ready intake responses point users to the magic wand button", async () => {
     const response = await continuePlanIntakeWithAiContract({
       draft: completeDraft,
       userMessage: "Looks good",
       messages: [],
+    });
+
+    expect(response.ready).toBe(true);
+    expect(response.assistantMessage).toBe(INTAKE_READY_MESSAGE);
+  });
+
+  test("asks the final open-ended review question before becoming ready", async () => {
+    const response = await continuePlanIntakeWithAiContract({
+      draft: { ...completeDraft, finalIntakeReviewAsked: undefined },
+      userMessage: "Looks good",
+      messages: [],
+    });
+
+    expect(response.ready).toBe(false);
+    expect(response.assistantMessage).toBe("Is there anything else I should know about you or your goals before I am ready to generate the plan?");
+    expect(response.draft.finalIntakeReviewAsked).toBe(true);
+  });
+
+  test("asks preferred workout days before the final review", async () => {
+    const response = await continuePlanIntakeWithAiContract({
+      draft: {
+        ...completeDraft,
+        preferredWorkoutDaysAsked: undefined,
+        preferredRestDaysAsked: undefined,
+        finalIntakeReviewAsked: undefined,
+      },
+      userMessage: "Looks good",
+      messages: [],
+    });
+
+    expect(response.ready).toBe(false);
+    expect(response.assistantMessage).toBe("Are there specific days you like to work out?");
+    expect(response.draft.preferredWorkoutDaysAsked).toBe(true);
+  });
+
+  test("records preferred workout days and then asks preferred rest days", async () => {
+    const response = await continuePlanIntakeWithAiContract({
+      draft: {
+        ...completeDraft,
+        preferredWorkoutDaysAsked: true,
+        preferredRestDaysAsked: undefined,
+        finalIntakeReviewAsked: undefined,
+      },
+      userMessage: "Monday, Wednesday, and Saturday are best.",
+      messages: [{ role: "assistant", content: "Are there specific days you like to work out?" }],
+    });
+
+    expect(response.ready).toBe(false);
+    expect(response.assistantMessage).toBe("Are there specific days you would prefer as rest days?");
+    expect(response.draft.planStructureNotes).toContain("Preferred workout days: Monday, Wednesday, and Saturday are best.");
+  });
+
+  test("becomes ready after the final open-ended review answer", async () => {
+    const response = await continuePlanIntakeWithAiContract({
+      draft: { ...completeDraft, finalIntakeReviewAsked: true },
+      userMessage: "No, that covers it.",
+      messages: [
+        {
+          role: "assistant",
+          content: "Is there anything else I should know about you or your goals before I am ready to generate the plan?",
+        },
+      ],
     });
 
     expect(response.ready).toBe(true);
@@ -337,6 +468,7 @@ describe("plan intake AI contract", () => {
     expect(PLAN_INTAKE_SYSTEM_PROMPT).toContain("not a rigid form");
     expect(PLAN_INTAKE_SYSTEM_PROMPT).toContain("Ask exactly one concise question");
     expect(PLAN_INTAKE_SYSTEM_PROMPT).toContain("after constraints are present");
+    expect(PLAN_INTAKE_SYSTEM_PROMPT).toContain("planStructureNotes");
   });
 
   test("defines narrow plan-generation prompts for live model calls", () => {

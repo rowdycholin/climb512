@@ -1,10 +1,7 @@
 import { expect, test } from "@playwright/test";
-import { dockerServiceUsesSimulator, registerUser, seedFailedGenerationPlan } from "./helpers";
+import { registerUser, seedFailedGenerationPlan, skipIfWorkerStackIsNotSimulator } from "./helpers";
 
-test.skip(
-  !dockerServiceUsesSimulator("web") || !dockerServiceUsesSimulator("plan-worker"),
-  "Plan generation repair regression runs only when web and plan-worker use the simulator backend.",
-);
+skipIfWorkerStackIsNotSimulator(test);
 
 test("failed worker generation can be repaired and resumed from the failed week", async ({ page }) => {
   const suffix = `${Date.now()}-${test.info().workerIndex}`;

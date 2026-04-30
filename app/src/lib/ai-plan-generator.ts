@@ -325,6 +325,7 @@ function buildPlanRequestWeekPrompt(request: PlanRequest, athleteAge: number, we
     : "no special equipment listed";
   const trainingFocus = request.trainingFocus.length > 0 ? request.trainingFocus.join(", ") : "general progression";
   const disciplineList = request.disciplines.length > 0 ? request.disciplines.join(", ") : request.sport;
+  const planStructureNotes = request.planStructureNotes?.trim() || "none provided";
 
   const phaseNote = (() => {
     const progress = weekNum / request.blockLengthWeeks;
@@ -350,6 +351,7 @@ ATHLETE_CONTEXT:
 - Current level: ${request.currentLevel ?? "not specified"}
 - Target level: ${request.targetLevel ?? "not specified"}
 - Training focus: ${trainingFocus}
+- Athlete requested structure: ${planStructureNotes}
 - Equipment: ${equipmentList}
 - Injuries: ${request.constraints.injuries.length ? request.constraints.injuries.join(", ") : "none listed"}
 - Limitations: ${request.constraints.limitations.length ? request.constraints.limitations.join(", ") : "none listed"}
@@ -370,6 +372,7 @@ RULES:
 - Rest days: isRest=true, sessions=[], focus="Rest"
 - Training days: exactly ONE session, 3-4 exercises max
 - Choose exercises appropriate to the sport, goal, available equipment, and constraints
+- Respect athlete requested structure, named-day preferences, and requested workouts unless they conflict with safety, recovery, or the requested training-day count
 - Respect injuries, limitations, and avoid-exercise requests
 - notes: REQUIRED, max 10 words
 - sets/reps/duration/rest: include only what applies, omit the rest
@@ -396,6 +399,7 @@ export function buildNextWeekPrompt(params: {
     : "no special equipment listed";
   const trainingFocus = request.trainingFocus.length > 0 ? request.trainingFocus.join(", ") : "general progression";
   const disciplineList = request.disciplines.length > 0 ? request.disciplines.join(", ") : request.sport;
+  const planStructureNotes = request.planStructureNotes?.trim() || "none provided";
 
   const phaseNote = (() => {
     const progress = weekNum / totalWeeks;
@@ -423,6 +427,7 @@ ATHLETE_CONTEXT:
 - Current level: ${request.currentLevel ?? "not specified"}
 - Target level: ${request.targetLevel ?? "not specified"}
 - Training focus: ${trainingFocus}
+- Athlete requested structure: ${planStructureNotes}
 - Equipment: ${equipmentList}
 - Injuries: ${request.constraints.injuries.length ? request.constraints.injuries.join(", ") : "none listed"}
 - Limitations: ${request.constraints.limitations.length ? request.constraints.limitations.join(", ") : "none listed"}
@@ -439,6 +444,7 @@ ${previousWeekContext}
 
 PROGRESSION RULES:
 - Use previous-week summaries to progress logically from the work already scheduled.
+- Preserve athlete requested structure and named-day preferences across the block unless repair feedback or safety requires a change.
 - Do not repeat the exact same week unless repair feedback explicitly asks for a reset.
 - Progress volume, intensity, exercise difficulty, or specificity gradually.
 - Keep recovery load coherent with prior training days, rest days, and total exercises.
@@ -456,6 +462,7 @@ RULES:
 - Rest days: isRest=true, sessions=[], focus="Rest"
 - Training days: exactly ONE session, 3-4 exercises max
 - Choose exercises appropriate to the sport, goal, available equipment, and constraints
+- Respect athlete requested structure, named-day preferences, and requested workouts unless they conflict with safety, recovery, or the requested training-day count
 - Respect injuries, limitations, and avoid-exercise requests as hard constraints
 - notes: REQUIRED, max 10 words
 - sets/reps/duration/rest: include only what applies, omit the rest

@@ -1,10 +1,7 @@
 import { expect, test } from "@playwright/test";
-import { dockerServiceUsesSimulator, readSqlValue, registerUser, seedPendingGenerationPlan } from "./helpers";
+import { readSqlValue, registerUser, seedPendingGenerationPlan, skipIfWorkerStackIsNotSimulator } from "./helpers";
 
-test.skip(
-  !dockerServiceUsesSimulator("web") || !dockerServiceUsesSimulator("plan-worker"),
-  "Worker generation regression runs only when web and plan-worker use the simulator backend.",
-);
+skipIfWorkerStackIsNotSimulator(test);
 
 test("worker generation shows partial progress before completing the plan", async ({ page }) => {
   const suffix = `${Date.now()}-${test.info().workerIndex}`;
@@ -31,14 +28,9 @@ test("worker generation shows partial progress before completing the plan", asyn
   await expect(page.getByRole("button", { name: "Complete plan" })).toBeEnabled();
 
   expect(Number(readSqlValue(`SELECT COUNT(*) FROM "PlanGenerationWeek" WHERE "planId" = '${planId}';`))).toBe(4);
-  expect(Number(readSqlValue(`SELECT COUNT(*) FROM "PlanVersion" WHERE "planId" = '${planId}';`))).toBe(2);
-  expect(
-    Number(
-      readSqlValue(
-        `SELECT COUNT(*) FROM "PlanVersion" WHERE "planId" = '${planId}' AND "changeType" NOT IN ('worker_generation_started', 'worker_generation');`,
-      ),
-    ),
-  ).toBe(1);
+  expect(Number(readSqlValue(`SELECT COUNT(*) FROM "PlanVersion" WHERE "planId" = '${planId}';`))).toBe(1);
+  expect(Number(readSqlValue(`SELECT COUNT(*) FROM "PlanVersion" WHERE "planId" = '${planId}' AND "changeType" = 'worker_generation_started';`))).toBe(0);
+  expect(Number(readSqlValue(`SELECT "versionNum" FROM "PlanVersion" WHERE "planId" = '${planId}' AND "changeType" = 'generated';`))).toBe(1);
 
   await page.getByRole("button", { name: "Open version history" }).click();
   await expect(page.getByText("Current v1")).toBeVisible();
