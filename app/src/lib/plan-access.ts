@@ -2,6 +2,7 @@ import { prisma } from "./prisma";
 import {
   buildPlanView,
   findExerciseInSnapshot,
+  hasMeaningfulWorkoutLog,
   parsePlanSnapshot,
   toStoredJson,
   type PlanSnapshot,
@@ -180,6 +181,18 @@ export async function upsertExerciseLogForUser(input: WorkoutLogInput) {
   }
 
   const { plan, match } = authorized;
+
+  if (!hasMeaningfulWorkoutLog(input)) {
+    await prisma.workoutLog.deleteMany({
+      where: {
+        userId: input.userId,
+        planId: input.planId,
+        exerciseKey: input.exerciseKey,
+      },
+    });
+
+    return { ok: true as const };
+  }
 
   await prisma.workoutLog.upsert({
     where: {

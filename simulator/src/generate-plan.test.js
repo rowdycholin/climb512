@@ -78,6 +78,20 @@ test("worker next-week prompts generate the requested week", () => {
   assert.equal(week.days.length, 7);
 });
 
+test("generated weeks include rich coaching and prescription fields", () => {
+  const week = generateWeekFromPrompt(promptFor(baseRequest(), 1), { seed: "rich" });
+  const trainingDay = week.days.find((day) => !day.isRest);
+  const mainSession = trainingDay.sessions.find((session) => session.name === "Main Session");
+
+  assert(week.summary);
+  assert(week.progressionNote);
+  assert(trainingDay.coachNotes);
+  assert.deepEqual(trainingDay.sessions.map((session) => session.name), ["Warm-up", "Main Session", "Cooldown"]);
+  assert(mainSession.objective);
+  assert(mainSession.intensity);
+  assert(mainSession.exercises.some((exercise) => exercise.intensity || exercise.work || exercise.restBetweenSets));
+});
+
 test("running requests generate running-specific sessions", () => {
   const week = generateWeekFromPrompt(
     promptFor(baseRequest({

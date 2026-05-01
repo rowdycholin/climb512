@@ -921,6 +921,9 @@ Why this matters:
 - Users benefit from knowing why a week/day/session exists, not only what to log.
 - Plan adjustments work better when the model and user can see the intent behind the original programming.
 - Trackable prescription fields should stay separate from richer coaching explanation so logging remains simple.
+- Exercise prescriptions also need enough detail that users do not have to guess what a set, rep, interval, hold, attempt, load, duration, or rest instruction means.
+- The plan viewer should stay logger-first by default, but users should be able to drill into coaching detail and prescription detail whenever they need more context.
+- Some coaching content belongs at the whole-plan or training-block level, such as training principles, intensity distribution, recommendations, and progression tables. That content should not be repeated inside every week/day, but it should be available from the plan page.
 
 Recommended snapshot additions:
 
@@ -933,48 +936,176 @@ Recommended snapshot additions:
 - `session.cooldown`: optional concise cooldown or mobility guidance.
 - `exercise.modifications`: optional easier/harder substitutions or safety modifications.
 
+Recommended plan-level guidance additions:
+
+Some high-quality model output looks more like a coaching brief than a single workout. Preserve that value separately from the week/day/session hierarchy.
+
+Candidate optional fields:
+
+- `planGuidance.overview`: short explanation of the whole plan structure.
+- `planGuidance.intensityDistribution`: compact items such as "Monday: moderate volume" or "Wednesday: high intensity".
+- `planGuidance.progressionPrinciples`: concise rules for how volume, difficulty, duration, or specificity should progress.
+- `planGuidance.recoveryPrinciples`: practical recovery and deload guidance tied to the plan.
+- `planGuidance.recommendations`: sport- or equipment-specific recommendations, such as how to use a board, gym, route terrain, or aerobic modality.
+- `planGuidance.progressionTable`: optional small table for block-level progression, such as week-by-week volume/intensity targets.
+
+This content should appear in a collapsible plan-level "Coach Guidance" or similar area, not inside the daily logging path.
+
+Recommended weekly overview behavior:
+
+The plan viewer should show a week-at-a-glance summary near the week header, derived from the week's days whenever possible:
+
+- day name
+- focus
+- training/rest state
+- estimated duration
+- optional intensity or purpose when available
+
+This weekly overview helps users understand the shape of the week before drilling into day details. It can be rendered from existing `week.days` plus optional rich fields, so a separate stored `weeklySchedule` object is only needed if generation later produces information that cannot be derived from days.
+
+Recommended day/session structure:
+
+The app should support training days with multiple sessions or sections when that makes the prescription clearer. A day may be structured like:
+
+- Warm-up
+- Main Session
+- Cooldown
+
+Prefer reusing the existing `day.sessions[]` model for these sections instead of introducing a separate `day.sections[]` shape. This keeps exercises and logging attached to the same hierarchy while allowing the richer breakdown shown in strong model outputs.
+
+Recommended exercise prescription additions:
+
+The current exercise fields (`sets`, `reps`, `duration`, `rest`, and `notes`) should remain supported for compatibility, but generated exercises need optional fields that make the prescribed work clearer.
+
+Candidate optional fields:
+
+- `exercise.rounds`: number of rounds or circuits when sets/reps is not the right model.
+- `exercise.work`: work interval, effort duration, hang duration, route/lap duration, or active interval.
+- `exercise.restBetweenReps`: rest between individual reps, hangs, attempts, intervals, or efforts.
+- `exercise.restBetweenSets`: rest between sets, rounds, circuits, or major attempts.
+- `exercise.load`: weight, assistance, percentage, bodyweight, pack weight, or other loading guidance.
+- `exercise.intensity`: exercise-level RPE, effort, pace, grade range, percentage, or quality target.
+- `exercise.tempo`: movement tempo, eccentric/concentric timing, pause, or cadence.
+- `exercise.distance`: distance for running, hiking, carries, approaches, laps, or routes when relevant.
+- `exercise.grade`: climbing grade range, route/problem difficulty, or target difficulty band.
+- `exercise.sides`: whether the work is left, right, both, alternating, or per-side.
+- `exercise.holdType`: climbing hold type or grip position when relevant.
+- `exercise.prescriptionDetails`: short bounded detail for sport-specific instructions that do not fit the structured fields yet.
+
+These fields should be displayed as compact prescription chips or short secondary lines near the exercise name, because they are part of what the user needs to do. They are different from coaching explanation, which can be expanded on demand.
+
 Implementation batches:
 
-**Batch 1: Schema And Compatibility**
+**Batch 1: Canonical Rich Snapshot Shape**
 
-- [ ] Extend snapshot parsing/types to allow optional rich coaching fields while preserving old snapshots.
-- [ ] Keep existing required trackable fields unchanged: sets, reps, duration, rest, notes, and exercise keys.
-- [ ] Add unit coverage that old compact snapshots still parse and render.
-- [ ] Add unit coverage that rich snapshots parse without losing optional fields.
+Development note: this is a development environment, so old generated plan data can be deleted if the new shape makes existing snapshots invalid. Do not spend implementation effort preserving old compact generated snapshots unless the compatibility is essentially free.
+
+- [x] Define the new canonical rich `PlanSnapshot` shape.
+- [x] Update snapshot types/builders to use the new canonical shape.
+- [x] Add plan-level guidance fields to the canonical snapshot shape.
+- [x] Keep logging identifiers stable and required: week/day/session/exercise keys.
+- [x] Keep existing trackable exercise fields for product continuity: sets, reps, duration, rest, and notes.
+- [x] Add richer exercise prescription fields to the canonical exercise shape.
+- [x] Decide which richer prescription fields are first-class structured fields versus temporarily stored in `prescriptionDetails`.
+- [x] Allow training days to contain multiple sessions where useful, such as warm-up, main session, and cooldown.
+- [x] Keep viewer/parsing code defensive enough that missing optional strings do not crash the app, but do not maintain a formal old-snapshot compatibility path.
+- [x] Add unit coverage for the new canonical rich snapshot shape.
+- [x] Add unit coverage that richer exercise prescription fields preserve stable exercise keys and logging behavior.
+- [x] Add unit coverage that multi-session training days parse and preserve stable session/exercise keys.
+- [x] Reset local/dev data after the new shape is in place if old snapshots no longer render.
 
 **Batch 2: Generation Prompt And Normalization**
 
-- [ ] Update plan-generation prompts to request concise rich coaching fields.
-- [ ] Update normalization to trim rich fields and cap overly long model text.
-- [ ] Update simulator output with representative rich fields so local testing can show the new UI.
-- [ ] Ensure worker-generated weeks preserve rich fields in `PlanGenerationWeek` and final `PlanVersion`.
+- [x] Switch local development back to simulator mode before implementing UI changes so rich sample plans are deterministic.
+- [x] Update plan-generation prompts to request concise rich coaching fields.
+- [x] Synthesize bounded plan-level guidance when the full generated snapshot is assembled, instead of asking every per-week generation call to return duplicate plan-level guidance.
+- [x] Update plan-generation prompts to request unambiguous exercise prescriptions, including work/rest timing, intensity, load, tempo, grade, sides, or rounds when relevant.
+- [x] Update normalization to trim rich fields and cap overly long model text.
+- [x] Normalize plan-level guidance so lists/tables remain small and do not crowd the plan page.
+- [x] Normalize richer prescription fields into compact strings and cap long freeform `prescriptionDetails`.
+- [x] Update simulator output with representative rich fields so local testing can show the new UI.
+- [x] Update simulator output with representative weekly overview data that can be derived from days and multi-session day breakdowns.
+- [x] Update simulator output with representative exercise prescriptions for strength, intervals, and climbing-specific work.
+- [x] Ensure worker-generated weeks preserve rich fields in `PlanGenerationWeek` and final `PlanVersion`.
 
 **Batch 3: Plan Viewer UI**
 
-- [ ] Display week summary/progression notes near the week header.
-- [ ] Display day coach notes inside each day without crowding logging controls.
-- [ ] Display session objective/intensity/warmup/cooldown in a compact, scannable layout.
-- [ ] Display exercise modifications behind an expandable detail or subtle secondary text.
-- [ ] Keep the logging path visually dominant for users who just want to complete exercises.
+- [x] Make the default plan viewer logger-first: prescribed work and logging controls stay visually dominant.
+- [x] Allow coach-rich and prescription-rich drill-down at any time through compact expandable details in the relevant week/day/session/exercise context.
+- [x] Add a compact week-at-a-glance overview near the week header using day focus, duration, training/rest state, and optional intensity.
+- [x] Display week summary/progression notes near the week header.
+- [x] Display plan-level coach guidance in a collapsible area away from the daily logging controls.
+- [x] Display day coach notes inside each day without crowding logging controls.
+- [x] Render multi-session training days cleanly, such as warm-up, main session, and cooldown sections.
+- [x] Display session objective and intensity by default when present because they directly affect execution.
+- [x] Display session warmup/cooldown behind compact expandable session details unless the text is very short.
+- [x] Display richer exercise prescription fields as compact chips or concise secondary lines near the exercise title.
+- [x] Display exercise modifications behind an expandable detail or subtle secondary text.
+- [x] Keep the logging path visually dominant for users who just want to complete exercises.
+
+**Batch 3A: Plan Viewer Polish**
+
+- [x] Add a collapse control for the Plan Summary section so users can reclaim vertical space during daily logging.
+- [x] Add a collapse control for the Week Summary / week-at-a-glance section.
+- [x] Rework exercise rows so content below the checkbox/name line spans the full white exercise box width instead of staying indented under the exercise name.
+- [x] Clean up the visible prescription line so it is consistent from exercise to exercise.
+- [x] Prefer richer fields over legacy duplicates: use `restBetweenSets` or `restBetweenReps` instead of also showing generic `rest`, and use `work` instead of also showing duplicate `duration` when they describe the same effort.
+- [x] Use clear labels such as `Sets`, `Reps`, `Work`, `Rest`, `Load`, `Tempo`, and `RPE`.
+- [x] Do not show grade as a primary prescription chip; prefer RPE/intensity because it is more portable across athletes, sports, and activities.
+- [x] Keep grade or sport-specific difficulty available only in expanded exercise details when it is useful context and not a primary effort target.
+- [x] Keep logging controls visually dominant after the layout cleanup.
+
+**Batch 3B: Exercise-Specific Logging UI**
+
+- [ ] Keep the completion checkbox as the fastest path for "completed as prescribed."
+- [ ] Treat checking complete as meaningful logged work even when the user does not enter notes or actuals.
+- [ ] Treat unchecking complete with no notes or actuals as not logged; delete or ignore any empty incomplete `WorkoutLog` row.
+- [ ] Replace the generic detailed log form with exercise-specific logging controls derived from the prescription shape.
+- [ ] For set/rep/load prescriptions, show one row per prescribed set with fields for reps, load/weight, optional RPE, and notes.
+- [ ] For timed interval prescriptions, show one row per interval or round with work, rest, completion, optional RPE, and notes.
+- [ ] For climbing attempts, routes, boulders, or circuits, show attempt/route/problem rows with result, duration when relevant, optional RPE, and notes.
+- [ ] For mobility, recovery, or simple duration work, keep a lightweight duration/RPE/notes log instead of forcing set rows.
+- [ ] Support a fallback summary log for unusual exercises that do not fit the structured logging shapes yet.
+- [ ] Store detailed logs in a structured shape that can preserve per-set/per-interval/per-attempt actuals without losing the existing quick-complete workflow.
+- [ ] Keep the detailed log collapsed by default so daily logging stays fast.
+- [ ] Add tests that quick completion, accidental uncheck, and detailed per-set logging all produce the expected logged/unlogged state.
 
 **Batch 4: Adjustment And Versioning**
 
+- [ ] Include plan-level guidance in adjustment context when it helps preserve the larger training intent.
 - [ ] Include rich coaching fields in adjustment context so the AI understands the original programming intent.
+- [ ] Include richer exercise prescription fields in adjustment context so the AI can modify precise work/rest/load/intensity details without flattening them into notes.
+- [ ] Validate that adjustments preserve or intentionally update plan-level guidance when the plan's larger intent changes.
 - [ ] Validate that adjustments preserve or intentionally update rich fields on changed days.
+- [ ] Validate that adjustments preserve or intentionally update richer prescription fields on changed exercises.
+- [ ] Show changed plan-level guidance in the adjustment preview when the overall plan intent changes materially.
 - [ ] Show changed rich coaching notes in the adjustment preview when they materially change.
+- [ ] Show changed prescription details in the adjustment preview when work/rest/load/intensity changes materially.
+- [ ] Confirm historical preview and revert preserve plan-level guidance exactly.
 - [ ] Confirm historical preview and revert preserve rich fields exactly.
+- [ ] Confirm historical preview and revert preserve richer exercise prescription fields exactly.
 
 **Batch 5: Tests And Docs**
 
 - [ ] Add simulator-gated Playwright coverage for rich generated plan display.
+- [ ] Add simulator-gated Playwright coverage for plan-level coach guidance and week-at-a-glance display.
+- [ ] Add simulator-gated Playwright coverage for multi-session day display.
+- [ ] Add simulator-gated Playwright coverage for richer exercise prescription display.
 - [ ] Add regression coverage that logging still works with rich snapshots.
+- [ ] Add regression coverage that logging still works when exercises include richer prescription fields.
 - [ ] Update `docs/data-model.md`, `docs/ai-integration.md`, and `CLAUDE.md` once implemented.
 
 Open questions:
 
 - Should rich fields be plain strings only, or allow small structured arrays for warmups/modifications?
 - Should exercise-level notes remain short while `modifications` carries longer substitutions?
-- Should the plan viewer show rich coaching text by default or collapse it for dense plans?
+- Should plan-level guidance live inside `PlanSnapshot` as `planGuidance`, or inside `profileSnapshot`/another future table if it becomes more durable than generated weeks?
+- Should training principles, recommendations, and progression tables be generated once per plan or synthesized from the generated weeks after all weeks complete?
+- Should multi-session days replace the current "exactly one session per training day" generation rule, or should warm-up/cooldown be represented as non-loggable details inside one session?
+- Which richer exercise prescription fields should be first-class in the snapshot versus folded into `prescriptionDetails`?
+- Should `rest` remain a generic display field while `restBetweenReps` and `restBetweenSets` provide more precise optional detail?
+- How should logging evolve later so users can log actual work against richer prescription fields without turning the log form into a burden?
+- Should the plan viewer show rich coaching text by default or collapse it for dense plans? Current preference: logger-first by default, with drill-down details available at week, day, session, and exercise level.
 
 ## Phase 10: Add More Sports
 

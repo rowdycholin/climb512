@@ -28,6 +28,7 @@ const followUpResponseSchema = z.object({
 });
 
 const nullableTextSchema = z.string().nullable();
+const optionalNullableTextSchema = nullableTextSchema.optional();
 
 const adjustmentExerciseSnapshotSchema = z.object({
   key: z.string().trim().min(1),
@@ -37,6 +38,19 @@ const adjustmentExerciseSnapshotSchema = z.object({
   duration: nullableTextSchema,
   rest: nullableTextSchema,
   notes: nullableTextSchema,
+  rounds: optionalNullableTextSchema,
+  work: optionalNullableTextSchema,
+  restBetweenReps: optionalNullableTextSchema,
+  restBetweenSets: optionalNullableTextSchema,
+  load: optionalNullableTextSchema,
+  intensity: optionalNullableTextSchema,
+  tempo: optionalNullableTextSchema,
+  distance: optionalNullableTextSchema,
+  grade: optionalNullableTextSchema,
+  sides: optionalNullableTextSchema,
+  holdType: optionalNullableTextSchema,
+  prescriptionDetails: optionalNullableTextSchema,
+  modifications: optionalNullableTextSchema,
 });
 
 const adjustmentSessionSnapshotSchema = z.object({
@@ -44,6 +58,10 @@ const adjustmentSessionSnapshotSchema = z.object({
   name: z.string().trim().min(1),
   description: z.string(),
   duration: z.number().int().min(0).max(360),
+  objective: optionalNullableTextSchema,
+  intensity: optionalNullableTextSchema,
+  warmup: optionalNullableTextSchema,
+  cooldown: optionalNullableTextSchema,
   exercises: z.array(adjustmentExerciseSnapshotSchema),
 });
 
@@ -53,6 +71,7 @@ const adjustmentDaySnapshotSchema = z.object({
   dayName: z.string().trim().min(1),
   focus: z.string().trim().min(1),
   isRest: z.boolean(),
+  coachNotes: optionalNullableTextSchema,
   sessions: z.array(adjustmentSessionSnapshotSchema),
 });
 
@@ -60,10 +79,25 @@ const adjustmentWeekSnapshotSchema = z.object({
   key: z.string().trim().min(1),
   weekNum: z.number().int().min(1),
   theme: z.string().trim().min(1),
+  summary: optionalNullableTextSchema,
+  progressionNote: optionalNullableTextSchema,
   days: z.array(adjustmentDaySnapshotSchema).length(7),
 });
 
+const adjustmentPlanGuidanceSchema = z.object({
+  overview: nullableTextSchema,
+  intensityDistribution: z.array(z.object({
+    label: z.string(),
+    detail: z.string(),
+  })),
+  progressionPrinciples: z.array(z.string()),
+  recoveryPrinciples: z.array(z.string()),
+  recommendations: z.array(z.string()),
+  progressionTable: z.array(z.record(z.string(), z.string())),
+});
+
 export const adjustmentPlanSnapshotSchema = z.object({
+  planGuidance: adjustmentPlanGuidanceSchema.nullable().optional(),
   weeks: z.array(adjustmentWeekSnapshotSchema).min(1),
 });
 

@@ -7,6 +7,7 @@ import PlanViewer from "@/components/PlanViewer";
 export default function PlanWorkspace({
   planId,
   weeks,
+  planGuidance,
   totalWeeks,
   generation,
   sport,
@@ -24,6 +25,7 @@ export default function PlanWorkspace({
 }: {
   planId: string;
   weeks: Parameters<typeof PlanViewer>[0]["weeks"];
+  planGuidance: Parameters<typeof PlanViewer>[0]["planGuidance"];
   totalWeeks: number;
   generation: Parameters<typeof PlanViewer>[0]["generation"];
   sport: string;
@@ -66,6 +68,7 @@ export default function PlanWorkspace({
       <PlanViewer
         planId={planId}
         weeks={weeks}
+        planGuidance={planGuidance}
         totalWeeks={totalWeeks}
         generation={generation}
         adjustmentMetadata={adjustmentMetadata}

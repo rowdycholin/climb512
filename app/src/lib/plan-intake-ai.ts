@@ -384,7 +384,7 @@ function weekdayNumber(value: string) {
 }
 
 function nextWeekdayDate(value: string, clientToday?: string) {
-  const weekdayMatch = value.match(/^(?:(?:this|coming|next)\s+)?(sun(?:day)?|mon(?:day)?|tue(?:s|sday|day)?|wed(?:nesday)?|thu(?:r|rs|rsday|rday|day)?|fri(?:day)?|sat(?:urday)?)$/i);
+  const weekdayMatch = value.match(/^(?:(?:this\s+coming|this|coming|next)\s+)?(sun(?:day)?|mon(?:day)?|tue(?:s|sday|day)?|wed(?:nesday)?|thu(?:r|rs|rsday|rday|day)?|fri(?:day)?|sat(?:urday)?)$/i);
   if (!weekdayMatch) return undefined;
 
   const target = weekdayNumber(weekdayMatch[1]);

@@ -1,7 +1,7 @@
 import { prisma } from "./prisma";
 import { generateNextWeekFromPlanContext } from "./ai-plan-generator";
 import { composePlanSnapshotFromGeneratedWeeks, getNextJobStatusAfterWeek } from "./plan-generation-state";
-import { parseProfileSnapshot, toStoredJson, type ProfileSnapshot, type WeekSnapshot } from "./plan-snapshot";
+import { buildPlanGuidance, parseProfileSnapshot, toStoredJson, type ProfileSnapshot, type WeekSnapshot } from "./plan-snapshot";
 import { buildPlanSnapshot } from "./plan-snapshot";
 import type { Prisma } from "@prisma/client";
 import type { WeekData } from "./plan-types";
@@ -148,12 +148,16 @@ async function saveGeneratedWeek(params: {
     });
     const generatedWeeks = generatedRows.length;
     savedGeneratedWeeks = generatedWeeks;
-    const generatedSnapshot = composePlanSnapshotFromGeneratedWeeks(
+    let generatedSnapshot = composePlanSnapshotFromGeneratedWeeks(
       generatedRows.map((row) => parseWeekSnapshot(row.weekSnapshot)),
     );
 
     let finalVersionId: string | undefined;
     if (nextStatus === "ready") {
+      generatedSnapshot = {
+        ...generatedSnapshot,
+        planGuidance: buildPlanGuidance(profileSnapshot, generatedSnapshot.weeks),
+      };
       const latest = await tx.planVersion.findFirst({
         where: { planId: job.planId },
         orderBy: { versionNum: "desc" },

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { type ReactNode, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { logExercise } from "@/app/actions";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
@@ -24,6 +24,19 @@ interface Exercise {
   duration: string | null;
   rest: string | null;
   notes: string | null;
+  rounds?: string | null;
+  work?: string | null;
+  restBetweenReps?: string | null;
+  restBetweenSets?: string | null;
+  load?: string | null;
+  intensity?: string | null;
+  tempo?: string | null;
+  distance?: string | null;
+  grade?: string | null;
+  sides?: string | null;
+  holdType?: string | null;
+  prescriptionDetails?: string | null;
+  modifications?: string | null;
   logs: ExerciseLog[];
 }
 
@@ -32,6 +45,10 @@ interface DaySession {
   name: string;
   description: string;
   duration: number;
+  objective?: string | null;
+  intensity?: string | null;
+  warmup?: string | null;
+  cooldown?: string | null;
   exercises: Exercise[];
 }
 
@@ -41,6 +58,7 @@ interface Day {
   dayName: string;
   focus: string;
   isRest: boolean;
+  coachNotes?: string | null;
   sessions: DaySession[];
 }
 
@@ -48,7 +66,18 @@ interface Week {
   id: string;
   weekNum: number;
   theme: string;
+  summary?: string | null;
+  progressionNote?: string | null;
   days: Day[];
+}
+
+interface PlanGuidance {
+  overview: string | null;
+  intensityDistribution: Array<{ label: string; detail: string }>;
+  progressionPrinciples: string[];
+  recoveryPrinciples: string[];
+  recommendations: string[];
+  progressionTable: Array<Record<string, string>>;
 }
 
 interface GenerationProgress {
@@ -83,6 +112,126 @@ const FOCUS_COLORS: Record<string, string> = {
   "Rest & Recovery": "bg-slate-100 text-slate-500 border-slate-200",
 };
 
+function detailItems(items: Array<{ label: string; value?: string | null }>) {
+  return items.filter((item) => item.value?.trim());
+}
+
+function exercisePrescriptionChips(exercise: Exercise) {
+  const hasPreciseRest = Boolean(exercise.restBetweenSets?.trim() || exercise.restBetweenReps?.trim());
+  const hasWork = Boolean(exercise.work?.trim());
+
+  return detailItems([
+    { label: "Sets", value: exercise.sets },
+    { label: "Rounds", value: exercise.rounds },
+    { label: "Reps", value: exercise.reps },
+    { label: "Work", value: exercise.work },
+    { label: "Duration", value: hasWork ? null : exercise.duration },
+    { label: "Rest", value: exercise.restBetweenSets ?? exercise.restBetweenReps ?? (!hasPreciseRest ? exercise.rest : null) },
+    { label: "Load", value: exercise.load },
+    { label: "Tempo", value: exercise.tempo },
+    { label: "Distance", value: exercise.distance },
+    { label: "Sides", value: exercise.sides },
+    { label: "RPE", value: exercise.intensity },
+  ]);
+}
+
+function SmallChip({ children, tone = "slate" }: { children: ReactNode; tone?: "slate" | "amber" | "blue" }) {
+  const classes = {
+    slate: "border-slate-200 bg-slate-100 text-slate-600",
+    amber: "border-amber-200 bg-amber-50 text-amber-700",
+    blue: "border-blue-200 bg-blue-50 text-blue-700",
+  };
+
+  return (
+    <span className={`rounded-full border px-2 py-0.5 text-xs ${classes[tone]}`}>
+      {children}
+    </span>
+  );
+}
+
+function PlanGuidancePanel({ planGuidance }: { planGuidance?: PlanGuidance | null }) {
+  if (!planGuidance) return null;
+  const hasGuidance = Boolean(planGuidance.overview)
+    || planGuidance.intensityDistribution.length > 0
+    || planGuidance.progressionPrinciples.length > 0
+    || planGuidance.recoveryPrinciples.length > 0
+    || planGuidance.recommendations.length > 0
+    || planGuidance.progressionTable.length > 0;
+  if (!hasGuidance) return null;
+
+  return (
+    <details className="mb-5 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700">
+      <summary className="cursor-pointer text-sm font-semibold text-slate-800">Coach Guidance</summary>
+      <div className="mt-3 space-y-4">
+        {planGuidance.overview && <p className="leading-relaxed text-slate-600">{planGuidance.overview}</p>}
+        {planGuidance.intensityDistribution.length > 0 && (
+          <div>
+            <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Intensity Distribution</p>
+            <div className="grid gap-2 sm:grid-cols-2">
+              {planGuidance.intensityDistribution.map((item, index) => (
+                <div key={`${item.label}-${index}`} className="rounded-lg border border-slate-100 bg-slate-50 px-3 py-2">
+                  <span className="text-xs font-semibold text-slate-700">{item.label}</span>
+                  <p className="mt-0.5 text-xs text-slate-500">{item.detail}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+        {(planGuidance.progressionPrinciples.length > 0 || planGuidance.recoveryPrinciples.length > 0) && (
+          <div className="grid gap-3 sm:grid-cols-2">
+            {planGuidance.progressionPrinciples.length > 0 && (
+              <div>
+                <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-500">Progression</p>
+                <ul className="space-y-1 text-xs leading-relaxed text-slate-600">
+                  {planGuidance.progressionPrinciples.map((item) => <li key={item}>{item}</li>)}
+                </ul>
+              </div>
+            )}
+            {planGuidance.recoveryPrinciples.length > 0 && (
+              <div>
+                <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-500">Recovery</p>
+                <ul className="space-y-1 text-xs leading-relaxed text-slate-600">
+                  {planGuidance.recoveryPrinciples.map((item) => <li key={item}>{item}</li>)}
+                </ul>
+              </div>
+            )}
+          </div>
+        )}
+        {planGuidance.recommendations.length > 0 && (
+          <div>
+            <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-500">Recommendations</p>
+            <ul className="space-y-1 text-xs leading-relaxed text-slate-600">
+              {planGuidance.recommendations.map((item) => <li key={item}>{item}</li>)}
+            </ul>
+          </div>
+        )}
+        {planGuidance.progressionTable.length > 0 && (
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[420px] border-collapse text-xs">
+              <thead>
+                <tr className="border-b border-slate-200 text-left text-slate-500">
+                  {Object.keys(planGuidance.progressionTable[0]).map((key) => (
+                    <th key={key} className="py-1.5 pr-3 font-semibold capitalize">{key}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {planGuidance.progressionTable.map((row, index) => (
+                  <tr key={index} className="border-b border-slate-100 last:border-0">
+                    {Object.keys(planGuidance.progressionTable[0]).map((key) => (
+                      <td key={key} className="py-1.5 pr-3 text-slate-600">{row[key]}</td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </details>
+  );
+}
+
 function ExerciseRow({ planId, exercise, readOnly = false }: { planId: string; exercise: Exercise; readOnly?: boolean }) {
   const log = exercise.logs[0] ?? null;
   const [completed, setCompleted] = useState(log?.completed ?? false);
@@ -90,6 +239,21 @@ function ExerciseRow({ planId, exercise, readOnly = false }: { planId: string; e
   const [saved, setSaved] = useState(false);
   const [pending, startTransition] = useTransition();
   const router = useRouter();
+  const prescriptionChips = exercisePrescriptionChips(exercise);
+  const prescriptionDetails = detailItems([
+    { label: "Rounds", value: exercise.rounds },
+    { label: "Work", value: exercise.work },
+    { label: "Rest between reps", value: exercise.restBetweenReps },
+    { label: "Rest between sets", value: exercise.restBetweenSets },
+    { label: "Load", value: exercise.load },
+    { label: "RPE", value: exercise.intensity },
+    { label: "Tempo", value: exercise.tempo },
+    { label: "Distance", value: exercise.distance },
+    { label: "Difficulty", value: exercise.grade },
+    { label: "Sides", value: exercise.sides },
+    { label: "Hold", value: exercise.holdType },
+  ]);
+  const hasExpandableDetails = prescriptionDetails.length > 0 || Boolean(exercise.prescriptionDetails) || Boolean(exercise.modifications);
 
   useEffect(() => {
     setCompleted(log?.completed ?? false);
@@ -141,19 +305,20 @@ function ExerciseRow({ planId, exercise, readOnly = false }: { planId: string; e
         completed ? "border-green-300 bg-green-50" : "border-slate-200 bg-white"
       }`}
     >
-      <div className="flex items-start gap-3 px-3 py-3">
-        <button
-          type="button"
-          onClick={toggleComplete}
-          disabled={pending || readOnly}
-          aria-label={`${completed ? "Mark incomplete" : "Mark complete"}: ${exercise.name}`}
-          className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded border-2 transition-colors disabled:opacity-60 ${
-            completed ? "border-green-500 bg-green-500" : "border-slate-300 hover:border-green-400"
-          }`}
-          title="Mark complete"
-        >
-          {completed && <span className="text-xs leading-none text-white">✓</span>}
-        </button>
+      <div className="px-3 py-3">
+        <div className="flex items-start gap-3">
+          <button
+            type="button"
+            onClick={toggleComplete}
+            disabled={pending || readOnly}
+            aria-label={`${completed ? "Mark incomplete" : "Mark complete"}: ${exercise.name}`}
+            className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded border-2 transition-colors disabled:opacity-60 ${
+              completed ? "border-green-500 bg-green-500" : "border-slate-300 hover:border-green-400"
+            }`}
+            title="Mark complete"
+          >
+            {completed && <CheckMarkIcon className="h-3 w-3 text-white" />}
+          </button>
 
         <div className="min-w-0 flex-1">
           <span
@@ -163,29 +328,35 @@ function ExerciseRow({ planId, exercise, readOnly = false }: { planId: string; e
           >
             {exercise.name}
           </span>
+        </div>
 
-          <div className="mt-1 flex flex-wrap gap-1.5">
-            {exercise.sets && (
-              <span className="rounded-full border border-slate-200 bg-slate-100 px-2 py-0.5 text-xs text-slate-600">
-                {exercise.sets} sets
-              </span>
-            )}
-            {exercise.reps && (
-              <span className="rounded-full border border-slate-200 bg-slate-100 px-2 py-0.5 text-xs text-slate-600">
-                {exercise.reps}
-              </span>
-            )}
-            {exercise.duration && (
-              <span className="rounded-full border border-slate-200 bg-slate-100 px-2 py-0.5 text-xs text-slate-600">
-                {exercise.duration}
-              </span>
-            )}
-            {exercise.rest && (
-              <span className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-xs text-amber-600">
-                rest {exercise.rest}
-              </span>
-            )}
-          </div>
+        {!readOnly && (
+          <button
+            type="button"
+            onClick={() => setOpen((value) => !value)}
+            className="shrink-0 rounded-lg border border-slate-300 px-2.5 py-1 text-xs text-slate-500 transition-colors hover:border-slate-400 hover:text-slate-700"
+          >
+            {open ? "Close" : log?.setsCompleted || log?.weightUsed ? "Edit log" : "Log"}
+          </button>
+          )}
+        </div>
+
+        <div className="mt-2">
+          {prescriptionChips.length > 0 && (
+            <div className="flex flex-wrap gap-1.5">
+              {prescriptionChips.map((item) => {
+                const tone = item.label === "Rest" ? "amber" : item.label === "Work" || item.label === "RPE" ? "blue" : "slate";
+                const chipText = item.label === "RPE" && /^rpe\b/i.test(item.value ?? "")
+                  ? item.value
+                  : `${item.label}: ${item.value}`;
+                return (
+                  <SmallChip key={`${item.label}-${item.value}`} tone={tone}>
+                    {chipText}
+                  </SmallChip>
+                );
+              })}
+            </div>
+          )}
 
           {exercise.notes && (
             <p className="mt-1.5 text-xs leading-relaxed text-slate-500">{exercise.notes}</p>
@@ -215,17 +386,31 @@ function ExerciseRow({ planId, exercise, readOnly = false }: { planId: string; e
               )}
             </div>
           )}
+
+          {hasExpandableDetails && (
+            <details className="mt-2 text-xs text-slate-500">
+              <summary className="cursor-pointer font-medium text-slate-600">Exercise details</summary>
+              <div className="mt-2 space-y-2 rounded-lg border border-slate-100 bg-slate-50 px-3 py-2">
+                {prescriptionDetails.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5">
+                    {prescriptionDetails.map((item) => (
+                      <SmallChip key={`${item.label}-${item.value}`}>
+                        {item.label}: {item.value}
+                      </SmallChip>
+                    ))}
+                  </div>
+                )}
+                {exercise.prescriptionDetails && <p className="leading-relaxed">{exercise.prescriptionDetails}</p>}
+                {exercise.modifications && (
+                  <p className="leading-relaxed">
+                    <span className="font-semibold text-slate-600">Modify:</span> {exercise.modifications}
+                  </p>
+                )}
+              </div>
+            </details>
+          )}
         </div>
 
-        {!readOnly && (
-          <button
-            type="button"
-            onClick={() => setOpen((value) => !value)}
-            className="shrink-0 rounded-lg border border-slate-300 px-2.5 py-1 text-xs text-slate-500 transition-colors hover:border-slate-400 hover:text-slate-700"
-          >
-            {open ? "Close" : log?.setsCompleted || log?.weightUsed ? "Edit log" : "Log"}
-          </button>
-        )}
       </div>
 
       {open && !readOnly && (
@@ -300,6 +485,13 @@ function ExerciseRow({ planId, exercise, readOnly = false }: { planId: string; e
 }
 
 function SessionBlock({ planId, session, readOnly = false }: { planId: string; session: DaySession; readOnly?: boolean }) {
+  const sessionDetails = detailItems([
+    { label: "Objective", value: session.objective },
+    { label: "Intensity", value: session.intensity },
+    { label: "Warm-up", value: session.warmup },
+    { label: "Cooldown", value: session.cooldown },
+  ]);
+
   return (
     <div className="mb-4 last:mb-0">
       <div className="mb-2 flex items-center gap-2 px-1">
@@ -310,6 +502,24 @@ function SessionBlock({ planId, session, readOnly = false }: { planId: string; s
         <div className="h-px flex-1 bg-slate-200" />
       </div>
       <p className="mb-2 px-1 text-xs italic text-slate-500">{session.description}</p>
+      {(session.objective || session.intensity) && (
+        <div className="mb-2 flex flex-wrap gap-1.5 px-1">
+          {session.objective && <SmallChip tone="blue">Objective: {session.objective}</SmallChip>}
+          {session.intensity && <SmallChip tone="blue">{session.intensity}</SmallChip>}
+        </div>
+      )}
+      {sessionDetails.some((item) => item.label === "Warm-up" || item.label === "Cooldown") && (
+        <details className="mb-2 px-1 text-xs text-slate-500">
+          <summary className="cursor-pointer font-medium text-slate-600">Session details</summary>
+          <div className="mt-2 space-y-1.5 rounded-lg border border-slate-100 bg-slate-50 px-3 py-2">
+            {sessionDetails.map((item) => (
+              <p key={item.label} className="leading-relaxed">
+                <span className="font-semibold text-slate-600">{item.label}:</span> {item.value}
+              </p>
+            ))}
+          </div>
+        </details>
+      )}
       <div>
         {session.exercises.map((exercise) => (
           <ExerciseRow key={exercise.id} planId={planId} exercise={exercise} readOnly={readOnly} />
@@ -319,19 +529,28 @@ function SessionBlock({ planId, session, readOnly = false }: { planId: string; s
   );
 }
 
-function ChevronIcon({ className }: { className?: string }) {
+function CheckMarkIcon({ className }: { className?: string }) {
   return (
     <svg
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
-      strokeWidth={2.5}
+      strokeWidth={3}
       strokeLinecap="round"
       strokeLinejoin="round"
-      className={className ?? "h-4 w-4"}
+      className={className ?? "h-3 w-3"}
     >
-      <polyline points="6 9 12 15 18 9" />
+      <polyline points="20 6 9 17 4 12" />
     </svg>
+  );
+}
+
+function DisclosureArrowHead({ open, className = "" }: { open: boolean; className?: string }) {
+  return (
+    <span
+      aria-hidden="true"
+      className={`inline-block h-0 w-0 shrink-0 border-y-[4px] border-l-[6px] border-y-transparent border-l-current transition-transform ${open ? "rotate-90" : ""} ${className}`}
+    />
   );
 }
 
@@ -371,11 +590,11 @@ function DayCard({
       }`}
     >
       <AccordionTrigger
-        className="group px-4 py-3 hover:bg-slate-50 hover:no-underline [&[data-state=open]]:bg-slate-50"
+        className="px-4 py-3 hover:bg-slate-50 hover:no-underline [&[data-state=open]]:bg-slate-50 [&_[data-slot=accordion-trigger-icon]]:hidden"
         onClick={() => onSelect(day.id)}
       >
         <div className="flex w-full items-center gap-2 text-left">
-          <ChevronIcon className="h-4 w-4 shrink-0 text-slate-400 transition-transform duration-200 group-aria-expanded:rotate-180" />
+          <DisclosureArrowHead open={false} className="text-slate-700 group-aria-expanded/accordion-trigger:rotate-90" />
           <div className="w-[72px] shrink-0">
             <span className={`text-xs font-semibold ${isHighlighted ? "text-blue-600" : "text-slate-500"}`}>
               {day.dayName}
@@ -406,11 +625,49 @@ function DayCard({
             {adjustmentSummary}
           </p>
         )}
+        {day.coachNotes && (
+          <p className="mb-3 rounded-lg border border-blue-100 bg-blue-50 px-3 py-2 text-xs leading-relaxed text-blue-900">
+            {day.coachNotes}
+          </p>
+        )}
         {day.sessions.map((session) => (
           <SessionBlock key={session.id} planId={planId} session={session} readOnly={readOnly} />
         ))}
       </AccordionContent>
     </AccordionItem>
+  );
+}
+
+function WeekOverview({ week }: { week: Week }) {
+  return (
+    <div className="overflow-hidden bg-white">
+      <div className="grid grid-cols-[88px_minmax(0,1fr)_72px] gap-2 border-b border-slate-100 bg-slate-50 px-3 py-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
+        <span>Day</span>
+        <span>Focus</span>
+        <span className="text-right">Time</span>
+      </div>
+      <div className="divide-y divide-slate-100">
+        {week.days.map((day) => {
+          const totalDuration = day.sessions.reduce((sum, session) => sum + session.duration, 0);
+          const intensity = day.sessions.map((session) => session.intensity).find(Boolean);
+          return (
+            <div
+              key={`overview-${day.id}`}
+              className={`grid grid-cols-[88px_minmax(0,1fr)_72px] gap-2 px-3 py-2 text-sm ${
+                day.isRest ? "bg-slate-50/70 text-slate-500" : "text-slate-700"
+              }`}
+            >
+              <span className="font-semibold">{day.dayName}</span>
+              <span className="min-w-0">
+                {day.focus}
+                {intensity && <span className="ml-2 text-xs text-blue-600">{intensity}</span>}
+              </span>
+              <span className="text-right text-xs text-slate-500">{day.isRest ? "Rest" : `${totalDuration} min`}</span>
+            </div>
+          );
+        })}
+      </div>
+    </div>
   );
 }
 
@@ -431,9 +688,11 @@ function WeekCard({
   const allExercises = week.days.flatMap((day) => day.sessions.flatMap((session) => session.exercises));
   const completedCount = allExercises.filter((exercise) => exercise.logs[0]?.completed).length;
   const initialDayId = week.days[initialDayIndex]?.id ?? null;
+  const hasWeekSummary = Boolean(week.summary || week.progressionNote || week.days.length);
 
   const [openDayIds, setOpenDayIds] = useState<string[]>(() => (initialDayId ? [initialDayId] : []));
   const [highlightedDayId, setHighlightedDayId] = useState<string | null>(initialDayId);
+  const [weekSummaryOpen, setWeekSummaryOpen] = useState(true);
   const adjustedByDay = useMemo(() => {
     const entries = adjustmentMetadata?.affectedDays.filter((day) => day.weekNum === week.weekNum) ?? [];
     return new Map(entries.map((day) => [day.dayNum, day.summary]));
@@ -458,6 +717,32 @@ function WeekCard({
         </div>
         <p className="mt-1 text-sm text-slate-500">{trainingDays} training days | {7 - trainingDays} rest days</p>
       </div>
+      {hasWeekSummary && (
+        <div className="mb-4 overflow-hidden rounded-xl border border-slate-200 bg-white">
+          <button
+            type="button"
+            onClick={() => setWeekSummaryOpen((value) => !value)}
+            className="flex w-full items-center justify-between gap-3 bg-slate-50 px-3 py-2 text-left text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-100"
+            aria-expanded={weekSummaryOpen}
+          >
+            <span className="flex items-center gap-1.5">
+              <DisclosureArrowHead open={weekSummaryOpen} className="text-slate-700" />
+              Week Summary
+            </span>
+          </button>
+          {weekSummaryOpen && (
+            <div className="px-0 pb-0">
+              {(week.summary || week.progressionNote) && (
+                <div className="space-y-1 border-b border-slate-100 px-3 py-3 text-sm leading-relaxed text-slate-600">
+                  {week.summary && <p>{week.summary}</p>}
+                  {week.progressionNote && <p className="text-xs text-slate-500">{week.progressionNote}</p>}
+                </div>
+              )}
+              <WeekOverview week={week} />
+            </div>
+          )}
+        </div>
+      )}
       <Accordion multiple value={openDayIds} onValueChange={setOpenDayIds} className="space-y-0">
         {week.days.map((day, index) => (
           <DayCard
@@ -502,6 +787,7 @@ function MissingWeekCard({ weekNum, generation }: { weekNum: number; generation:
 export default function PlanViewer({
   planId,
   weeks,
+  planGuidance,
   totalWeeks = weeks.length,
   generation,
   adjustmentMetadata,
@@ -513,6 +799,7 @@ export default function PlanViewer({
 }: {
   planId: string;
   weeks: Week[];
+  planGuidance?: PlanGuidance | null;
   totalWeeks?: number;
   generation?: GenerationProgress;
   adjustmentMetadata?: AdjustmentMetadata | null;
@@ -554,6 +841,7 @@ export default function PlanViewer({
 
   return (
     <div>
+      <PlanGuidancePanel planGuidance={planGuidance} />
       <div ref={weekScrollRef} className="mb-6 flex gap-2 overflow-x-auto pb-2" style={{ scrollbarWidth: "thin" }}>
         {Array.from({ length: resolvedTotalWeeks }, (_, index) => {
           const week = weeks[index] ?? null;

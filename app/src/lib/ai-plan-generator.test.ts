@@ -137,6 +137,34 @@ describe("ai plan generator sequential core", () => {
     expect(validateGeneratedWeek(validWeek, 1)).toBe(validWeek);
   });
 
+  test("allows warm-up, main session, and cooldown sections on a training day", () => {
+    const multiSessionWeek: WeekData = {
+      ...validWeek,
+      days: validWeek.days.map((day) => day.dayNum === 1
+        ? {
+            ...day,
+            sessions: [
+              {
+                name: "Warm-up",
+                description: "Prepare for climbing.",
+                duration: 10,
+                exercises: [{ name: "Easy traversing", duration: "5 min", notes: "Stay easy" }],
+              },
+              ...day.sessions,
+              {
+                name: "Cooldown",
+                description: "Downshift after climbing.",
+                duration: 8,
+                exercises: [{ name: "Shoulder mobility", duration: "5 min", notes: "Relax" }],
+              },
+            ],
+          }
+        : day),
+    };
+
+    expect(validateGeneratedWeek(multiSessionWeek, 1)).toBe(multiSessionWeek);
+  });
+
   test("rejects malformed generated weeks before saving", () => {
     const invalidWeek: WeekData = {
       ...validWeek,

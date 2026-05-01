@@ -187,16 +187,16 @@ function shouldAvoidExercise(exercise, input) {
 function replacementExercise(input) {
   const text = constraintText(input);
   if (text.includes("shin")) {
-    return { name: "Low-impact Aerobic Work", duration: "25 min", rest: "none", notes: "Bike or brisk walk" };
+    return { name: "Low-impact Aerobic Work", duration: "25 min", intensity: "Zone 2", rest: "none", notes: "Bike or brisk walk" };
   }
   if (text.includes("pulley") || text.includes("max hang")) {
-    return { name: "Open-hand Technique Drills", sets: "3", duration: "5 min", rest: "1 min", notes: "Easy grips, no crimping" };
+    return { name: "Open-hand Technique Drills", sets: "3", duration: "5 min", restBetweenSets: "1 min", holdType: "open hand", notes: "Easy grips, no crimping" };
   }
   if (text.includes("shoulder")) {
-    return { name: "Scapular Control Drill", sets: "3", reps: "10", rest: "60 sec", notes: "Pain-free range only" };
+    return { name: "Scapular Control Drill", sets: "3", reps: "10", restBetweenSets: "60 sec", intensity: "easy", notes: "Pain-free range only" };
   }
   if (text.includes("knee")) {
-    return { name: "Hip Bridge", sets: "3", reps: "12", rest: "60 sec", notes: "Pain-free hip drive" };
+    return { name: "Hip Bridge", sets: "3", reps: "12", restBetweenSets: "60 sec", intensity: "easy", notes: "Pain-free hip drive" };
   }
 
   return { name: "Mobility Reset", duration: "10 min", rest: "none", notes: "Stay easy, pain-free" };
@@ -254,24 +254,91 @@ function strengthAccessory(input) {
   return { name: "Strength Accessory Circuit", sets: "3", reps: "8", rest: "90 sec", notes: "Moderate load, clean form" };
 }
 
+function enrichExercise(exercise, input) {
+  const name = exercise.name.toLowerCase();
+  const next = { ...exercise };
+
+  if (next.rest && !next.restBetweenSets) {
+    next.restBetweenSets = next.rest;
+  }
+  if (!next.intensity) {
+    if (name.includes("limit") || name.includes("power") || name.includes("project")) next.intensity = "RPE 8-9";
+    else if (name.includes("easy") || name.includes("warm")) next.intensity = "RPE 3-4";
+    else next.intensity = "RPE 6-7";
+  }
+  if (!next.work && next.duration && /sec|min/.test(String(next.duration))) {
+    next.work = next.duration;
+  }
+  if (!next.grade && input.currentGrade && (name.includes("boulder") || name.includes("problem") || name.includes("route") || name.includes("climb"))) {
+    next.grade = String(input.currentGrade);
+  }
+  if (!next.load && (name.includes("weighted") || name.includes("carry") || name.includes("squat") || name.includes("deadlift") || name.includes("row"))) {
+    next.load = "moderate load";
+  }
+  if (!next.tempo && (name.includes("squat") || name.includes("press") || name.includes("row") || name.includes("push"))) {
+    next.tempo = "controlled 2-1-2";
+  }
+  if (!next.modifications) {
+    next.modifications = "Reduce volume or intensity if form breaks.";
+  }
+
+  return next;
+}
+
+function warmupExercise(input) {
+  if (input.discipline === "running") {
+    return { name: "Dynamic Warm-up", duration: "8 min", work: "8 min", intensity: "RPE 3", notes: "Leg swings, skips, easy jog" };
+  }
+  if (input.discipline === "strength_training") {
+    return { name: "Movement Prep", duration: "8 min", work: "8 min", intensity: "RPE 3", notes: "Easy ramp sets and mobility" };
+  }
+  return { name: "Easy Movement Warm-up", duration: "10 min", work: "10 min", grade: "easy", intensity: "RPE 3-4", notes: "Easy climbing and mobility" };
+}
+
+function cooldownExercise(input) {
+  if (input.discipline === "running") {
+    return { name: "Cooldown Walk", duration: "6 min", work: "6 min", intensity: "easy", notes: "Let breathing settle" };
+  }
+  return { name: "Mobility Cooldown", duration: "6 min", work: "6 min", intensity: "easy", notes: "Shoulders, hips, forearms" };
+}
+
 function buildTrainingDay(template, dayNum, input, rng) {
-  let exercises = addEquipmentTweaks(template.exercises.slice(0, 4), input);
+  let exercises = addEquipmentTweaks(template.exercises.slice(0, 4), input).map((exercise) => enrichExercise(exercise, input));
   if (input.strengthTraining?.include && input.discipline !== "strength_training") {
-    exercises = [...exercises.slice(0, 3), strengthAccessory(input)];
+    exercises = [...exercises.slice(0, 3), enrichExercise(strengthAccessory(input), input)];
   }
   const durationJitter = Math.floor(rng() * 2) * 5;
+  const mainDuration = 45 + (exercises.length - 3) * 10 + durationJitter;
 
   return {
     dayNum,
     dayName: DAY_NAMES[dayNum - 1],
     focus: template.focus,
     isRest: false,
+    coachNotes: `${template.focus} supports ${input.goalDescription}; keep quality higher than fatigue.`,
     sessions: [
       {
-        name: template.sessionName,
+        name: "Warm-up",
+        description: "Prepare joints, breathing, and movement quality.",
+        duration: 10,
+        objective: "Start warm without creating fatigue.",
+        intensity: "RPE 3-4",
+        exercises: [warmupExercise(input)]
+      },
+      {
+        name: "Main Session",
         description: template.description,
-        duration: 45 + (exercises.length - 3) * 10 + durationJitter,
+        duration: mainDuration,
+        objective: template.description,
+        intensity: exercises.some((exercise) => String(exercise.intensity).includes("8")) ? "RPE 8-9" : "RPE 6-7",
         exercises
+      },
+      {
+        name: "Cooldown",
+        description: "Downshift and leave the session recovered.",
+        duration: 8,
+        cooldown: "Easy mobility and breathing before leaving the gym.",
+        exercises: [cooldownExercise(input)]
       }
     ]
   };
@@ -311,6 +378,10 @@ function generateWeekFromPrompt(prompt, options = {}) {
   return {
     weekNum: input.weekNum,
     theme: getPhaseTheme(input),
+    summary: `${getPhaseTheme(input)} week for ${input.goalDescription}.`,
+    progressionNote: input.weekNum === 1
+      ? "Establish a repeatable baseline before progressing volume or intensity."
+      : "Progress from prior weeks while preserving recovery and movement quality.",
     days
   };
 }

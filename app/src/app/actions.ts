@@ -7,9 +7,11 @@ import { getPostLoginPath } from "@/lib/post-login-route";
 import { getSession, getSessionBootId, getSessionExpiresAt, refreshSession } from "@/lib/session";
 import {
   buildPlanSnapshot,
+  buildPlanGuidance,
   createProfileSnapshot,
   type ExerciseSnapshot,
   type DaySnapshot,
+  hasMeaningfulWorkoutLog,
   parsePlanSnapshot,
   parseProfileSnapshot,
   toStoredJson,
@@ -628,6 +630,17 @@ const DAY_NAME_TO_NUM: Record<string, number> = {
   sun: 7,
 };
 
+const meaningfulWorkoutLogWhere = {
+  OR: [
+    { completed: true },
+    { setsCompleted: { not: null } },
+    { repsCompleted: { not: null } },
+    { weightUsed: { not: null } },
+    { durationActual: { not: null } },
+    { notes: { not: null } },
+  ],
+};
+
 function mentionedDayNumbers(text: string) {
   const normalized = text.toLowerCase();
   const seen = new Set<number>();
@@ -1125,7 +1138,7 @@ export async function createPlan(formData: FormData) {
   const startDate = parsePlanStartDate(formData);
   const weeks = await generatePlanWithAI(input, session.loginId);
   const profileSnapshot = createProfileSnapshot(input);
-  const planSnapshot = buildPlanSnapshot(weeks);
+  const planSnapshot = buildPlanSnapshot(weeks, buildPlanGuidance(profileSnapshot, weeks));
 
   const plan = await prisma.plan.create({
     data: {
@@ -1490,14 +1503,16 @@ export async function continuePlanAdjustmentChat(formData: FormData): Promise<Pl
 
   const currentSnapshot = plan.currentVersion.planSnapshot;
   const profileSnapshot = parseProfileSnapshot(plan.currentVersion.profileSnapshot);
-  const logs: WorkoutLogDayMarker[] = plan.workoutLogs.map((log) => ({
-    weekNum: log.weekNum,
-    dayNum: log.dayNum,
-    sessionKey: log.sessionKey,
-    exerciseKey: log.exerciseKey,
-    exerciseName: log.exerciseName,
-    completed: log.completed,
-  }));
+  const logs: WorkoutLogDayMarker[] = plan.workoutLogs
+    .filter(hasMeaningfulWorkoutLog)
+    .map((log) => ({
+      weekNum: log.weekNum,
+      dayNum: log.dayNum,
+      sessionKey: log.sessionKey,
+      exerciseKey: log.exerciseKey,
+      exerciseName: log.exerciseName,
+      completed: log.completed,
+    }));
   const lockedPlanDays = new Set(logs.map((log) => planDayFromWeekDay(log.weekNum, log.dayNum)));
   const effectiveFrom = findNextUnloggedPlanDay({
     planStartDate: plan.startDate,
@@ -1583,14 +1598,16 @@ async function saveConfirmedFutureAdjustment(input: ConfirmedPlanAdjustmentInput
 
   const currentSnapshot = plan.currentVersion.planSnapshot;
   const profileSnapshot = parseProfileSnapshot(plan.currentVersion.profileSnapshot);
-  const logs: WorkoutLogDayMarker[] = plan.workoutLogs.map((log) => ({
-    weekNum: log.weekNum,
-    dayNum: log.dayNum,
-    sessionKey: log.sessionKey,
-    exerciseKey: log.exerciseKey,
-    exerciseName: log.exerciseName,
-    completed: log.completed,
-  }));
+  const logs: WorkoutLogDayMarker[] = plan.workoutLogs
+    .filter(hasMeaningfulWorkoutLog)
+    .map((log) => ({
+      weekNum: log.weekNum,
+      dayNum: log.dayNum,
+      sessionKey: log.sessionKey,
+      exerciseKey: log.exerciseKey,
+      exerciseName: log.exerciseName,
+      completed: log.completed,
+    }));
   const lockedPlanDays = new Set(logs.map((log) => planDayFromWeekDay(log.weekNum, log.dayNum)));
 
   const effectiveFrom = findNextUnloggedPlanDay({
@@ -1702,14 +1719,16 @@ async function saveConfirmedAiAdjustmentProposal(input: {
 
   const currentSnapshot = plan.currentVersion.planSnapshot;
   const profileSnapshot = parseProfileSnapshot(plan.currentVersion.profileSnapshot);
-  const logs: WorkoutLogDayMarker[] = plan.workoutLogs.map((log) => ({
-    weekNum: log.weekNum,
-    dayNum: log.dayNum,
-    sessionKey: log.sessionKey,
-    exerciseKey: log.exerciseKey,
-    exerciseName: log.exerciseName,
-    completed: log.completed,
-  }));
+  const logs: WorkoutLogDayMarker[] = plan.workoutLogs
+    .filter(hasMeaningfulWorkoutLog)
+    .map((log) => ({
+      weekNum: log.weekNum,
+      dayNum: log.dayNum,
+      sessionKey: log.sessionKey,
+      exerciseKey: log.exerciseKey,
+      exerciseName: log.exerciseName,
+      completed: log.completed,
+    }));
   const effectiveFrom = findNextUnloggedPlanDay({
     planStartDate: plan.startDate,
     currentDate: new Date(),
@@ -1913,6 +1932,7 @@ export async function applyPlanAdjustment(formData: FormData): Promise<{ error?:
       userId: session.userId,
       planId,
       weekNum,
+      ...meaningfulWorkoutLogWhere,
     },
     select: { id: true },
   });
@@ -1972,6 +1992,7 @@ export async function saveEditedWeek(formData: FormData): Promise<{ error?: stri
       userId: session.userId,
       planId,
       weekNum,
+      ...meaningfulWorkoutLogWhere,
     },
     select: { id: true },
   });

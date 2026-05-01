@@ -150,6 +150,7 @@ export default async function PlanPage({
         <PlanPageShell
           planId={plan.id}
           weeks={weeks}
+          planGuidance={planView.planGuidance}
           totalWeeks={totalWeeks}
           initialWeekIndex={currentWeekIndex}
           initialDayIndex={currentDayIndex}

@@ -14,9 +14,19 @@ const REPAIR_PROMPTS = [
   "Keep the same goal, but make the remaining weeks more conservative.",
 ];
 
+function DisclosureArrowHead({ open, className = "" }: { open: boolean; className?: string }) {
+  return (
+    <span
+      aria-hidden="true"
+      className={`inline-block h-0 w-0 border-y-[4px] border-l-[6px] border-y-transparent border-l-current transition-transform ${open ? "rotate-90" : ""} ${className}`}
+    />
+  );
+}
+
 interface PlanPageShellProps {
   planId: string;
   weeks: Parameters<typeof PlanWorkspace>[0]["weeks"];
+  planGuidance: Parameters<typeof PlanWorkspace>[0]["planGuidance"];
   totalWeeks: number;
   initialWeekIndex: number;
   initialDayIndex: number;
@@ -97,6 +107,7 @@ interface PlanPageShellProps {
 export default function PlanPageShell({
   planId,
   weeks,
+  planGuidance,
   totalWeeks,
   initialWeekIndex,
   initialDayIndex,
@@ -108,6 +119,7 @@ export default function PlanPageShell({
   const [coachOpen, setCoachOpen] = useState(false);
   const [completionPanelOpen, setCompletionPanelOpen] = useState(false);
   const [versionHistoryOpen, setVersionHistoryOpen] = useState(false);
+  const [summaryOpen, setSummaryOpen] = useState(true);
   const [repairNotes, setRepairNotes] = useState(summary.generationJob?.repairNotes ?? "");
   const [transientAdjustmentMetadata, setTransientAdjustmentMetadata] =
     useState<typeof summary.version.changeMetadata>(null);
@@ -169,7 +181,19 @@ export default function PlanPageShell({
         <div className="flex items-start justify-between gap-3">
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.16em] text-sky-700/70">Current Block</p>
-            <h2 className="mt-1 text-xl font-semibold text-slate-950">Your Plan Summary</h2>
+            <div className="mt-1 flex items-center gap-1.5">
+              <button
+                type="button"
+                aria-expanded={summaryOpen}
+                aria-label={summaryOpen ? "Collapse plan summary" : "Expand plan summary"}
+                title={summaryOpen ? "Collapse summary" : "Expand summary"}
+                onClick={() => setSummaryOpen((value) => !value)}
+                className="rounded p-0.5 text-slate-800 transition-colors hover:text-slate-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400"
+              >
+                <DisclosureArrowHead open={summaryOpen} />
+              </button>
+              <h2 className="text-xl font-semibold text-slate-950">Your Plan Summary</h2>
+            </div>
             <p className="mt-1 text-sm text-slate-600">
               {summary.currentGrade} to {summary.targetGrade} over {summary.weeksDuration} weeks
             </p>
@@ -193,7 +217,7 @@ export default function PlanPageShell({
               </div>
             )}
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center justify-end gap-2">
             <Button
               type="button"
               variant={versionHistoryOpen ? "default" : "outline"}
@@ -262,6 +286,8 @@ export default function PlanPageShell({
           </div>
         </div>
 
+        {summaryOpen && (
+          <>
         <div className="mt-4 flex flex-wrap gap-3 text-sm text-slate-700">
           <span>
             {summary.version.isPreview
@@ -508,11 +534,14 @@ export default function PlanPageShell({
             Week {activeWeek.weekNum} already has workout logs. Existing work is protected, but you can still add extra exercises from Edit Day.
           </p>
         )}
+          </>
+        )}
       </div>
 
       <PlanWorkspace
         planId={planId}
         weeks={weeks}
+        planGuidance={planGuidance}
         totalWeeks={totalWeeks}
         generation={summary.generation}
         sport={summary.sport}

@@ -14,6 +14,7 @@ export function countGeneratedWeeks(snapshot: PlanSnapshot | null | undefined) {
 
 export function composePlanSnapshotFromGeneratedWeeks(weeks: WeekSnapshot[]): PlanSnapshot {
   return {
+    planGuidance: null,
     weeks: weeks
       .slice()
       .sort((a, b) => a.weekNum - b.weekNum),

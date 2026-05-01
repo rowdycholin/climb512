@@ -38,6 +38,8 @@ export const PLAN_QUALITY_RULES = `COACHING QUALITY:
 - For ongoing goals, favor sustainable development and avoid peaking too aggressively.
 - Include strength training only when requested or clearly useful as support.
 - Keep prescriptions specific enough to track: sets, reps, duration, rest, and short coaching notes where applicable.
+- Include concise rich coaching fields where useful: week summary/progressionNote, day coachNotes, session objective/intensity/warmup/cooldown, and exercise modifications.
+- Make exercise prescriptions unambiguous with optional work/restBetweenReps/restBetweenSets/load/intensity/tempo/grade/sides/rounds fields when they clarify the assignment.
 - Do not include medical claims, diagnosis, nutrition prescriptions, supplement advice, or unrelated coaching.`;
 
 function buildWeekPrompt(input: PlanInput, weekNum: number): string {
@@ -84,7 +86,7 @@ ${input.equipment.includes("campus board") ? "- Campus board available: include 
 ${input.equipment.includes("weights") || input.equipment.includes("gym") ? "- Weights available: include weighted pull-ups and antagonist work." : "- No weights: use bodyweight only."}
 
 OUTPUT: Return ONLY a single JSON object (not an array) in this exact shape:
-{"weekNum":${weekNum},"theme":"<short theme>","days":[{"dayNum":1,"dayName":"Monday","focus":"<focus>","isRest":false,"sessions":[{"name":"<name>","description":"<one sentence>","duration":45,"exercises":[{"name":"<name>","sets":"3","reps":"5","duration":"10s","rest":"3 min","notes":"<coaching cue>"}]}]},{"dayNum":2,"dayName":"Tuesday","focus":"Rest","isRest":true,"sessions":[]},...7 days total]}
+{"weekNum":${weekNum},"theme":"<short theme>","summary":"<week purpose>","progressionNote":"<how this week progresses>","days":[{"dayNum":1,"dayName":"Monday","focus":"<focus>","isRest":false,"coachNotes":"<day intent>","sessions":[{"name":"Warm-up","description":"<one sentence>","duration":10,"objective":"<what to accomplish>","intensity":"RPE 3-4","exercises":[{"name":"<name>","duration":"5 min","notes":"<cue>"}]},{"name":"Main Session","description":"<one sentence>","duration":45,"objective":"<what to accomplish>","intensity":"<RPE/grade/effort>","exercises":[{"name":"<name>","sets":"3","reps":"5","work":"10s","restBetweenSets":"3 min","intensity":"RPE 7","grade":"<optional grade>","notes":"<cue>","modifications":"<easier/harder option>"}]},{"name":"Cooldown","description":"<one sentence>","duration":8,"cooldown":"<short cooldown guidance>","exercises":[{"name":"<name>","duration":"5 min","notes":"<cue>"}]}]},{"dayNum":2,"dayName":"Tuesday","focus":"Rest","isRest":true,"sessions":[]},...7 days total]}
 
 RULES:
 - Exactly 7 days (Monday–Sunday), dayNum 1–7
@@ -157,6 +159,12 @@ function asString(v: unknown): string | undefined {
   return undefined;
 }
 
+function cappedString(v: unknown, maxLength: number): string | undefined {
+  const value = asString(v);
+  if (!value) return undefined;
+  return value.length > maxLength ? value.slice(0, maxLength).trim() : value;
+}
+
 function normalizeWeek(raw: unknown, weekNum: number): WeekData {
   const week = (raw && typeof raw === "object") ? raw as Record<string, unknown> : {};
   const theme = asString(week.theme) ?? `Week ${weekNum}`;
@@ -201,14 +209,43 @@ function normalizeWeek(raw: unknown, weekNum: number): WeekData {
           reps: asString(ex.reps),
           duration: asString(ex.duration),
           rest: asString(ex.rest),
-          notes: asString(ex.notes),
+          notes: cappedString(ex.notes, 120),
+          rounds: cappedString(ex.rounds, 40),
+          work: cappedString(ex.work, 60),
+          restBetweenReps: cappedString(ex.restBetweenReps, 60),
+          restBetweenSets: cappedString(ex.restBetweenSets, 60),
+          load: cappedString(ex.load, 60),
+          intensity: cappedString(ex.intensity, 60),
+          tempo: cappedString(ex.tempo, 60),
+          distance: cappedString(ex.distance, 60),
+          grade: cappedString(ex.grade, 60),
+          sides: cappedString(ex.sides, 40),
+          holdType: cappedString(ex.holdType, 60),
+          prescriptionDetails: cappedString(ex.prescriptionDetails, 180),
+          modifications: cappedString(ex.modifications, 180),
         });
       }
 
-      sessions.push({ name, description, duration, exercises });
+      sessions.push({
+        name,
+        description: cappedString(sess.description, 180) ?? "",
+        duration,
+        objective: cappedString(sess.objective, 180),
+        intensity: cappedString(sess.intensity, 80),
+        warmup: cappedString(sess.warmup, 180),
+        cooldown: cappedString(sess.cooldown, 180),
+        exercises,
+      });
     }
 
-    daysByNum.set(dayNum, { dayNum, dayName, focus, isRest, sessions });
+    daysByNum.set(dayNum, {
+      dayNum,
+      dayName,
+      focus,
+      isRest,
+      coachNotes: cappedString(day.coachNotes, 220),
+      sessions,
+    });
   }
 
   for (let d = 1; d <= 7; d++) {
@@ -218,7 +255,13 @@ function normalizeWeek(raw: unknown, weekNum: number): WeekData {
   }
 
   const days = Array.from(daysByNum.values()).sort((a, b) => a.dayNum - b.dayNum);
-  return { weekNum, theme, days };
+  return {
+    weekNum,
+    theme,
+    summary: cappedString(week.summary, 220),
+    progressionNote: cappedString(week.progressionNote, 220),
+    days,
+  };
 }
 
 interface ApiResult {
@@ -298,7 +341,8 @@ export function validateGeneratedWeek(week: WeekData, expectedWeekNum: number): 
     if (day.dayName !== DAY_NAMES[index]) errors.push(`day ${expectedDayNum} must be ${DAY_NAMES[index]}`);
     if (!day.focus.trim()) errors.push(`day ${expectedDayNum} focus is required`);
     if (day.isRest && day.sessions.length > 0) errors.push(`day ${expectedDayNum} rest day must not have sessions`);
-    if (!day.isRest && day.sessions.length !== 1) errors.push(`day ${expectedDayNum} training day must have one session`);
+    if (!day.isRest && day.sessions.length < 1) errors.push(`day ${expectedDayNum} training day must have at least one session`);
+    if (!day.isRest && day.sessions.length > 3) errors.push(`day ${expectedDayNum} training day must have no more than three sessions`);
 
     for (const session of day.sessions) {
       if (!session.name.trim()) errors.push(`day ${expectedDayNum} session name is required`);
@@ -365,17 +409,18 @@ WEEK ${weekNum} of ${request.blockLengthWeeks}:
 ${PLAN_QUALITY_RULES}
 
 OUTPUT: Return ONLY a single JSON object (not an array) in this exact shape:
-{"weekNum":${weekNum},"theme":"<short theme>","days":[{"dayNum":1,"dayName":"Monday","focus":"<focus>","isRest":false,"sessions":[{"name":"<name>","description":"<one sentence>","duration":45,"exercises":[{"name":"<name>","sets":"3","reps":"5","duration":"10s","rest":"3 min","notes":"<coaching cue>"}]}]},{"dayNum":2,"dayName":"Tuesday","focus":"Rest","isRest":true,"sessions":[]},...7 days total]}
+{"weekNum":${weekNum},"theme":"<short theme>","summary":"<week purpose>","progressionNote":"<how this week progresses>","days":[{"dayNum":1,"dayName":"Monday","focus":"<focus>","isRest":false,"coachNotes":"<day intent>","sessions":[{"name":"Warm-up","description":"<one sentence>","duration":10,"objective":"<what to accomplish>","intensity":"RPE 3-4","exercises":[{"name":"<name>","duration":"5 min","notes":"<cue>"}]},{"name":"Main Session","description":"<one sentence>","duration":45,"objective":"<what to accomplish>","intensity":"<RPE/grade/effort>","exercises":[{"name":"<name>","sets":"3","reps":"5","work":"10s","restBetweenSets":"3 min","intensity":"RPE 7","grade":"<optional grade>","notes":"<cue>","modifications":"<easier/harder option>"}]},{"name":"Cooldown","description":"<one sentence>","duration":8,"cooldown":"<short cooldown guidance>","exercises":[{"name":"<name>","duration":"5 min","notes":"<cue>"}]}]},{"dayNum":2,"dayName":"Tuesday","focus":"Rest","isRest":true,"sessions":[]},...7 days total]}
 
 RULES:
 - Exactly 7 days (Monday-Sunday), dayNum 1-7
 - Rest days: isRest=true, sessions=[], focus="Rest"
-- Training days: exactly ONE session, 3-4 exercises max
+- Training days may have 1-3 sessions. Prefer Warm-up, Main Session, Cooldown when useful; this replaces any older one-session wording.
+- Main Session should contain 2-4 exercises; Warm-up/Cooldown should contain 1-2 exercises.
 - Choose exercises appropriate to the sport, goal, available equipment, and constraints
 - Respect athlete requested structure, named-day preferences, and requested workouts unless they conflict with safety, recovery, or the requested training-day count
 - Respect injuries, limitations, and avoid-exercise requests
 - notes: REQUIRED, max 10 words
-- sets/reps/duration/rest: include only what applies, omit the rest
+- Also include work/restBetweenReps/restBetweenSets/load/intensity/tempo/grade/sides/rounds when they clarify the assignment
 - All string values must be SHORT
 - Return ONLY compact minified JSON, no markdown, no explanation`;
 }
@@ -455,17 +500,15 @@ ${params.repairFeedback ? `- Repair feedback from the athlete/coach: ${params.re
 ${PLAN_QUALITY_RULES}
 
 OUTPUT: Return ONLY a single JSON object (not an array) in this exact shape:
-{"weekNum":${weekNum},"theme":"<short theme>","days":[{"dayNum":1,"dayName":"Monday","focus":"<focus>","isRest":false,"sessions":[{"name":"<name>","description":"<one sentence>","duration":45,"exercises":[{"name":"<name>","sets":"3","reps":"5","duration":"10s","rest":"3 min","notes":"<coaching cue>"}]}]},{"dayNum":2,"dayName":"Tuesday","focus":"Rest","isRest":true,"sessions":[]},...7 days total]}
+{"weekNum":${weekNum},"theme":"<short theme>","summary":"<week purpose>","progressionNote":"<how this week progresses>","days":[{"dayNum":1,"dayName":"Monday","focus":"<focus>","isRest":false,"coachNotes":"<day intent>","sessions":[{"name":"Warm-up","description":"<one sentence>","duration":10,"objective":"<what to accomplish>","intensity":"RPE 3-4","exercises":[{"name":"<name>","duration":"5 min","notes":"<cue>"}]},{"name":"Main Session","description":"<one sentence>","duration":45,"objective":"<what to accomplish>","intensity":"<RPE/grade/effort>","exercises":[{"name":"<name>","sets":"3","reps":"5","work":"10s","restBetweenSets":"3 min","intensity":"RPE 7","grade":"<optional grade>","notes":"<cue>","modifications":"<easier/harder option>"}]},{"name":"Cooldown","description":"<one sentence>","duration":8,"cooldown":"<short cooldown guidance>","exercises":[{"name":"<name>","duration":"5 min","notes":"<cue>"}]}]},{"dayNum":2,"dayName":"Tuesday","focus":"Rest","isRest":true,"sessions":[]},...7 days total]}
 
 RULES:
 - Exactly 7 days (Monday-Sunday), dayNum 1-7
 - Rest days: isRest=true, sessions=[], focus="Rest"
-- Training days: exactly ONE session, 3-4 exercises max
 - Choose exercises appropriate to the sport, goal, available equipment, and constraints
 - Respect athlete requested structure, named-day preferences, and requested workouts unless they conflict with safety, recovery, or the requested training-day count
 - Respect injuries, limitations, and avoid-exercise requests as hard constraints
 - notes: REQUIRED, max 10 words
-- sets/reps/duration/rest: include only what applies, omit the rest
 - All string values must be SHORT
 - Return ONLY compact minified JSON, no markdown, no explanation`;
 }
