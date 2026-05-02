@@ -1,6 +1,13 @@
 import { z } from "zod";
 import type { PlanRequest } from "./plan-request";
-import type { DaySnapshot, PlanSnapshot, ProfileSnapshot } from "./plan-snapshot";
+import type {
+  DaySnapshot,
+  ExerciseSnapshot,
+  PlanGuidance,
+  PlanSnapshot,
+  ProfileSnapshot,
+  SessionSnapshot,
+} from "./plan-snapshot";
 import {
   findNextUnloggedPlanDay,
   planDayFromWeekDay,
@@ -118,6 +125,12 @@ export const adjustmentGoalChangeSchema = z.object({
     .optional(),
 });
 
+const adjustmentRichChangeSummarySchema = z.object({
+  planGuidance: z.array(z.string()).default([]),
+  coaching: z.array(z.string()).default([]),
+  prescriptions: z.array(z.string()).default([]),
+});
+
 export const adjustmentChatProposalSchema = z.object({
   summary: z.string().trim().min(1).max(500),
   changes: z.array(z.string().trim().min(1).max(300)).min(1).max(12),
@@ -136,6 +149,7 @@ export const adjustmentChatProposalSchema = z.object({
   preservesOriginalGoal: z.boolean(),
   requiresGoalChangeConfirmation: z.boolean(),
   goalChange: adjustmentGoalChangeSchema.optional(),
+  richChanges: adjustmentRichChangeSummarySchema.optional(),
   revisedPlanSnapshot: adjustmentPlanSnapshotSchema,
 });
 
@@ -160,6 +174,7 @@ export type AdjustmentChatState = z.infer<typeof adjustmentChatStateSchema>;
 export type AdjustmentChatModelResponse = z.infer<typeof adjustmentChatModelResponseSchema>;
 export type AdjustmentChatProposal = z.infer<typeof adjustmentChatProposalSchema>;
 export type AdjustmentProposalValidationResult = z.infer<typeof adjustmentProposalValidationResultSchema>;
+export type AdjustmentRichChangeSummary = z.infer<typeof adjustmentRichChangeSummarySchema>;
 
 export interface AdjustmentChatContext {
   planId: string;
@@ -177,6 +192,7 @@ export interface AdjustmentChatContext {
     id: string;
     versionNum: number;
   };
+  planGuidance: PlanGuidance | null;
   activeView?: {
     weekNum: number;
     dayNum: number | null;
@@ -198,13 +214,39 @@ export interface AdjustmentChatContext {
     planDay: number;
     focus: string;
     isRest: boolean;
+    summary?: string | null;
+    progressionNote?: string | null;
+    coachNotes?: string | null;
     sessions: Array<{
       key: string;
       name: string;
+      description: string;
       duration: number;
+      objective?: string | null;
+      intensity?: string | null;
+      warmup?: string | null;
+      cooldown?: string | null;
       exercises: Array<{
         key: string;
         name: string;
+        sets: string | null;
+        reps: string | null;
+        duration: string | null;
+        rest: string | null;
+        notes: string | null;
+        rounds?: string | null;
+        work?: string | null;
+        restBetweenReps?: string | null;
+        restBetweenSets?: string | null;
+        load?: string | null;
+        intensity?: string | null;
+        tempo?: string | null;
+        distance?: string | null;
+        grade?: string | null;
+        sides?: string | null;
+        holdType?: string | null;
+        prescriptionDetails?: string | null;
+        modifications?: string | null;
       }>;
     }>;
   }>;
@@ -259,6 +301,41 @@ function lockedCompletedDays(logs: WorkoutLogDayMarker[]) {
   return Array.from(byPlanDay.values()).sort((a, b) => a.planDay - b.planDay);
 }
 
+function richSessionContext(session: SessionSnapshot) {
+  return {
+    key: session.key,
+    name: session.name,
+    description: session.description,
+    duration: session.duration,
+    objective: session.objective ?? null,
+    intensity: session.intensity ?? null,
+    warmup: session.warmup ?? null,
+    cooldown: session.cooldown ?? null,
+    exercises: session.exercises.map((exercise) => ({
+      key: exercise.key,
+      name: exercise.name,
+      sets: exercise.sets,
+      reps: exercise.reps,
+      duration: exercise.duration,
+      rest: exercise.rest,
+      notes: exercise.notes,
+      rounds: exercise.rounds ?? null,
+      work: exercise.work ?? null,
+      restBetweenReps: exercise.restBetweenReps ?? null,
+      restBetweenSets: exercise.restBetweenSets ?? null,
+      load: exercise.load ?? null,
+      intensity: exercise.intensity ?? null,
+      tempo: exercise.tempo ?? null,
+      distance: exercise.distance ?? null,
+      grade: exercise.grade ?? null,
+      sides: exercise.sides ?? null,
+      holdType: exercise.holdType ?? null,
+      prescriptionDetails: exercise.prescriptionDetails ?? null,
+      modifications: exercise.modifications ?? null,
+    })),
+  };
+}
+
 export function buildAdjustmentChatContext(params: {
   planId: string;
   planStartDate: Date;
@@ -295,6 +372,7 @@ export function buildAdjustmentChatContext(params: {
       id: params.currentVersion.id,
       versionNum: params.currentVersion.versionNum,
     },
+    planGuidance: params.currentVersion.planSnapshot.planGuidance ?? null,
     activeView: params.activeView
       ? {
           weekNum: params.activeView.weekNum,
@@ -313,15 +391,10 @@ export function buildAdjustmentChatContext(params: {
       planDay,
       focus: day.focus,
       isRest: day.isRest,
-      sessions: day.sessions.map((session) => ({
-        key: session.key,
-        name: session.name,
-        duration: session.duration,
-        exercises: session.exercises.map((exercise) => ({
-          key: exercise.key,
-          name: exercise.name,
-        })),
-      })),
+      summary: week.summary ?? null,
+      progressionNote: week.progressionNote ?? null,
+      coachNotes: day.coachNotes ?? null,
+      sessions: day.sessions.map(richSessionContext),
     })),
   };
 }
@@ -343,6 +416,9 @@ Boundaries:
 - Keep all locked days unchanged.
 - Keep stable keys for existing weeks, days, sessions, and exercises. New sessions or exercises may use new unique keys.
 - Declare every changed day in changedDays and every changed week in changedWeeks.
+- Preserve planGuidance and rich coaching fields unless the user's request intentionally changes the larger training intent.
+- Preserve structured prescription fields such as work, restBetweenSets, load, intensity, grade, tempo, distance, and modifications when changing unrelated text.
+- When work/rest/load/intensity or coaching details change, mention those details in the proposal summary or changedDays summaries.
 
 Return JSON only.`;
 }
@@ -366,6 +442,9 @@ IMPORTANT PROPOSAL RULES:
 - Unchanged weeks and days must still be present.
 - Locked history and logged exercise days must be byte-for-byte unchanged.
 - changedDays must list every day whose snapshot changed.
+- Keep planGuidance in revisedPlanSnapshot. Only change it when the overall plan intent, recovery strategy, progression, or recommendations materially change.
+- Keep rich coaching fields and structured exercise prescriptions on unchanged days exactly as they are.
+- When changing a day, preserve useful coachNotes, session objective/intensity/warmup/cooldown, exercise modifications, and structured prescription fields unless the change intentionally updates them.
 - If the user wants to change sport, goal, target level/date, event, block length, or training days per week, set requiresGoalChangeConfirmation to true.
 
 FOLLOW_UP SHAPE:
@@ -390,6 +469,138 @@ PROPOSAL SHAPE:
     "revisedPlanSnapshot": { "weeks": [] }
   }
 }`;
+}
+
+function nullableText(value: unknown) {
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function changedText(label: string, before: unknown, after: unknown) {
+  const oldValue = nullableText(before);
+  const newValue = nullableText(after);
+  if (oldValue === newValue) return null;
+  if (oldValue && newValue) return `${label}: ${oldValue} -> ${newValue}`;
+  if (newValue) return `${label}: added ${newValue}`;
+  return `${label}: removed`;
+}
+
+function objectChanged(before: unknown, after: unknown) {
+  return JSON.stringify(before ?? null) !== JSON.stringify(after ?? null);
+}
+
+function sessionByKey(day: DaySnapshot) {
+  return new Map(day.sessions.map((session) => [session.key, session]));
+}
+
+function exerciseByKey(session: SessionSnapshot) {
+  return new Map(session.exercises.map((exercise) => [exercise.key, exercise]));
+}
+
+const sessionRichFields = ["objective", "intensity", "warmup", "cooldown"] as const;
+const exercisePrescriptionFields = [
+  "sets",
+  "reps",
+  "duration",
+  "rest",
+  "rounds",
+  "work",
+  "restBetweenReps",
+  "restBetweenSets",
+  "load",
+  "intensity",
+  "tempo",
+  "distance",
+  "grade",
+  "sides",
+  "holdType",
+  "prescriptionDetails",
+  "modifications",
+] as const;
+
+function dayLabel(weekNum: number, day: DaySnapshot) {
+  return `Week ${weekNum}, ${day.dayName}`;
+}
+
+function summarizePlanGuidanceChanges(original: PlanSnapshot, adjusted: PlanSnapshot) {
+  const changes: string[] = [];
+  const originalGuidance = original.planGuidance ?? null;
+  const adjustedGuidance = adjusted.planGuidance ?? null;
+
+  if (!objectChanged(originalGuidance, adjustedGuidance)) return changes;
+  if (!originalGuidance && adjustedGuidance) return ["Plan guidance added"];
+  if (originalGuidance && !adjustedGuidance) return ["Plan guidance removed"];
+
+  for (const field of ["overview", "intensityDistribution", "progressionPrinciples", "recoveryPrinciples", "recommendations", "progressionTable"] as const) {
+    if (objectChanged(originalGuidance?.[field], adjustedGuidance?.[field])) {
+      changes.push(`Plan guidance ${field} changed`);
+    }
+  }
+
+  return changes;
+}
+
+export function summarizeRichSnapshotChanges(params: {
+  original: PlanSnapshot;
+  adjusted: PlanSnapshot;
+  effectiveFromPlanDay: number;
+}): AdjustmentRichChangeSummary {
+  const planGuidance = summarizePlanGuidanceChanges(params.original, params.adjusted);
+  const coaching: string[] = [];
+  const prescriptions: string[] = [];
+  const adjustedWeeks = new Map(params.adjusted.weeks.map((week) => [week.weekNum, week]));
+
+  for (const originalWeek of params.original.weeks) {
+    const adjustedWeek = adjustedWeeks.get(originalWeek.weekNum);
+    if (!adjustedWeek) continue;
+
+    const weekSummaryChange = changedText(`Week ${originalWeek.weekNum} summary`, originalWeek.summary, adjustedWeek.summary);
+    if (weekSummaryChange) coaching.push(weekSummaryChange);
+    const weekProgressionChange = changedText(`Week ${originalWeek.weekNum} progression`, originalWeek.progressionNote, adjustedWeek.progressionNote);
+    if (weekProgressionChange) coaching.push(weekProgressionChange);
+
+    const adjustedDays = new Map(adjustedWeek.days.map((day) => [day.dayNum, day]));
+    for (const originalDay of originalWeek.days) {
+      const planDay = planDayFromWeekDay(originalWeek.weekNum, originalDay.dayNum);
+      if (planDay < params.effectiveFromPlanDay) continue;
+      const adjustedDay = adjustedDays.get(originalDay.dayNum);
+      if (!adjustedDay) continue;
+
+      const coachNotesChange = changedText(`${dayLabel(originalWeek.weekNum, originalDay)} coach notes`, originalDay.coachNotes, adjustedDay.coachNotes);
+      if (coachNotesChange) coaching.push(coachNotesChange);
+
+      const adjustedSessions = sessionByKey(adjustedDay);
+      for (const originalSession of originalDay.sessions) {
+        const adjustedSession = adjustedSessions.get(originalSession.key);
+        if (!adjustedSession) continue;
+
+        for (const field of sessionRichFields) {
+          const change = changedText(`${dayLabel(originalWeek.weekNum, originalDay)} ${originalSession.name} ${field}`, originalSession[field], adjustedSession[field]);
+          if (change) coaching.push(change);
+        }
+
+        const adjustedExercises = exerciseByKey(adjustedSession);
+        for (const originalExercise of originalSession.exercises) {
+          const adjustedExercise = adjustedExercises.get(originalExercise.key);
+          if (!adjustedExercise) continue;
+
+          for (const field of exercisePrescriptionFields) {
+            const change = changedText(
+              `${dayLabel(originalWeek.weekNum, originalDay)} ${originalExercise.name} ${field}`,
+              originalExercise[field as keyof ExerciseSnapshot],
+              adjustedExercise[field as keyof ExerciseSnapshot],
+            );
+            if (change) prescriptions.push(change);
+          }
+        }
+      }
+    }
+  }
+
+  return adjustmentRichChangeSummarySchema.parse({
+    planGuidance: planGuidance.slice(0, 6),
+    coaching: coaching.slice(0, 10),
+    prescriptions: prescriptions.slice(0, 12),
+  });
 }
 
 function addUniqueError(errors: string[], message: string) {
@@ -646,31 +857,32 @@ export function validateAdjustmentChatProposal(params: {
 
   const proposal = parsed.data;
   const adjusted = proposal.revisedPlanSnapshot;
+  const original = adjustmentPlanSnapshotSchema.parse(params.originalSnapshot);
 
   if (proposal.effectiveFromPlanDay < params.effectiveFromPlanDay) {
     errors.push("Adjustment proposal starts before the first editable plan day");
   }
 
   try {
-    validateLockedHistoryUnchanged(params.originalSnapshot, adjusted, params.effectiveFromPlanDay);
+    validateLockedHistoryUnchanged(original, adjusted, params.effectiveFromPlanDay);
   } catch (error) {
     errors.push((error as Error).message);
   }
 
-  for (const error of validateOriginalStructure(params.originalSnapshot, adjusted)) {
+  for (const error of validateOriginalStructure(original, adjusted)) {
     addUniqueError(errors, error);
   }
   for (const error of collectDuplicateKeys(adjusted)) {
     addUniqueError(errors, error);
   }
-  for (const error of validateFutureDayIdentity(params.originalSnapshot, adjusted, params.effectiveFromPlanDay)) {
+  for (const error of validateFutureDayIdentity(original, adjusted, params.effectiveFromPlanDay)) {
     addUniqueError(errors, error);
   }
-  for (const error of validateExistingKeyParents(params.originalSnapshot, adjusted)) {
+  for (const error of validateExistingKeyParents(original, adjusted)) {
     addUniqueError(errors, error);
   }
   for (const error of validateChangedDays({
-    original: params.originalSnapshot,
+    original,
     adjusted,
     proposal,
     effectiveFromPlanDay: params.effectiveFromPlanDay,

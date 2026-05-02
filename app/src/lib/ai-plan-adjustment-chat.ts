@@ -8,7 +8,10 @@ import {
 } from "./plan-adjustment-chat";
 
 const MODEL = process.env.ANTHROPIC_MODEL ?? "anthropic/claude-haiku-4-5";
-const MAX_TOKENS = parseInt(process.env.ANTHROPIC_ADJUSTMENT_MAX_TOKENS ?? "12000", 10);
+const MAX_TOKENS = parseInt(
+  process.env.ANTHROPIC_ADJUSTMENT_MAX_TOKENS ?? process.env.ANTHROPIC_MAX_TOKENS ?? "12000",
+  10,
+);
 const BASE_URL = (process.env.ANTHROPIC_BASE_URL ?? "https://openrouter.ai/api").replace(/\/$/, "");
 const API_KEY = process.env.ANTHROPIC_API_KEY ?? "";
 const USE_LOCAL_SIMULATOR = /^https?:\/\/(simulator|localhost|127\.0\.0\.1)(:\d+)?$/i.test(BASE_URL);

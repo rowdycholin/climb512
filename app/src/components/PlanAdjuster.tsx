@@ -33,6 +33,7 @@ interface Proposal {
   scopeLabel: string;
   requiresGoalChangeConfirmation: boolean;
   previewGroups: string[];
+  richPreviewGroups: string[];
   previewDetails: Array<{
     weekNum: number;
     dayNum: number;
@@ -348,6 +349,7 @@ function buildProposal(messages: ChatMessage[], latestMessage: string, weeks: We
     scopeLabel: scopeLabel(scope),
     requiresGoalChangeConfirmation,
     previewGroups: preview.groups,
+    richPreviewGroups: [],
     previewDetails: preview.details,
   };
 }
@@ -396,6 +398,11 @@ function aiProposalFromRaw(rawProposal: string, feedback: string, weeks: Week[])
     changedDays: Array<{ weekNum: number; dayNum: number; planDay: number; summary: string }>;
     effectiveFromPlanDay: number;
     requiresGoalChangeConfirmation: boolean;
+    richChanges?: {
+      planGuidance?: string[];
+      coaching?: string[];
+      prescriptions?: string[];
+    };
   };
   const effective = weekDayFromPlanDay(parsed.effectiveFromPlanDay);
   const dayNameByRef = new Map<string, { dayName: string; focus: string }>();
@@ -413,6 +420,11 @@ function aiProposalFromRaw(rawProposal: string, feedback: string, weeks: Week[])
     scope: { type: "future_from_day", startWeek: effective.weekNum, startDay: effective.dayNum },
     scopeLabel: `From Week ${effective.weekNum}, Day ${effective.dayNum} through plan end`,
     requiresGoalChangeConfirmation: parsed.requiresGoalChangeConfirmation,
+    richPreviewGroups: [
+      ...(parsed.richChanges?.planGuidance ?? []),
+      ...(parsed.richChanges?.coaching ?? []),
+      ...(parsed.richChanges?.prescriptions ?? []),
+    ],
     previewGroups: [
       `Changed ${parsed.changedDays.length} day${parsed.changedDays.length === 1 ? "" : "s"} across ${parsed.changedWeeks.length} week${parsed.changedWeeks.length === 1 ? "" : "s"}.`,
       "Logged days stay protected; exact changed days are highlighted after apply.",
@@ -578,7 +590,7 @@ export default function PlanAdjuster({
     formData.set("feedback", proposal.feedback);
     formData.set("adjustmentScope", JSON.stringify(proposal.scope));
     formData.set("proposalSummary", proposal.summary);
-    formData.set("proposalChanges", JSON.stringify([...proposal.changes, ...proposal.previewGroups]));
+    formData.set("proposalChanges", JSON.stringify([...proposal.changes, ...proposal.previewGroups, ...proposal.richPreviewGroups]));
     formData.set("requiresGoalChangeConfirmation", proposal.requiresGoalChangeConfirmation ? "true" : "false");
     formData.set("goalChangeConfirmed", goalChangeConfirmed ? "true" : "false");
     if (proposal.rawProposal) formData.set("proposal", proposal.rawProposal);
@@ -715,6 +727,19 @@ export default function PlanAdjuster({
                 </li>
               ))}
             </ul>
+            {proposal.richPreviewGroups.length > 0 && (
+              <div className="mt-3 rounded-lg border border-sky-200 bg-white/70 px-3 py-2">
+                <p className="text-xs font-semibold uppercase tracking-[0.12em] text-sky-700">Rich detail changes</p>
+                <ul className="mt-2 space-y-1 text-xs text-slate-700">
+                  {proposal.richPreviewGroups.map((change) => (
+                    <li key={change} className="flex gap-2">
+                      <span aria-hidden="true">-</span>
+                      <span>{change}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
             {!proposal.rawProposal && (
             <div className="mt-3 rounded-lg border border-sky-200 bg-white/70 px-3 py-2">
               <p className="text-xs font-semibold uppercase tracking-[0.12em] text-sky-700">Scope override</p>

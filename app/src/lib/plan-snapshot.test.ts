@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { buildPlanGuidance, buildPlanSnapshot, buildPlanView } from "./plan-snapshot";
+import { buildPlanGuidance, buildPlanSnapshot, buildPlanView, hasMeaningfulWorkoutLog } from "./plan-snapshot";
 import type { WeekData } from "./plan-types";
 
 const richWeek: WeekData = {
@@ -122,6 +122,7 @@ describe("plan snapshot canonical rich shape", () => {
         weightUsed: null,
         durationActual: "30 sec",
         notes: "Felt controlled",
+        actuals: null,
         completed: true,
       },
     ]);
@@ -136,6 +137,33 @@ describe("plan snapshot canonical rich shape", () => {
       durationActual: "30 sec",
       completed: true,
     });
+  });
+
+  test("filters empty accidental log rows but keeps quick completion and structured actuals", () => {
+    const emptyLog = {
+      id: "log-empty",
+      exerciseKey: "w1-d1-s2-e1-tb2-board-technique-hangs",
+      setsCompleted: null,
+      repsCompleted: null,
+      weightUsed: null,
+      durationActual: null,
+      notes: null,
+      actuals: null,
+      completed: false,
+    };
+    expect(hasMeaningfulWorkoutLog(emptyLog)).toBe(false);
+    expect(hasMeaningfulWorkoutLog({ ...emptyLog, completed: true })).toBe(true);
+    expect(hasMeaningfulWorkoutLog({
+      ...emptyLog,
+      actuals: {
+        mode: "sets",
+        entries: [{ set: 1, reps: "6", load: "20 lb", completed: false }],
+      },
+    })).toBe(true);
+
+    const snapshot = buildPlanSnapshot([richWeek]);
+    const view = buildPlanView(snapshot, [emptyLog]);
+    expect(view.weeks[0].days[0].sessions[1].exercises[0].logs).toEqual([]);
   });
 
   test("builds bounded plan-level guidance from profile and generated weeks", () => {

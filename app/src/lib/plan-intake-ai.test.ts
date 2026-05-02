@@ -2,11 +2,15 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 import { createInitialIntakeDraft } from "./intake";
 import { PLAN_GENERATION_SYSTEM_PROMPT, PLAN_QUALITY_RULES } from "./ai-plan-generator";
 import {
+  buildCoachIntakePrompt,
   continuePlanIntakeWithAiContract,
   firstQuestionOnly,
   INTAKE_READY_MESSAGE,
+  INTAKE_TRUNCATED_MESSAGE,
   INTAKE_VALIDATION_FALLBACK_MESSAGE,
   isPlanIntakeMessageAllowed,
+  looksLikeTruncatedAssistantMessage,
+  nextNonDuplicateQuestion,
   PLAN_INTAKE_SYSTEM_PROMPT,
   validatePlanIntakeAiResponse,
 } from "./plan-intake-ai";
@@ -374,6 +378,50 @@ describe("plan intake AI contract", () => {
     expect(response.draft.planStructureNotes).toContain("Freerider");
   });
 
+  test("recovers conversation context instead of repeating the opening sport question", async () => {
+    const messages = [
+      { role: "assistant" as const, content: "What sport or discipline would you like to train for?" },
+      { role: "user" as const, content: "Bouldering" },
+      { role: "assistant" as const, content: "What's your main goal right now?" },
+      { role: "user" as const, content: "Climb Burden of Dreams" },
+      { role: "assistant" as const, content: "When are you hoping to send it?" },
+      { role: "user" as const, content: "November of this year" },
+      { role: "assistant" as const, content: "What's your current bouldering level?" },
+      { role: "user" as const, content: "I climb V12-v13" },
+      { role: "assistant" as const, content: "How many days per week can you realistically train right now?" },
+      { role: "user" as const, content: "5 days per week" },
+      { role: "assistant" as const, content: "Do you have any injuries or pain I should account for in your training?" },
+      { role: "user" as const, content: "No." },
+      {
+        role: "assistant" as const,
+        content: "Just to confirm: you want this first block to be 4 weeks instead of the full 26 weeks to November, correct?",
+      },
+    ];
+
+    const response = await continuePlanIntakeWithAiContract({
+      draft: createInitialIntakeDraft(),
+      userMessage: "Yes",
+      messages,
+    });
+
+    expect(response.draft.sport).toBe("climbing");
+    expect(response.draft.disciplines).toContain("bouldering");
+    expect(response.draft.goalDescription).toContain("Burden of Dreams");
+    expect(response.draft.blockLengthWeeks).toBe(4);
+    expect(response.assistantMessage).not.toMatch(/what sport or discipline/i);
+  });
+
+  test("asks about strength training instead of looping on generic constraints when strength is missing", () => {
+    const { strengthTraining: _strengthTraining, ...draftWithoutStrength } = completeDraft;
+    const response = validatePlanIntakeAiResponse({
+      status: "needs_more_info",
+      message: "",
+      planRequestDraft: draftWithoutStrength,
+    });
+
+    expect(response.message).toBe("Do you want strength training included in this plan?");
+  });
+
   test("ready intake responses point users to the magic wand button", async () => {
     const response = await continuePlanIntakeWithAiContract({
       draft: completeDraft,
@@ -453,6 +501,45 @@ describe("plan intake AI contract", () => {
         "How many days per week can you train, and what's your current climbing level—are you a beginner, intermediate, or advanced climber?",
       ),
     ).toBe("How many days per week can you train?");
+
+    expect(
+      firstQuestionOnly(
+        "Six days a week is solid commitment for a serious project. Before I dial in the workouts, what is your current training level?",
+      ),
+    ).toBe(
+      "Six days a week is solid commitment for a serious project. Before I dial in the workouts, what is your current training level?",
+    );
+  });
+
+  test("detects obviously truncated assistant messages", () => {
+    expect(
+      looksLikeTruncatedAssistantMessage(
+        "Six days a week is solid commitment for a project like that. Before I dial in the workouts, I need to underst?",
+      ),
+    ).toBe(true);
+
+    expect(
+      looksLikeTruncatedAssistantMessage(
+        "Six days a week is solid commitment for a serious project. Before I dial in the workouts, what is your current training level?",
+      ),
+    ).toBe(false);
+  });
+
+  test("does not synthesize a hard-coded intake question for truncated provider output", () => {
+    const message = nextNonDuplicateQuestion({
+      status: "needs_more_info",
+      message: "Six days a week is solid commitment. Before I dial in the workouts, I need to underst?",
+      planRequestDraft: {
+        sport: "climbing",
+        goalDescription: "Climb a hard boulder",
+        goalType: "event",
+        blockLengthWeeks: 4,
+        daysPerWeek: 6,
+      },
+    });
+
+    expect(message).toBe(INTAKE_TRUNCATED_MESSAGE);
+    expect(message).not.toMatch(/sport|level|equipment|strength|injur/i);
   });
 
   test("blocks general-assistant requests before they reach the intake simulator", () => {
@@ -466,9 +553,30 @@ describe("plan intake AI contract", () => {
     expect(PLAN_INTAKE_SYSTEM_PROMPT).toContain("hacking, malware, phishing");
     expect(PLAN_INTAKE_SYSTEM_PROMPT).toContain("Run a flexible coach-led interview");
     expect(PLAN_INTAKE_SYSTEM_PROMPT).toContain("not a rigid form");
-    expect(PLAN_INTAKE_SYSTEM_PROMPT).toContain("Ask exactly one concise question");
+    expect(PLAN_INTAKE_SYSTEM_PROMPT).toContain("Ask one primary question");
     expect(PLAN_INTAKE_SYSTEM_PROMPT).toContain("after constraints are present");
+    expect(PLAN_INTAKE_SYSTEM_PROMPT).toContain("natural negative answer");
+    expect(PLAN_INTAKE_SYSTEM_PROMPT).toContain('"injuries": [], "limitations": [], "avoidExercises": []');
+    expect(PLAN_INTAKE_SYSTEM_PROMPT).toContain("brief coaching reaction, encouragement, or light joke");
+    expect(PLAN_INTAKE_SYSTEM_PROMPT).toContain("unusually ambitious");
+    expect(PLAN_INTAKE_SYSTEM_PROMPT).toContain("do not sound like a questionnaire");
     expect(PLAN_INTAKE_SYSTEM_PROMPT).toContain("planStructureNotes");
+  });
+
+  test("documents model-led intake sequencing in the live prompt", () => {
+    const prompt = buildCoachIntakePrompt({
+      draft: { sport: "running", daysPerWeek: 4 },
+      userMessage: "I want to train for a 10k.",
+      messages: [],
+      clientToday: "2026-05-01",
+    });
+
+    expect(prompt).toContain("Treat MISSING_REQUIRED_FIELDS as background state, not as a script");
+    expect(prompt).toContain("readiness checkpoints, not a separate fixed interview script");
+    expect(prompt).toContain("Infer reasonable structured values from natural answers");
+    expect(prompt).toContain("Do not sound like a form");
+    expect(prompt).toContain("one or two short coaching sentences");
+    expect(prompt).toContain("Never silently increase daysPerWeek");
   });
 
   test("defines narrow plan-generation prompts for live model calls", () => {

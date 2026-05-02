@@ -47,6 +47,7 @@ import {
   buildAdjustmentChatContext,
   createAdjustmentChatState,
   adjustmentChatProposalSchema,
+  summarizeRichSnapshotChanges,
   validateAdjustmentChatProposal,
   type AdjustmentChatMessage,
   type AdjustmentChatProposal,
@@ -576,11 +577,83 @@ function durationText(value: string | null, direction: "easier" | "harder") {
   return `${Math.max(1, current + delta)}${match[2]}`;
 }
 
+function isRunningExercise(exercise: ExerciseSnapshot) {
+  const text = `${exercise.name} ${exercise.notes ?? ""} ${exercise.intensity ?? ""} ${exercise.distance ?? ""}`.toLowerCase();
+  return /\brun|jog|stride|tempo|interval|pace|aerobic|walk\b/.test(text);
+}
+
+function isWarmupOrCooldownExercise(exercise: ExerciseSnapshot) {
+  return /\bwarm[- ]?up|cooldown|cool[- ]?down|mobility|walk\b/i.test(exercise.name);
+}
+
+function isStrengthExercise(exercise: ExerciseSnapshot) {
+  return /\bstrength|circuit|step[- ]?up|rdl|deadlift|squat|lunge|raise|calf|bridge|row|press\b/i.test(exercise.name);
+}
+
+function easierRunningIntensity(exercise: ExerciseSnapshot) {
+  if (/\btempo|interval|stride|repeat|hard|fast\b/i.test(exercise.name)) return "RPE 5-6";
+  return "RPE 3-4";
+}
+
+function easierRunningNotes(exercise: ExerciseSnapshot) {
+  if (/\btempo|interval|stride|repeat|hard|fast\b/i.test(exercise.name)) {
+    return "Dial this back to controlled aerobic work; finish with legs fresher than usual.";
+  }
+  if (isWarmupOrCooldownExercise(exercise)) {
+    return exercise.notes ?? "Keep this relaxed and easy.";
+  }
+  return "Keep this conversational and reduce pace before reducing form quality.";
+}
+
+function adjustedRunningExercise(exercise: ExerciseSnapshot, direction: "easier" | "harder"): ExerciseSnapshot {
+  if (direction === "harder") {
+    return {
+      ...exercise,
+      duration: durationText(exercise.duration, "harder"),
+      work: durationText(exercise.work ?? null, "harder") ?? exercise.work ?? null,
+      sets: numberText(exercise.sets, "harder"),
+      intensity: exercise.intensity ?? "RPE 6-7",
+      notes: "Progress only if form and breathing stay controlled.",
+    };
+  }
+
+  if (isWarmupOrCooldownExercise(exercise)) {
+    return {
+      ...exercise,
+      intensity: exercise.intensity ? "RPE 2-3" : exercise.intensity ?? null,
+      notes: easierRunningNotes(exercise),
+    };
+  }
+
+  if (isStrengthExercise(exercise)) {
+    return {
+      ...exercise,
+      sets: numberText(exercise.sets, "easier"),
+      intensity: "RPE 5-6",
+      notes: "Keep this supportive, not fatiguing; leave 3-4 reps in reserve.",
+    };
+  }
+
+  const nextDuration = durationText(exercise.duration, "easier");
+  return {
+    ...exercise,
+    sets: numberText(exercise.sets, "easier"),
+    duration: nextDuration,
+    work: durationText(exercise.work ?? null, "easier") ?? exercise.work ?? null,
+    intensity: easierRunningIntensity(exercise),
+    notes: easierRunningNotes(exercise),
+  };
+}
+
 function adjustedExercise(exercise: ExerciseSnapshot, reason: PlanAdjustmentReason, feedback: string) {
   const feedbackText = feedback.toLowerCase();
   const easier = reason === "too_hard" || reason === "injury" || reason === "travel" || reason === "missed_time" || feedbackText.includes("easy");
   const harder = reason === "too_easy" || feedbackText.includes("harder") || feedbackText.includes("more");
   const direction = harder && !easier ? "harder" : "easier";
+
+  if (isRunningExercise(exercise) && (/\bleg|run|pace|intensity|load|heavy\b/.test(feedbackText) || direction === "harder")) {
+    return adjustedRunningExercise(exercise, direction);
+  }
 
   return {
     ...exercise,
@@ -595,15 +668,25 @@ function adjustedExercise(exercise: ExerciseSnapshot, reason: PlanAdjustmentReas
 
 function adjustedDay(day: DaySnapshot, reason: PlanAdjustmentReason, feedback: string): DaySnapshot {
   if (day.isRest || day.sessions.length === 0) return day;
+  const feedbackText = feedback.toLowerCase();
+  const easier = reason === "too_hard" || reason === "injury" || reason === "travel" || reason === "missed_time" || /\bleg|heavy|reduce|decrease|less|fatigue|recover/.test(feedbackText);
+  const isRunningDay = day.sessions.some((session) => session.exercises.some(isRunningExercise));
 
   return {
     ...day,
     focus: reason === "injury" ? "Modified Training" : day.focus,
     sessions: day.sessions.map((session) => ({
       ...session,
-      duration: reason === "too_easy" ? session.duration + 5 : Math.max(20, session.duration - 5),
+      duration: isRunningDay && easier
+        ? session.duration
+        : reason === "too_easy"
+          ? session.duration + 5
+          : Math.max(20, session.duration - 5),
+      intensity: isRunningDay && easier ? "RPE 3-5" : session.intensity,
       description: reason === "too_easy"
         ? "Use a stronger training stimulus while movement quality stays high."
+        : isRunningDay && easier
+          ? "Reduce intensity and keep the work aerobic so the legs can recover."
         : "Protect recovery and keep the session consistent.",
       exercises: session.exercises.map((exercise) => adjustedExercise(exercise, reason, feedback)),
     })),
@@ -640,6 +723,71 @@ const meaningfulWorkoutLogWhere = {
     { notes: { not: null } },
   ],
 };
+
+function textValue(formData: FormData, key: string) {
+  const value = formData.get(key);
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function parseDetailedActuals(formData: FormData) {
+  const mode = textValue(formData, "actualMode");
+  const rowCount = parseInt(textValue(formData, "actualRowCount") ?? "0", 10);
+  if (!mode || !Number.isFinite(rowCount) || rowCount <= 0) return null;
+
+  const prefix = mode === "sets" ? "set" : mode === "intervals" ? "interval" : mode === "attempts" ? "attempt" : "summary";
+  const entries = Array.from({ length: rowCount }, (_, index) => {
+    const row = index + 1;
+    if (mode === "sets") {
+      return {
+        set: row,
+        completed: formData.get(`${prefix}-${row}-completed`) === "on",
+        reps: textValue(formData, `${prefix}-${row}-reps`),
+        target: textValue(formData, `${prefix}-${row}-target`) ?? textValue(formData, `${prefix}-${row}-load`),
+        rpe: textValue(formData, `${prefix}-${row}-rpe`),
+        notes: textValue(formData, `${prefix}-${row}-notes`),
+      };
+    }
+    if (mode === "intervals") {
+      return {
+        interval: row,
+        completed: formData.get(`${prefix}-${row}-completed`) === "on",
+        work: textValue(formData, `${prefix}-${row}-work`),
+        rest: textValue(formData, `${prefix}-${row}-rest`),
+        rpe: textValue(formData, `${prefix}-${row}-rpe`),
+        notes: textValue(formData, `${prefix}-${row}-notes`),
+      };
+    }
+    if (mode === "attempts") {
+      return {
+        attempt: row,
+        result: textValue(formData, `${prefix}-${row}-result`),
+        duration: textValue(formData, `${prefix}-${row}-duration`),
+        rpe: textValue(formData, `${prefix}-${row}-rpe`),
+        notes: textValue(formData, `${prefix}-${row}-notes`),
+      };
+    }
+    return {
+      duration: textValue(formData, "summary-duration"),
+      rpe: textValue(formData, "summary-rpe"),
+      notes: textValue(formData, "summary-notes"),
+    };
+  });
+
+  return { mode, entries };
+}
+
+function parseActuals(formData: FormData) {
+  const detailed = parseDetailedActuals(formData);
+  if (detailed) return detailed;
+
+  const raw = formData.get("actualsJson");
+  if (typeof raw !== "string" || !raw.trim()) return null;
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
 
 function mentionedDayNumbers(text: string) {
   const normalized = text.toLowerCase();
@@ -913,7 +1061,12 @@ function formatAdjustmentSummary(params: {
   return `Adjusted future plan from ${params.effectiveLabel}.`;
 }
 
-function collectChangedDayRefs(original: PlanSnapshot, adjusted: PlanSnapshot, effectiveFromPlanDay: number) {
+function collectChangedDayRefs(
+  original: PlanSnapshot,
+  adjusted: PlanSnapshot,
+  effectiveFromPlanDay: number,
+  lockedPlanDays = new Set<number>(),
+) {
   const adjustedDays = new Map<string, DaySnapshot>();
   for (const week of adjusted.weeks) {
     for (const day of week.days) {
@@ -926,6 +1079,7 @@ function collectChangedDayRefs(original: PlanSnapshot, adjusted: PlanSnapshot, e
     for (const day of week.days) {
       const planDay = planDayFromWeekDay(week.weekNum, day.dayNum);
       if (planDay < effectiveFromPlanDay) continue;
+      if (lockedPlanDays.has(planDay)) continue;
 
       const adjustedDay = adjustedDays.get(`${week.weekNum}:${day.dayNum}`);
       if (!adjustedDay || JSON.stringify(day) === JSON.stringify(adjustedDay)) continue;
@@ -935,12 +1089,102 @@ function collectChangedDayRefs(original: PlanSnapshot, adjusted: PlanSnapshot, e
         dayNum: day.dayNum,
         planDay,
         dayName: adjustedDay.dayName,
-        summary: `${day.focus} -> ${adjustedDay.focus}`,
+        summary: day.focus === adjustedDay.focus
+          ? `${adjustedDay.dayName}: prescription or coaching detail updated`
+          : `${day.focus} -> ${adjustedDay.focus}`,
       });
     }
   }
 
   return refs;
+}
+
+function proposalWithRichChanges(proposal: AdjustmentChatProposal, originalSnapshot: PlanSnapshot) {
+  return adjustmentChatProposalSchema.parse({
+    ...proposal,
+    richChanges: summarizeRichSnapshotChanges({
+      original: originalSnapshot,
+      adjusted: proposal.revisedPlanSnapshot,
+      effectiveFromPlanDay: proposal.effectiveFromPlanDay,
+    }),
+  });
+}
+
+function restoreProtectedDays(params: {
+  original: PlanSnapshot;
+  adjusted: PlanSnapshot;
+  effectiveFromPlanDay: number;
+  lockedPlanDays: Set<number>;
+}) {
+  const adjustedWeeks = new Map(params.adjusted.weeks.map((week) => [week.weekNum, week]));
+
+  return parsePlanSnapshot({
+    ...params.original,
+    planGuidance: params.adjusted.planGuidance ?? params.original.planGuidance ?? null,
+    weeks: params.original.weeks.map((originalWeek) => {
+      const adjustedWeek = adjustedWeeks.get(originalWeek.weekNum);
+      const adjustedDays = new Map(adjustedWeek?.days.map((day) => [day.dayNum, day]) ?? []);
+
+      return {
+        ...(adjustedWeek ?? originalWeek),
+        key: originalWeek.key,
+        weekNum: originalWeek.weekNum,
+        days: originalWeek.days.map((originalDay) => {
+          const planDay = planDayFromWeekDay(originalWeek.weekNum, originalDay.dayNum);
+          if (planDay < params.effectiveFromPlanDay || params.lockedPlanDays.has(planDay)) {
+            return originalDay;
+          }
+          const adjustedDay = adjustedDays.get(originalDay.dayNum);
+          return adjustedDay
+            ? {
+                ...adjustedDay,
+                key: originalDay.key,
+                dayNum: originalDay.dayNum,
+                dayName: originalDay.dayName,
+              }
+            : originalDay;
+        }),
+      };
+    }),
+  });
+}
+
+function normalizedAdjustmentProposal(params: {
+  proposal: AdjustmentChatProposal;
+  originalSnapshot: PlanSnapshot;
+  effectiveFromPlanDay: number;
+  lockedPlanDays: Set<number>;
+}) {
+  const effectiveFromPlanDay = Math.max(params.proposal.effectiveFromPlanDay, params.effectiveFromPlanDay);
+  const revisedPlanSnapshot = restoreProtectedDays({
+    original: params.originalSnapshot,
+    adjusted: params.proposal.revisedPlanSnapshot,
+    effectiveFromPlanDay,
+    lockedPlanDays: params.lockedPlanDays,
+  });
+  const changedRefs = collectChangedDayRefs(
+    params.originalSnapshot,
+    revisedPlanSnapshot,
+    effectiveFromPlanDay,
+    params.lockedPlanDays,
+  );
+
+  if (changedRefs.length === 0) {
+    throw new Error("The adjustment did not produce any editable future changes after protecting logged days");
+  }
+
+  return proposalWithRichChanges(adjustmentChatProposalSchema.parse({
+    ...params.proposal,
+    effectiveFromPlanDay,
+    changedDays: changedRefs.map((ref) => ({
+      weekNum: ref.weekNum,
+      dayNum: ref.dayNum,
+      planDay: ref.planDay,
+      summary: ref.summary,
+    })),
+    changedWeeks: Array.from(new Set(changedRefs.map((ref) => ref.weekNum))).sort((a, b) => a - b),
+    revisedPlanSnapshot,
+  }), params.originalSnapshot);
 }
 
 function inferAdjustmentReasonFromText(text: string): PlanAdjustmentReason {
@@ -1000,7 +1244,12 @@ function fallbackAdjustmentChatProposal(params: {
     null,
     params.lockedPlanDays,
   );
-  const changedRefs = collectChangedDayRefs(params.currentSnapshot, revisedPlanSnapshot, params.effectiveFromPlanDay);
+  const changedRefs = collectChangedDayRefs(
+    params.currentSnapshot,
+    revisedPlanSnapshot,
+    params.effectiveFromPlanDay,
+    params.lockedPlanDays,
+  );
   const changedDays = changedRefs.map((ref) => ({
     weekNum: ref.weekNum,
     dayNum: ref.dayNum,
@@ -1010,7 +1259,11 @@ function fallbackAdjustmentChatProposal(params: {
   const changedWeeks = Array.from(new Set(changedDays.map((day) => day.weekNum))).sort((a, b) => a - b);
   const requiresGoalChangeConfirmation = mentionsExplicitGoalChange(params.feedback);
 
-  return adjustmentChatProposalSchema.parse({
+  return normalizedAdjustmentProposal({
+    originalSnapshot: params.currentSnapshot,
+    effectiveFromPlanDay: params.effectiveFromPlanDay,
+    lockedPlanDays: params.lockedPlanDays,
+    proposal: {
     summary: "I can adjust the remaining plan around your request.",
     changes: [
       "Keep logged days and completed exercises unchanged.",
@@ -1033,6 +1286,7 @@ function fallbackAdjustmentChatProposal(params: {
       ? { goalChange: { requestedByUser: true, summary: "User requested a goal or target change." } }
       : {}),
     revisedPlanSnapshot,
+    },
   });
 }
 
@@ -1470,6 +1724,7 @@ export async function logExercise(formData: FormData) {
   const weightUsed = (formData.get("weightUsed") as string) || null;
   const durationActual = (formData.get("durationActual") as string) || null;
   const notes = (formData.get("notes") as string) || null;
+  const actuals = parseActuals(formData);
   const completed = formData.get("completed") === "true";
 
   return upsertExerciseLogForUser({
@@ -1481,6 +1736,7 @@ export async function logExercise(formData: FormData) {
     weightUsed,
     durationActual,
     notes,
+    actuals,
     completed,
   });
 }
@@ -1563,10 +1819,17 @@ export async function continuePlanAdjustmentChat(formData: FormData): Promise<Pl
       };
     }
 
+    const normalizedProposal = normalizedAdjustmentProposal({
+      proposal: response.proposal,
+      originalSnapshot: currentSnapshot,
+      effectiveFromPlanDay: effectiveFrom.planDay,
+      lockedPlanDays,
+    });
+
     const validation = validateAdjustmentChatProposal({
       originalSnapshot: currentSnapshot,
-      proposal: response.proposal,
-      effectiveFromPlanDay: effectiveFrom.planDay,
+      proposal: normalizedProposal,
+      effectiveFromPlanDay: normalizedProposal.effectiveFromPlanDay,
       userExplicitlyRequestedGoalChange: mentionsExplicitGoalChange(latestFeedback),
     });
     if (!validation.ok) {
@@ -1576,7 +1839,7 @@ export async function continuePlanAdjustmentChat(formData: FormData): Promise<Pl
     return {
       responseType: "proposal",
       assistantMessage: response.assistantMessage,
-      proposal: JSON.stringify(response.proposal),
+      proposal: JSON.stringify(normalizedProposal),
     };
   } catch (error) {
     if (error instanceof AiAdjustmentJsonError) {
@@ -1729,6 +1992,7 @@ async function saveConfirmedAiAdjustmentProposal(input: {
       exerciseName: log.exerciseName,
       completed: log.completed,
     }));
+  const lockedPlanDays = new Set(logs.map((log) => planDayFromWeekDay(log.weekNum, log.dayNum)));
   const effectiveFrom = findNextUnloggedPlanDay({
     planStartDate: plan.startDate,
     currentDate: new Date(),
@@ -1739,29 +2003,37 @@ async function saveConfirmedAiAdjustmentProposal(input: {
     return { error: "There are no unlogged days left to adjust in this plan" };
   }
 
+  const normalizedProposal = normalizedAdjustmentProposal({
+    proposal,
+    originalSnapshot: currentSnapshot,
+    effectiveFromPlanDay: effectiveFrom.planDay,
+    lockedPlanDays,
+  });
+
   const validation = validateAdjustmentChatProposal({
     originalSnapshot: currentSnapshot,
-    proposal,
-    effectiveFromPlanDay: effectiveFrom.planDay,
+    proposal: normalizedProposal,
+    effectiveFromPlanDay: normalizedProposal.effectiveFromPlanDay,
     userExplicitlyRequestedGoalChange: mentionsExplicitGoalChange(input.feedback) || input.goalChangeConfirmed,
   });
   if (!validation.ok) {
     return { error: `Adjustment proposal was rejected: ${validation.rejectedReasons.join("; ")}` };
   }
 
-  const proposalEffective = dayRefForPlanDayFromStart(plan.startDate, proposal.effectiveFromPlanDay);
+  const richChanges = normalizedProposal.richChanges ?? { planGuidance: [], coaching: [], prescriptions: [] };
+  const proposalEffective = dayRefForPlanDayFromStart(plan.startDate, normalizedProposal.effectiveFromPlanDay);
   const effectiveLabel = formatEffectiveFrom(proposalEffective);
   const summary = formatAdjustmentSummary({
     feedback: input.feedback || proposal.summary,
     effectiveLabel,
   });
   const dayNames = new Map<string, string>();
-  for (const week of proposal.revisedPlanSnapshot.weeks) {
+  for (const week of normalizedProposal.revisedPlanSnapshot.weeks) {
     for (const day of week.days) {
       dayNames.set(`${week.weekNum}:${day.dayNum}`, day.dayName);
     }
   }
-  const affectedDays = proposal.changedDays.map((day) => ({
+  const affectedDays = normalizedProposal.changedDays.map((day) => ({
     weekNum: day.weekNum,
     dayNum: day.dayNum,
     planDay: day.planDay,
@@ -1772,19 +2044,25 @@ async function saveConfirmedAiAdjustmentProposal(input: {
   await createPlanVersion({
     planId: input.planId,
     profileSnapshot,
-    planSnapshot: proposal.revisedPlanSnapshot,
+    planSnapshot: normalizedProposal.revisedPlanSnapshot,
     changeType: "ai_chat_adjustment",
     changeSummary: summary,
     changeMetadata: {
       type: "ai_chat_adjustment",
       summary,
-      changes: proposal.changes,
+      changes: [
+        ...normalizedProposal.changes,
+        ...richChanges.planGuidance,
+        ...richChanges.coaching,
+        ...richChanges.prescriptions,
+      ],
       scope: null,
       affectedDays,
+      richChanges,
     },
     basedOnVersionId: plan.currentVersion.id,
     effectiveFromWeek: proposalEffective.weekNum,
-    effectiveFromDay: proposal.effectiveFromPlanDay,
+    effectiveFromDay: normalizedProposal.effectiveFromPlanDay,
   });
 
   return {

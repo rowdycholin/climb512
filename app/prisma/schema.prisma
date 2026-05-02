@@ -131,6 +131,7 @@ model WorkoutLog {
   weightUsed         String?
   durationActual     String?
   notes              String?
+  actuals            Json?
   completed          Boolean     @default(false)
   loggedAt           DateTime    @default(now()) @db.Timestamptz(3)
 

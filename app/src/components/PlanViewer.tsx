@@ -13,6 +13,7 @@ interface ExerciseLog {
   weightUsed: string | null;
   durationActual: string | null;
   notes: string | null;
+  actuals?: unknown;
   completed: boolean;
 }
 
@@ -135,6 +136,134 @@ function exercisePrescriptionChips(exercise: Exercise) {
   ]);
 }
 
+function parseLeadingCount(value?: string | null) {
+  if (!value) return null;
+  const match = value.trim().match(/^(\d+)/);
+  if (!match) return null;
+  const parsed = parseInt(match[1], 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
+
+function isClimbingAttemptExercise(exercise: Exercise) {
+  const exerciseText = [
+    exercise.name,
+    exercise.reps,
+    exercise.work,
+    exercise.duration,
+    exercise.intensity,
+    exercise.prescriptionDetails,
+    exercise.notes,
+  ].filter(Boolean).join(" ");
+
+  return Boolean(
+    exercise.grade
+      || exercise.holdType
+      || /\bV\d+(?:\s*-\s*V?\d+)?\b/i.test(exerciseText)
+      || /\b5\.\d+[abcd]?(?:\s*-\s*5\.\d+[abcd]?)?\b/i.test(exerciseText)
+      || /\b(attempt|problem|route|boulder|circuit|project|pitch|lap)\b/i.test(exercise.name),
+  );
+}
+
+function inferredClimbingGrade(exercise: Exercise) {
+  const exerciseText = [
+    exercise.grade,
+    exercise.name,
+    exercise.reps,
+    exercise.work,
+    exercise.duration,
+    exercise.intensity,
+    exercise.prescriptionDetails,
+    exercise.notes,
+  ].filter(Boolean).join(" ");
+  return exerciseText.match(/\bV\d+(?:\s*-\s*V?\d+)?\b/i)?.[0]
+    ?? exerciseText.match(/\b5\.\d+[abcd]?(?:\s*-\s*5\.\d+[abcd]?)?\b/i)?.[0]
+    ?? null;
+}
+
+function isRunningOrCardioExercise(exercise: Exercise) {
+  return /\b(run|running|jog|sprint|tempo|pace|mile|meter|metre|km|bike|row|treadmill|cardio)\b/i.test(
+    `${exercise.name} ${exercise.distance ?? ""} ${exercise.work ?? ""}`,
+  );
+}
+
+function setTargetField(exercise: Exercise) {
+  if (exercise.grade || isClimbingAttemptExercise(exercise)) {
+    const grade = inferredClimbingGrade(exercise);
+    return {
+      label: "Grade",
+      placeholder: exercise.grade ?? grade ?? "grade",
+    };
+  }
+  if (isRunningOrCardioExercise(exercise)) {
+    return {
+      label: "Pace",
+      placeholder: exercise.distance ?? exercise.intensity ?? "pace",
+    };
+  }
+  if (exercise.load || /\b(lift|press|pull-?up|deadlift|squat|row|curl|carry|weighted|weight)\b/i.test(exercise.name)) {
+    return {
+      label: "Weight",
+      placeholder: exercise.load ?? "weight",
+    };
+  }
+  return {
+    label: "Intensity",
+    placeholder: exercise.intensity ?? "target",
+  };
+}
+
+function loggingShape(exercise: Exercise) {
+  const sets = parseLeadingCount(exercise.sets);
+  const rounds = parseLeadingCount(exercise.rounds);
+  if (sets && (exercise.reps || exercise.load || !isClimbingAttemptExercise(exercise))) {
+    return { mode: "sets" as const, rowCount: Math.min(sets, 12) };
+  }
+  if (exercise.work && (rounds || sets || exercise.restBetweenReps || exercise.restBetweenSets)) {
+    return { mode: "intervals" as const, rowCount: Math.min(rounds ?? sets ?? 1, 20) };
+  }
+  if (isClimbingAttemptExercise(exercise)) {
+    return { mode: "attempts" as const, rowCount: Math.min(rounds ?? sets ?? 3, 12) };
+  }
+  return { mode: "summary" as const, rowCount: 1 };
+}
+
+function actualEntry(log: ExerciseLog | null, mode: string, index: number) {
+  if (!log?.actuals || typeof log.actuals !== "object") return {};
+  const actuals = log.actuals as { mode?: unknown; entries?: unknown };
+  if (actuals.mode !== mode || !Array.isArray(actuals.entries)) return {};
+  return (actuals.entries[index] as Record<string, unknown> | undefined) ?? {};
+}
+
+function stringActual(value: unknown) {
+  return typeof value === "string" || typeof value === "number" ? String(value) : "";
+}
+
+function booleanActual(value: unknown) {
+  return value === true;
+}
+
+function actualsSummary(log: ExerciseLog | null) {
+  const actuals = log?.actuals;
+  if (!actuals || typeof actuals !== "object") return [];
+  const parsed = actuals as { mode?: unknown; entries?: unknown };
+  if (typeof parsed.mode !== "string" || !Array.isArray(parsed.entries) || parsed.entries.length === 0) return [];
+  const entries = parsed.entries as Array<Record<string, unknown>>;
+  if (parsed.mode === "sets") {
+    const done = entries.filter((entry) => entry.completed || entry.reps || entry.target || entry.load).length;
+    return done > 0 ? [`${done} sets logged`] : [];
+  }
+  if (parsed.mode === "intervals") {
+    const done = entries.filter((entry) => entry.completed || entry.work).length;
+    return done > 0 ? [`${done} intervals logged`] : [];
+  }
+  if (parsed.mode === "attempts") {
+    const done = entries.filter((entry) => entry.result || entry.duration || entry.notes).length;
+    return done > 0 ? [`${done} attempts logged`] : [];
+  }
+  const entry = entries[0] ?? {};
+  return [stringActual(entry.duration), stringActual(entry.rpe)].filter(Boolean);
+}
+
 function SmallChip({ children, tone = "slate" }: { children: ReactNode; tone?: "slate" | "amber" | "blue" }) {
   const classes = {
     slate: "border-slate-200 bg-slate-100 text-slate-600",
@@ -232,6 +361,121 @@ function PlanGuidancePanel({ planGuidance }: { planGuidance?: PlanGuidance | nul
   );
 }
 
+function DetailedLogFields({ exercise, log }: { exercise: Exercise; log: ExerciseLog | null }) {
+  const shape = loggingShape(exercise);
+  const setTarget = setTargetField(exercise);
+
+  if (shape.mode === "sets") {
+    return (
+      <div className="space-y-2">
+        <input type="hidden" name="actualMode" value="sets" />
+        <input type="hidden" name="actualRowCount" value={shape.rowCount} />
+        <div className="grid grid-cols-[44px_72px_minmax(76px,1fr)_64px_minmax(92px,1fr)] gap-2 px-1 text-xs font-medium text-slate-500">
+          <span>Done</span>
+          <span>Reps</span>
+          <span>{setTarget.label}</span>
+          <span>RPE</span>
+          <span>Notes</span>
+        </div>
+        {Array.from({ length: shape.rowCount }, (_, index) => {
+          const row = index + 1;
+          const entry = actualEntry(log, "sets", index);
+          return (
+            <div key={`set-${row}`} className="grid grid-cols-[44px_72px_minmax(76px,1fr)_64px_minmax(92px,1fr)] gap-2">
+              <label className="flex h-8 items-center gap-1 text-xs text-slate-500">
+                <input name={`set-${row}-completed`} type="checkbox" defaultChecked={booleanActual(entry.completed)} className="h-4 w-4" />
+                {row}
+              </label>
+              <input name={`set-${row}-reps`} type="text" defaultValue={stringActual(entry.reps)} placeholder={exercise.reps ?? "reps"} className="h-8 rounded-lg border border-slate-300 bg-white px-2 text-sm" />
+              <input name={`set-${row}-target`} type="text" defaultValue={stringActual(entry.target ?? entry.load)} placeholder={setTarget.placeholder} className="h-8 rounded-lg border border-slate-300 bg-white px-2 text-sm" />
+              <input name={`set-${row}-rpe`} type="text" defaultValue={stringActual(entry.rpe)} placeholder="RPE" className="h-8 rounded-lg border border-slate-300 bg-white px-2 text-sm" />
+              <input name={`set-${row}-notes`} type="text" defaultValue={stringActual(entry.notes)} placeholder="notes" className="h-8 rounded-lg border border-slate-300 bg-white px-2 text-sm" />
+            </div>
+          );
+        })}
+      </div>
+    );
+  }
+
+  if (shape.mode === "intervals") {
+    return (
+      <div className="space-y-2">
+        <input type="hidden" name="actualMode" value="intervals" />
+        <input type="hidden" name="actualRowCount" value={shape.rowCount} />
+        <div className="grid grid-cols-[44px_minmax(76px,1fr)_minmax(76px,1fr)_64px_minmax(92px,1fr)] gap-2 px-1 text-xs font-medium text-slate-500">
+          <span>Done</span>
+          <span>Work</span>
+          <span>Rest</span>
+          <span>RPE</span>
+          <span>Notes</span>
+        </div>
+        {Array.from({ length: shape.rowCount }, (_, index) => {
+          const row = index + 1;
+          const entry = actualEntry(log, "intervals", index);
+          return (
+            <div key={`interval-${row}`} className="grid grid-cols-[44px_minmax(76px,1fr)_minmax(76px,1fr)_64px_minmax(92px,1fr)] gap-2">
+              <label className="flex h-8 items-center gap-1 text-xs text-slate-500">
+                <input name={`interval-${row}-completed`} type="checkbox" defaultChecked={booleanActual(entry.completed)} className="h-4 w-4" />
+                {row}
+              </label>
+              <input name={`interval-${row}-work`} type="text" defaultValue={stringActual(entry.work)} placeholder={exercise.work ?? exercise.duration ?? "work"} className="h-8 rounded-lg border border-slate-300 bg-white px-2 text-sm" />
+              <input name={`interval-${row}-rest`} type="text" defaultValue={stringActual(entry.rest)} placeholder={exercise.restBetweenReps ?? exercise.restBetweenSets ?? exercise.rest ?? "rest"} className="h-8 rounded-lg border border-slate-300 bg-white px-2 text-sm" />
+              <input name={`interval-${row}-rpe`} type="text" defaultValue={stringActual(entry.rpe)} placeholder="RPE" className="h-8 rounded-lg border border-slate-300 bg-white px-2 text-sm" />
+              <input name={`interval-${row}-notes`} type="text" defaultValue={stringActual(entry.notes)} placeholder="notes" className="h-8 rounded-lg border border-slate-300 bg-white px-2 text-sm" />
+            </div>
+          );
+        })}
+      </div>
+    );
+  }
+
+  if (shape.mode === "attempts") {
+    return (
+      <div className="space-y-2">
+        <input type="hidden" name="actualMode" value="attempts" />
+        <input type="hidden" name="actualRowCount" value={shape.rowCount} />
+        <div className="grid grid-cols-[52px_minmax(96px,1fr)_minmax(76px,1fr)_64px_minmax(92px,1fr)] gap-2 px-1 text-xs font-medium text-slate-500">
+          <span>#</span>
+          <span>Result</span>
+          <span>Duration</span>
+          <span>RPE</span>
+          <span>Notes</span>
+        </div>
+        {Array.from({ length: shape.rowCount }, (_, index) => {
+          const row = index + 1;
+          const entry = actualEntry(log, "attempts", index);
+          return (
+            <div key={`attempt-${row}`} className="grid grid-cols-[52px_minmax(96px,1fr)_minmax(76px,1fr)_64px_minmax(92px,1fr)] gap-2">
+              <span className="flex h-8 items-center text-xs text-slate-500">#{row}</span>
+              <select name={`attempt-${row}-result`} defaultValue={stringActual(entry.result)} className="h-8 rounded-lg border border-slate-300 bg-white px-2 text-sm">
+                <option value="">Result</option>
+                <option value="sent">Sent</option>
+                <option value="fell">Fell</option>
+                <option value="worked moves">Worked moves</option>
+                <option value="skipped">Skipped</option>
+              </select>
+              <input name={`attempt-${row}-duration`} type="text" defaultValue={stringActual(entry.duration)} placeholder={exercise.work ?? exercise.duration ?? "time"} className="h-8 rounded-lg border border-slate-300 bg-white px-2 text-sm" />
+              <input name={`attempt-${row}-rpe`} type="text" defaultValue={stringActual(entry.rpe)} placeholder="RPE" className="h-8 rounded-lg border border-slate-300 bg-white px-2 text-sm" />
+              <input name={`attempt-${row}-notes`} type="text" defaultValue={stringActual(entry.notes)} placeholder="notes" className="h-8 rounded-lg border border-slate-300 bg-white px-2 text-sm" />
+            </div>
+          );
+        })}
+      </div>
+    );
+  }
+
+  const entry = actualEntry(log, "summary", 0);
+  return (
+    <div className="grid gap-2 sm:grid-cols-[minmax(120px,1fr)_80px_minmax(160px,2fr)]">
+      <input type="hidden" name="actualMode" value="summary" />
+      <input type="hidden" name="actualRowCount" value={1} />
+      <input name="summary-duration" type="text" defaultValue={stringActual(entry.duration)} placeholder={exercise.duration ?? exercise.work ?? "duration"} className="h-8 rounded-lg border border-slate-300 bg-white px-2 text-sm" />
+      <input name="summary-rpe" type="text" defaultValue={stringActual(entry.rpe)} placeholder="RPE" className="h-8 rounded-lg border border-slate-300 bg-white px-2 text-sm" />
+      <input name="summary-notes" type="text" defaultValue={stringActual(entry.notes)} placeholder="notes" className="h-8 rounded-lg border border-slate-300 bg-white px-2 text-sm" />
+    </div>
+  );
+}
+
 function ExerciseRow({ planId, exercise, readOnly = false }: { planId: string; exercise: Exercise; readOnly?: boolean }) {
   const log = exercise.logs[0] ?? null;
   const [completed, setCompleted] = useState(log?.completed ?? false);
@@ -270,6 +514,7 @@ function ExerciseRow({ planId, exercise, readOnly = false }: { planId: string; e
     if (log?.weightUsed) formData.set("weightUsed", log.weightUsed);
     if (log?.durationActual) formData.set("durationActual", log.durationActual);
     if (log?.notes) formData.set("notes", log.notes);
+    if (log?.actuals) formData.set("actualsJson", JSON.stringify(log.actuals));
     return formData;
   }
 
@@ -336,7 +581,7 @@ function ExerciseRow({ planId, exercise, readOnly = false }: { planId: string; e
             onClick={() => setOpen((value) => !value)}
             className="shrink-0 rounded-lg border border-slate-300 px-2.5 py-1 text-xs text-slate-500 transition-colors hover:border-slate-400 hover:text-slate-700"
           >
-            {open ? "Close" : log?.setsCompleted || log?.weightUsed ? "Edit log" : "Log"}
+            {open ? "Close" : log ? "Edit log" : "Log"}
           </button>
           )}
         </div>
@@ -362,8 +607,13 @@ function ExerciseRow({ planId, exercise, readOnly = false }: { planId: string; e
             <p className="mt-1.5 text-xs leading-relaxed text-slate-500">{exercise.notes}</p>
           )}
 
-          {log && !open && (log.setsCompleted || log.weightUsed || log.repsCompleted || log.durationActual) && (
+          {log && !open && (actualsSummary(log).length > 0 || log.setsCompleted || log.weightUsed || log.repsCompleted || log.durationActual) && (
             <div className="mt-1.5 flex flex-wrap gap-1.5">
+              {actualsSummary(log).map((item) => (
+                <span key={item} className="rounded-full border border-green-200 bg-green-100 px-2 py-0.5 text-xs text-green-700">
+                  {item}
+                </span>
+              ))}
               {log.setsCompleted && (
                 <span className="rounded-full border border-green-200 bg-green-100 px-2 py-0.5 text-xs text-green-700">
                   Done: {log.setsCompleted} sets
@@ -417,59 +667,21 @@ function ExerciseRow({ planId, exercise, readOnly = false }: { planId: string; e
         <form onSubmit={handleSubmit} className="border-t border-slate-100 bg-slate-50 px-3 pb-3 pt-3">
           <input type="hidden" name="planId" value={planId} />
           <input type="hidden" name="exerciseId" value={exercise.id} />
-          <p className="mb-2 text-xs font-medium text-slate-500">Record what you actually did:</p>
-          <div className="grid grid-cols-2 gap-2">
-            <div>
-              <label className="mb-1 block text-xs text-slate-500">Sets completed</label>
-              <input
-                name="setsCompleted"
-                type="number"
-                min="0"
-                defaultValue={log?.setsCompleted ?? ""}
-                placeholder={exercise.sets ?? "e.g. 3"}
-                className="h-8 w-full rounded-lg border border-slate-300 bg-white px-2 text-sm text-slate-800 placeholder:text-slate-400 focus:border-blue-400 focus:outline-none"
-              />
+          <p className="mb-2 text-xs font-medium text-slate-500">Record actual work:</p>
+          <div className="overflow-x-auto pb-1">
+            <div className="min-w-[560px]">
+              <DetailedLogFields exercise={exercise} log={log} />
             </div>
-            <div>
-              <label className="mb-1 block text-xs text-slate-500">Reps / time done</label>
-              <input
-                name="repsCompleted"
-                type="text"
-                defaultValue={log?.repsCompleted ?? ""}
-                placeholder={exercise.reps ?? exercise.duration ?? "e.g. 8"}
-                className="h-8 w-full rounded-lg border border-slate-300 bg-white px-2 text-sm text-slate-800 placeholder:text-slate-400 focus:border-blue-400 focus:outline-none"
-              />
-            </div>
-            <div>
-              <label className="mb-1 block text-xs text-slate-500">Weight used</label>
-              <input
-                name="weightUsed"
-                type="text"
-                defaultValue={log?.weightUsed ?? ""}
-                placeholder="e.g. 10kg / bodyweight"
-                className="h-8 w-full rounded-lg border border-slate-300 bg-white px-2 text-sm text-slate-800 placeholder:text-slate-400 focus:border-blue-400 focus:outline-none"
-              />
-            </div>
-            <div>
-              <label className="mb-1 block text-xs text-slate-500">Duration (if timed)</label>
-              <input
-                name="durationActual"
-                type="text"
-                defaultValue={log?.durationActual ?? ""}
-                placeholder="e.g. 7s / 20 min"
-                className="h-8 w-full rounded-lg border border-slate-300 bg-white px-2 text-sm text-slate-800 placeholder:text-slate-400 focus:border-blue-400 focus:outline-none"
-              />
-            </div>
-            <div className="col-span-2">
-              <label className="mb-1 block text-xs text-slate-500">Notes</label>
-              <input
-                name="notes"
-                type="text"
-                defaultValue={log?.notes ?? ""}
-                placeholder="How did it feel? Any modifications?"
-                className="h-8 w-full rounded-lg border border-slate-300 bg-white px-2 text-sm text-slate-800 placeholder:text-slate-400 focus:border-blue-400 focus:outline-none"
-              />
-            </div>
+          </div>
+          <div className="mt-2">
+            <label className="mb-1 block text-xs text-slate-500">Overall notes</label>
+            <input
+              name="notes"
+              type="text"
+              defaultValue={log?.notes ?? ""}
+              placeholder="How did it feel? Anything to remember?"
+              className="h-8 w-full rounded-lg border border-slate-300 bg-white px-2 text-sm text-slate-800 placeholder:text-slate-400 focus:border-blue-400 focus:outline-none"
+            />
           </div>
           <button
             type="submit"
@@ -590,7 +802,7 @@ function DayCard({
       }`}
     >
       <AccordionTrigger
-        className="px-4 py-3 hover:bg-slate-50 hover:no-underline [&[data-state=open]]:bg-slate-50 [&_[data-slot=accordion-trigger-icon]]:hidden"
+        className="px-4 py-3 hover:bg-slate-50 hover:no-underline [&[data-state=open]]:bg-slate-50 [&_[data-slot=accordion-trigger-icon]]:!hidden"
         onClick={() => onSelect(day.id)}
       >
         <div className="flex w-full items-center gap-2 text-left">

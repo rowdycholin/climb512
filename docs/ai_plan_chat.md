@@ -84,13 +84,27 @@ The intake prompt includes the browser's local date and time zone, and the date 
 
 The guided intake screen no longer shows an editable manual draft form or a visible Plan Draft panel. It submits the structured draft behind the scenes once enough information has been collected. The magic-wand generate button stays disabled until the draft passes the full `PlanRequest` schema, and the assistant tells the user to click the magic wand when the plan can be generated.
 
-The intake should feel like a professional coach conversation. The opening message introduces Alex/Alix as the user's personal training coach and explains that more detailed information leads to a better plan. The assistant should ask only one question and one topic at a time. Before marking the intake ready, the live AI prompt should give the user a clear chance to mention injuries, pain, exercises to avoid, and exercises or workout styles they especially want included. After asking how many training days per week the user wants, it must ask whether there are specific days they like to work out and whether there are specific days they prefer as rest days. It must always ask this final open-ended review question before it can mark the draft ready: "Is there anything else I should know about you or your goals before I am ready to generate the plan?" The generate button stays disabled until that final review question has been asked.
+The intake should feel like a professional coach conversation. The opening message introduces Alex/Alix as the user's personal training coach and explains that more detailed information leads to a better plan. The assistant should ask only one question and one topic at a time. Before marking the intake ready, the live AI prompt should give the user a clear chance to mention injuries, pain, exercises to avoid, and exercises or workout styles they especially want included. It should also collect preferred workout days, preferred rest days, and one final open-ended review question before generation, but those questions should be handled as natural coaching checkpoints rather than a rigid second checklist layered on top of the AI conversation.
+
+The intake coach should have a little personality. Each turn should usually include a brief reaction, encouragement, light humor, or a useful coaching observation before the next question, especially when the user names a difficult or audacious goal. The tone should make the user feel understood by a real coach who knows the sport or activity, without turning the intake into long explanations or motivational speeches. The target shape is one or two short coaching sentences plus one useful next question. Avoid prompt language that makes the AI sound like a questionnaire, such as over-emphasizing "exactly one concise question" without allowing any coaching response first.
+
+The app should defensively hide obviously malformed intake responses. If the provider returns a visibly truncated assistant message, such as a sentence ending mid-word with a question mark, the app should not synthesize a hard-coded intake question. It should show a neutral retry message or ask the model for a repaired response in a later enhancement.
 
 Detailed preferences from the chat, such as "do intervals on Wednesday" or "keep long sessions on Saturday", are stored in `PlanRequest.planStructureNotes`. The worker generation prompt includes those notes for each week and instructs the model to respect named-day preferences unless they conflict with safety, recovery, or the requested training-day count.
 
-The intake server keeps direct-answer hints and merged draft state after each turn, so detailed answers such as "bouldering for Freerider on El Cap" are retained as climbing/big-wall context. If a live AI response tries to ask again for an already collected field like sport, goal, start date, schedule, level, equipment, or constraints, the app replaces that stale prompt with the next missing intake question.
+The intake server keeps direct-answer hints and merged draft state after each turn, so detailed answers about a specific route, race, event, lift, season, or project are retained as user-provided goal and structure context. Production intake code should not hard-code named objectives, routes, races, or sport-specific projects. If a live AI response tries to ask again for an already collected field like sport, goal, start date, schedule, level, equipment, or constraints, the app replaces that stale prompt with the next missing intake question.
+
+Live AI intake interpretation should stay model-led rather than phrase-fenced in web code. The app validates response shape, preserves the structured draft, and requires a complete `PlanRequest` before generation, but it should not locally enumerate every possible way a user might answer a coach question. Negative answers to safety or constraint questions, such as "no", "no injuries", "none", or "nothing to avoid", should be represented by the AI as empty `constraints` arrays and the interview should move on. App fallback questions should stay narrow, for example asking about injuries or pain first instead of combining injuries, limitations, and avoid-list preferences into one brittle prompt.
+
+The live intake prompt should use missing required fields as background state, not as a script. The initial system prompt should fence the chat to training-plan intake, safety, and JSON output shape, while the per-turn prompt should give the model the current draft, recent conversation, latest user message, and any still-missing fields as context. The model should be instructed to infer reasonable structured values from natural answers, avoid asking for information already present in the draft, and choose the most useful next question based on the conversation rather than marching through the same generic sequence every time.
+
+App-side post-processing should be a guardrail, not a second interviewer. It should validate the JSON response, merge durable draft state, prevent stale duplicate questions, and enforce true readiness before generation. It should avoid overriding the model with fixed questions unless the model missed a required safety/readiness checkpoint or repeated a field that has already been answered. Preferred workout days, preferred rest days, and the final review question remain important, but they should be injected only when they are still missing and the conversation has reached the right moment.
+
+The app should not collapse unknown missing fields into vague repeated prompts like "Any other constraints or preferences?" Required fields in the app's missing-field helper must stay aligned with the actual `PlanRequest` schema, including `strengthTraining`. If a specific required field is missing, the fallback question should name that field directly. If the user's named-day preferences conflict with their requested `daysPerWeek`, the AI should acknowledge the mismatch and ask one clarifying priority question instead of silently increasing the schedule.
 
 Live AI adjustment responses are parsed and validated on the server before the user can apply them. If the provider returns malformed JSON, the app makes one repair attempt through the AI backend and then returns a concise retry/narrowing message instead of exposing a raw parser error.
+
+Live AI calls should use the shared `ANTHROPIC_MAX_TOKENS` environment value by default so token budget changes apply consistently across intake, plan generation, and adjustments. More specific overrides such as `ANTHROPIC_INTAKE_MAX_TOKENS` or `ANTHROPIC_ADJUSTMENT_MAX_TOKENS` can still be used when a flow needs a different budget, but they should be optional. Interactive adjustment proposals can be much larger than intake messages because they may include an adjusted plan snapshot plus metadata, so it is reasonable to keep `ANTHROPIC_ADJUSTMENT_MAX_TOKENS` higher than the shared default when testing live adjustments.
 
 ### Separate Intake From Plan Generation
 
@@ -189,7 +203,7 @@ This is a useful scope because climbing and strength training naturally fit toge
 
 For now, weight training should be modeled as support for climbing rather than a totally separate sport. The request model should still allow a future pure strength-training sport profile.
 
-Do not hard-code too much around a single objective like the Nose. Specific objectives can improve defaults, but they should not define the architecture.
+Do not hard-code around a single named objective. Specific objectives can improve the AI's coaching context, but named routes, races, competitions, lifts, or events should not define the architecture.
 
 ### Support Event And Ongoing Goals
 
@@ -971,7 +985,7 @@ The app should support training days with multiple sessions or sections when tha
 - Main Session
 - Cooldown
 
-Prefer reusing the existing `day.sessions[]` model for these sections instead of introducing a separate `day.sections[]` shape. This keeps exercises and logging attached to the same hierarchy while allowing the richer breakdown shown in strong model outputs.
+These are preferred examples for many workouts, not a hard three-session limit. Some sports or goals may need additional named blocks, such as skill practice, project attempts, conditioning, strength accessories, or review notes. Prefer reusing the existing `day.sessions[]` model for these sections instead of introducing a separate `day.sections[]` shape. This keeps exercises and logging attached to the same hierarchy while allowing the richer breakdown shown in strong model outputs. Validation should reject absurdly large or empty session structures, but it should not fail a reasonable training day just because it has more than three sessions.
 
 Recommended exercise prescription additions:
 
@@ -1057,33 +1071,47 @@ Development note: this is a development environment, so old generated plan data 
 
 **Batch 3B: Exercise-Specific Logging UI**
 
-- [ ] Keep the completion checkbox as the fastest path for "completed as prescribed."
-- [ ] Treat checking complete as meaningful logged work even when the user does not enter notes or actuals.
-- [ ] Treat unchecking complete with no notes or actuals as not logged; delete or ignore any empty incomplete `WorkoutLog` row.
-- [ ] Replace the generic detailed log form with exercise-specific logging controls derived from the prescription shape.
-- [ ] For set/rep/load prescriptions, show one row per prescribed set with fields for reps, load/weight, optional RPE, and notes.
-- [ ] For timed interval prescriptions, show one row per interval or round with work, rest, completion, optional RPE, and notes.
-- [ ] For climbing attempts, routes, boulders, or circuits, show attempt/route/problem rows with result, duration when relevant, optional RPE, and notes.
-- [ ] For mobility, recovery, or simple duration work, keep a lightweight duration/RPE/notes log instead of forcing set rows.
-- [ ] Support a fallback summary log for unusual exercises that do not fit the structured logging shapes yet.
-- [ ] Store detailed logs in a structured shape that can preserve per-set/per-interval/per-attempt actuals without losing the existing quick-complete workflow.
-- [ ] Keep the detailed log collapsed by default so daily logging stays fast.
-- [ ] Add tests that quick completion, accidental uncheck, and detailed per-set logging all produce the expected logged/unlogged state.
+- [x] Keep the completion checkbox as the fastest path for "completed as prescribed."
+- [x] Treat checking complete as meaningful logged work even when the user does not enter notes or actuals.
+- [x] Treat unchecking complete with no notes or actuals as not logged; delete or ignore any empty incomplete `WorkoutLog` row.
+- [x] Replace the generic detailed log form with exercise-specific logging controls derived from the prescription shape.
+- [x] For set/rep/load prescriptions, show one row per prescribed set with fields for reps, load/weight, optional RPE, and notes.
+- [x] For timed interval prescriptions, show one row per interval or round with work, rest, completion, optional RPE, and notes.
+- [x] For climbing attempts, routes, boulders, or circuits, show attempt/route/problem rows with result, duration when relevant, optional RPE, and notes.
+- [x] For mobility, recovery, or simple duration work, keep a lightweight duration/RPE/notes log instead of forcing set rows.
+- [x] Support a fallback summary log for unusual exercises that do not fit the structured logging shapes yet.
+- [x] Store detailed logs in a structured shape that can preserve per-set/per-interval/per-attempt actuals without losing the existing quick-complete workflow.
+- [x] Keep the detailed log collapsed by default so daily logging stays fast.
+- [x] Add tests that quick completion, accidental uncheck, and detailed per-set logging all produce the expected logged/unlogged state.
 
 **Batch 4: Adjustment And Versioning**
 
-- [ ] Include plan-level guidance in adjustment context when it helps preserve the larger training intent.
-- [ ] Include rich coaching fields in adjustment context so the AI understands the original programming intent.
-- [ ] Include richer exercise prescription fields in adjustment context so the AI can modify precise work/rest/load/intensity details without flattening them into notes.
-- [ ] Validate that adjustments preserve or intentionally update plan-level guidance when the plan's larger intent changes.
-- [ ] Validate that adjustments preserve or intentionally update rich fields on changed days.
-- [ ] Validate that adjustments preserve or intentionally update richer prescription fields on changed exercises.
-- [ ] Show changed plan-level guidance in the adjustment preview when the overall plan intent changes materially.
-- [ ] Show changed rich coaching notes in the adjustment preview when they materially change.
-- [ ] Show changed prescription details in the adjustment preview when work/rest/load/intensity changes materially.
-- [ ] Confirm historical preview and revert preserve plan-level guidance exactly.
-- [ ] Confirm historical preview and revert preserve rich fields exactly.
-- [ ] Confirm historical preview and revert preserve richer exercise prescription fields exactly.
+- [x] Include plan-level guidance in adjustment context when it helps preserve the larger training intent.
+- [x] Include rich coaching fields in adjustment context so the AI understands the original programming intent.
+- [x] Include richer exercise prescription fields in adjustment context so the AI can modify precise work/rest/load/intensity details without flattening them into notes.
+- [x] Validate that adjustments preserve or intentionally update plan-level guidance when the plan's larger intent changes.
+- [x] Validate that adjustments preserve or intentionally update rich fields on changed days.
+- [x] Validate that adjustments preserve or intentionally update richer prescription fields on changed exercises.
+- [x] Show changed plan-level guidance in the adjustment preview when the overall plan intent changes materially.
+- [x] Show changed rich coaching notes in the adjustment preview when they materially change.
+- [x] Show changed prescription details in the adjustment preview when work/rest/load/intensity changes materially.
+- [x] Confirm historical preview and revert preserve plan-level guidance exactly.
+- [x] Confirm historical preview and revert preserve rich fields exactly.
+- [x] Confirm historical preview and revert preserve richer exercise prescription fields exactly.
+
+Batch 4 implementation notes:
+
+- The adjustment chat context now carries `planGuidance`, week summaries/progression notes, day coach notes, session objectives/intensity/warmup/cooldown, and structured exercise prescription fields.
+- Adjustment prompts now explicitly tell the AI to preserve rich coaching and prescription fields unless the requested change intentionally updates them.
+- Adjustment proposals are enriched with computed `richChanges` for plan guidance, coaching detail, and prescription detail. The review panel shows those changes before apply.
+- Confirmed adjustment versions store the computed rich-change summary in version metadata. Historical preview/revert continue to use the exact stored plan snapshot, so rich fields round-trip with the version.
+
+Follow-up for next pass:
+
+- Investigate the live adjustment case where a user sent an RPE ramp-up request and the UI appeared to lose the in-progress adjustment. This was probably not caused by `ANTHROPIC_MAX_TOKENS=5000` before the token fallback change, because interactive adjustment chat previously defaulted to `ANTHROPIC_ADJUSTMENT_MAX_TOKENS` or `12000`.
+- Check whether the request timed out, returned malformed/rejected JSON, or the `PlanAdjuster` component remounted/reset while the request was pending.
+- Consider persisting adjustment draft state per plan in browser `sessionStorage`: chat messages, draft text, pending proposal, selected scope, and UI expansion state. Clear it after successful apply or explicit start-over.
+- Improve pending and error UI so a long live adjustment call cannot feel like it disappeared.
 
 **Batch 5: Tests And Docs**
 

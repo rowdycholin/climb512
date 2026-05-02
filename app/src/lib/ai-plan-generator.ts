@@ -342,7 +342,7 @@ export function validateGeneratedWeek(week: WeekData, expectedWeekNum: number): 
     if (!day.focus.trim()) errors.push(`day ${expectedDayNum} focus is required`);
     if (day.isRest && day.sessions.length > 0) errors.push(`day ${expectedDayNum} rest day must not have sessions`);
     if (!day.isRest && day.sessions.length < 1) errors.push(`day ${expectedDayNum} training day must have at least one session`);
-    if (!day.isRest && day.sessions.length > 3) errors.push(`day ${expectedDayNum} training day must have no more than three sessions`);
+    if (!day.isRest && day.sessions.length > 6) errors.push(`day ${expectedDayNum} training day has too many sessions`);
 
     for (const session of day.sessions) {
       if (!session.name.trim()) errors.push(`day ${expectedDayNum} session name is required`);
@@ -414,7 +414,7 @@ OUTPUT: Return ONLY a single JSON object (not an array) in this exact shape:
 RULES:
 - Exactly 7 days (Monday-Sunday), dayNum 1-7
 - Rest days: isRest=true, sessions=[], focus="Rest"
-- Training days may have 1-3 sessions. Prefer Warm-up, Main Session, Cooldown when useful; this replaces any older one-session wording.
+- Training days may have multiple sessions when useful. Warm-up, Main Session, and Cooldown are examples, not a hard limit or required structure.
 - Main Session should contain 2-4 exercises; Warm-up/Cooldown should contain 1-2 exercises.
 - Choose exercises appropriate to the sport, goal, available equipment, and constraints
 - Respect athlete requested structure, named-day preferences, and requested workouts unless they conflict with safety, recovery, or the requested training-day count
@@ -505,6 +505,7 @@ OUTPUT: Return ONLY a single JSON object (not an array) in this exact shape:
 RULES:
 - Exactly 7 days (Monday-Sunday), dayNum 1-7
 - Rest days: isRest=true, sessions=[], focus="Rest"
+- Training days may have multiple sessions when useful. Warm-up, Main Session, and Cooldown are examples, not a hard limit or required structure.
 - Choose exercises appropriate to the sport, goal, available equipment, and constraints
 - Respect athlete requested structure, named-day preferences, and requested workouts unless they conflict with safety, recovery, or the requested training-day count
 - Respect injuries, limitations, and avoid-exercise requests as hard constraints

@@ -6,6 +6,7 @@ import {
   buildAdjustmentChatSystemPrompt,
   buildAdjustmentChatUserPrompt,
   createAdjustmentChatState,
+  summarizeRichSnapshotChanges,
   validateAdjustmentChatProposal,
   type AdjustmentChatProposal,
 } from "./plan-adjustment-chat";
@@ -48,10 +49,20 @@ const profileSnapshot: ProfileSnapshot = {
 };
 
 const planSnapshot: PlanSnapshot = {
+  planGuidance: {
+    overview: "Three climbing days with finger-load management.",
+    intensityDistribution: [{ label: "Wednesday", detail: "Highest intensity board work" }],
+    progressionPrinciples: ["Add difficulty only when attempts stay high quality."],
+    recoveryPrinciples: ["Keep rest days genuinely easy."],
+    recommendations: ["Use the board for consistent limit problems."],
+    progressionTable: [{ week: "1", focus: "Base" }],
+  },
   weeks: [1, 2].map((weekNum) => ({
     key: `week-${weekNum}`,
     weekNum,
     theme: weekNum === 1 ? "Base" : "Build",
+    summary: weekNum === 1 ? "Establish rhythm and movement quality." : "Increase board specificity.",
+    progressionNote: weekNum === 1 ? "Start below max effort." : "Build from week 1 volume.",
     days: Array.from({ length: 7 }, (_, index) => {
       const dayNum = index + 1;
       const isTraining = [1, 3, 5].includes(dayNum);
@@ -62,6 +73,7 @@ const planSnapshot: PlanSnapshot = {
         dayName: ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"][index],
         focus: isTraining ? "Project Climbing" : "Rest",
         isRest: !isTraining,
+        coachNotes: isTraining ? "Keep attempts crisp and stop before form degrades." : null,
         sessions: isTraining
           ? [
               {
@@ -69,6 +81,10 @@ const planSnapshot: PlanSnapshot = {
                 name: "Climbing Session",
                 description: "Quality climbing",
                 duration: 60,
+                objective: "Practice high-quality attempts.",
+                intensity: "RPE 7",
+                warmup: "Easy movement and mobility.",
+                cooldown: "Forearm and shoulder mobility.",
                 exercises: [
                   {
                     key: `w${weekNum}-d${dayNum}-s1-e1`,
@@ -78,6 +94,11 @@ const planSnapshot: PlanSnapshot = {
                     duration: null,
                     rest: "2 min",
                     notes: null,
+                    work: "3 attempts",
+                    restBetweenSets: "2 min",
+                    intensity: "RPE 7",
+                    grade: "V3-V4",
+                    modifications: "Drop one grade if fingers feel tired.",
                   },
                 ],
               },
@@ -186,10 +207,18 @@ describe("adjustment chat contract", () => {
     expect(context.effectiveFrom?.planDay).toBe(2);
     expect(context.lockedHistory.throughPlanDay).toBe(1);
     expect(context.lockedHistory.loggedExercises).toHaveLength(1);
+    expect(context.planGuidance?.overview).toContain("finger-load management");
     expect(context.adjustableFuture[0]).toMatchObject({
       weekNum: 1,
       dayNum: 2,
       planDay: 2,
+    });
+    expect(context.adjustableFuture.find((day) => day.planDay === 3)?.sessions[0].exercises[0]).toMatchObject({
+      name: "Quality attempts",
+      work: "3 attempts",
+      restBetweenSets: "2 min",
+      grade: "V3-V4",
+      modifications: "Drop one grade if fingers feel tired.",
     });
     expect(context.adjustableFuture.some((day) => day.planDay === 1)).toBe(false);
   });
@@ -218,11 +247,38 @@ describe("adjustment chat contract", () => {
     const userPrompt = buildAdjustmentChatUserPrompt({ context, state });
 
     expect(systemPrompt).toContain("Default to preserving the original plan goal");
+    expect(systemPrompt).toContain("Preserve planGuidance and rich coaching fields");
     expect(systemPrompt).toContain("Ask at most one follow-up question at a time");
     expect(userPrompt).toContain("ADJUSTMENT_CONTEXT_JSON");
     expect(userPrompt).toContain("MESSAGE_HISTORY_JSON");
     expect(userPrompt).toContain("FOLLOW_UP SHAPE");
     expect(userPrompt).toContain("PROPOSAL SHAPE");
+    expect(userPrompt).toContain("structured exercise prescriptions");
+  });
+
+  test("summarizes rich guidance, coaching, and prescription changes for previews", () => {
+    const adjusted = cloneSnapshot(planSnapshot);
+    adjusted.planGuidance!.recoveryPrinciples = ["Add an extra low-stress recovery day when fingers feel tired."];
+    adjusted.weeks[0].days[2].coachNotes = "Keep Wednesday submaximal this week.";
+    adjusted.weeks[0].days[2].sessions[0].intensity = "RPE 6";
+    adjusted.weeks[0].days[2].sessions[0].exercises[0].restBetweenSets = "3 min";
+
+    expect(
+      summarizeRichSnapshotChanges({
+        original: planSnapshot,
+        adjusted,
+        effectiveFromPlanDay: 2,
+      }),
+    ).toMatchObject({
+      planGuidance: expect.arrayContaining(["Plan guidance recoveryPrinciples changed"]),
+      coaching: expect.arrayContaining([
+        "Week 1, Wednesday coach notes: Keep attempts crisp and stop before form degrades. -> Keep Wednesday submaximal this week.",
+        "Week 1, Wednesday Climbing Session intensity: RPE 7 -> RPE 6",
+      ]),
+      prescriptions: expect.arrayContaining([
+        "Week 1, Wednesday Quality attempts restBetweenSets: 2 min -> 3 min",
+      ]),
+    });
   });
 
   test("accepts either one follow-up response or a structured proposal", () => {

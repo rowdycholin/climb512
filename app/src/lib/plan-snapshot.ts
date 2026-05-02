@@ -10,6 +10,7 @@ interface WorkoutLogRecord {
   weightUsed: string | null;
   durationActual: string | null;
   notes: string | null;
+  actuals?: Prisma.JsonValue | null;
   completed: boolean;
 }
 
@@ -19,6 +20,7 @@ export function hasMeaningfulWorkoutLog(log: {
   weightUsed: string | null;
   durationActual: string | null;
   notes: string | null;
+  actuals?: unknown;
   completed: boolean;
 }) {
   return Boolean(
@@ -27,8 +29,24 @@ export function hasMeaningfulWorkoutLog(log: {
       || log.repsCompleted?.trim()
       || log.weightUsed?.trim()
       || log.durationActual?.trim()
-      || log.notes?.trim(),
+      || log.notes?.trim()
+      || hasMeaningfulActuals(log.actuals),
   );
+}
+
+function hasMeaningfulActuals(actuals: unknown) {
+  if (!actuals || typeof actuals !== "object") return false;
+  const entries = (actuals as { entries?: unknown }).entries;
+  if (!Array.isArray(entries)) return false;
+  return entries.some((entry) => {
+    if (!entry || typeof entry !== "object") return false;
+    return Object.values(entry).some((value) => {
+      if (typeof value === "boolean") return value;
+      if (typeof value === "number") return Number.isFinite(value);
+      if (typeof value === "string") return value.trim().length > 0;
+      return false;
+    });
+  });
 }
 
 export interface ProfileSnapshot extends PlanInput {
@@ -111,6 +129,7 @@ export interface ExerciseLogView {
   weightUsed: string | null;
   durationActual: string | null;
   notes: string | null;
+  actuals?: Prisma.JsonValue | null;
   completed: boolean;
 }
 
@@ -289,6 +308,7 @@ export function buildPlanView(snapshot: PlanSnapshot, logs: WorkoutLogRecord[]):
       weightUsed: log.weightUsed,
       durationActual: log.durationActual,
       notes: log.notes,
+      actuals: log.actuals ?? null,
       completed: log.completed,
     };
     const existing = logMap.get(log.exerciseKey) ?? [];

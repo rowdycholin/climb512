@@ -1,4 +1,5 @@
 import { prisma } from "./prisma";
+import { Prisma } from "@prisma/client";
 import {
   buildPlanView,
   findExerciseInSnapshot,
@@ -134,6 +135,7 @@ export interface WorkoutLogInput {
   weightUsed: string | null;
   durationActual: string | null;
   notes: string | null;
+  actuals: unknown | null;
   completed: boolean;
 }
 
@@ -217,6 +219,7 @@ export async function upsertExerciseLogForUser(input: WorkoutLogInput) {
       weightUsed: input.weightUsed,
       durationActual: input.durationActual,
       notes: input.notes,
+      actuals: input.actuals === null ? Prisma.JsonNull : toStoredJson(input.actuals),
       completed: input.completed,
     },
     update: {
@@ -231,6 +234,7 @@ export async function upsertExerciseLogForUser(input: WorkoutLogInput) {
       weightUsed: input.weightUsed,
       durationActual: input.durationActual,
       notes: input.notes,
+      actuals: input.actuals === null ? Prisma.JsonNull : toStoredJson(input.actuals),
       completed: input.completed,
       loggedAt: new Date(),
     },

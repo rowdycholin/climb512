@@ -165,6 +165,40 @@ describe("ai plan generator sequential core", () => {
     expect(validateGeneratedWeek(multiSessionWeek, 1)).toBe(multiSessionWeek);
   });
 
+  test("allows more than three sessions when the generated sport structure needs it", () => {
+    const fourSessionWeek: WeekData = {
+      ...validWeek,
+      days: validWeek.days.map((day) => day.dayNum === 1
+        ? {
+            ...day,
+            sessions: [
+              ...day.sessions,
+              {
+                name: "Skill Block",
+                description: "Practice specific movement.",
+                duration: 20,
+                exercises: [{ name: "Technique practice", duration: "15 min", notes: "Stay precise" }],
+              },
+              {
+                name: "Cooldown",
+                description: "Downshift after training.",
+                duration: 8,
+                exercises: [{ name: "Easy mobility", duration: "5 min", notes: "Relax" }],
+              },
+              {
+                name: "Notes",
+                description: "Record key observations.",
+                duration: 5,
+                exercises: [{ name: "Session notes", duration: "5 min", notes: "Capture learnings" }],
+              },
+            ],
+          }
+        : day),
+    };
+
+    expect(validateGeneratedWeek(fourSessionWeek, 1)).toBe(fourSessionWeek);
+  });
+
   test("rejects malformed generated weeks before saving", () => {
     const invalidWeek: WeekData = {
       ...validWeek,
