@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vitest";
 import {
   buildNextWeekPrompt,
+  dayNamesForPlanStart,
   summarizeGeneratedWeeks,
   validateGeneratedWeek,
   type PreviousWeekSummary,
@@ -131,6 +132,47 @@ describe("ai plan generator sequential core", () => {
     expect(prompt).toContain("Reduce elbow stress");
     expect(prompt).toContain("mild elbow irritation");
     expect(prompt).toContain("campus board");
+  });
+
+  test("rotates generated day labels from the requested start date", () => {
+    const sundayStartRequest = { ...request, startDate: "2026-05-03" };
+    const expectedDayNames = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+    const sundayWeek: WeekData = {
+      ...validWeek,
+      days: validWeek.days.map((day, index) => ({ ...day, dayName: expectedDayNames[index] })),
+    };
+
+    const prompt = buildNextWeekPrompt({
+      request: sundayStartRequest,
+      athleteAge: 68,
+      weekNum: 1,
+      totalWeeks: 4,
+      previousWeekSummaries: [],
+    });
+
+    expect(dayNamesForPlanStart("2026-05-03")).toEqual(expectedDayNames);
+    expect(prompt).toContain('"dayNum":1,"dayName":"Sunday"');
+    expect(prompt).toContain("dayNum 1 = Sunday");
+    expect(validateGeneratedWeek(sundayWeek, 1, expectedDayNames)).toBe(sundayWeek);
+  });
+
+  test("prompts for level-based RPE and model-decided deloads", () => {
+    const prompt = buildNextWeekPrompt({
+      request: {
+        ...request,
+        currentLevel: "V10",
+        targetLevel: "V12",
+        blockLengthWeeks: 4,
+      },
+      athleteAge: 68,
+      weekNum: 4,
+      totalWeeks: 4,
+      previousWeekSummaries: summarizeGeneratedWeeks([validWeek]),
+    });
+
+    expect(prompt).toContain("productive main work should generally live around RPE 8-10");
+    expect(prompt).toContain("Do not automatically make the final week a deload in a short block");
+    expect(prompt).not.toContain("This is a deload or consolidation week unless");
   });
 
   test("validates a well-formed generated week", () => {

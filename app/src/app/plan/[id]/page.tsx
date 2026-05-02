@@ -123,8 +123,10 @@ export default async function PlanPage({
     minute: "2-digit",
     timeZone: "UTC",
   });
-  const currentWeekIndex = Math.max(0, Math.min(calendarStatus.currentWeekIndex, Math.max(totalWeeks - 1, 0)));
-  const currentDayIndex = calendarStatus.currentDayIndex;
+  const currentWeekIndex = calendarStatus.isBeforeStart
+    ? 0
+    : Math.max(0, Math.min(calendarStatus.currentWeekIndex, Math.max(totalWeeks - 1, 0)));
+  const currentDayIndex = calendarStatus.isBeforeStart ? -1 : calendarStatus.currentDayIndex;
   const visibleVersions = plan.versions.filter(
     (version) => version.id === plan.currentVersion.id || isUserFacingVersion(version.changeType),
   );
@@ -201,6 +203,8 @@ export default async function PlanPage({
             generation,
             generationJob: latestGenerationJob
               ? {
+                  jobType: latestGenerationJob.jobType,
+                  nextWeekNum: latestGenerationJob.nextWeekNum,
                   failedWeekNum: latestGenerationJob.status === "failed" ? latestGenerationJob.nextWeekNum : null,
                   lastError: latestGenerationJob.lastError,
                   repairNotes: latestGenerationJob.repairNotes,

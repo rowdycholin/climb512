@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Check, ChevronDown, Send, WandSparkles, X } from "lucide-react";
 import { applyConfirmedPlanAdjustment, continuePlanAdjustmentChat } from "@/app/actions";
@@ -24,6 +24,14 @@ interface ChatMessage {
   content: string;
 }
 
+const INITIAL_ADJUSTMENT_MESSAGES: ChatMessage[] = [
+  {
+    id: "intro",
+    role: "assistant",
+    content: "Tell me what you would like to change, and I will show a proposed new plan that you can approve.",
+  },
+];
+
 interface Proposal {
   summary: string;
   changes: string[];
@@ -42,6 +50,30 @@ interface Proposal {
     summary: string;
   }>;
   rawProposal?: string;
+}
+
+interface PersistedAdjustmentState {
+  messages?: ChatMessage[];
+  draft?: string;
+  proposal?: Proposal | null;
+  goalChangeConfirmed?: boolean;
+  detailsOpen?: boolean;
+}
+
+function adjustmentStorageKey(planId: string) {
+  return `climb512.plan-adjuster.${planId}`;
+}
+
+function validMessages(value: unknown): value is ChatMessage[] {
+  return Array.isArray(value) && value.every((message) => {
+    if (!message || typeof message !== "object") return false;
+    const candidate = message as Partial<ChatMessage>;
+    return (
+      typeof candidate.id === "string" &&
+      (candidate.role === "user" || candidate.role === "assistant") &&
+      typeof candidate.content === "string"
+    );
+  });
 }
 
 type AdjustmentScope =
@@ -454,19 +486,14 @@ export default function PlanAdjuster({
   onAdjustmentApplied,
 }: PlanAdjusterProps) {
   const [internalOpen, setInternalOpen] = useState(false);
-  const [messages, setMessages] = useState<ChatMessage[]>([
-    {
-      id: "intro",
-      role: "assistant",
-      content: "Tell me what you would like to change, and I will show a proposed new plan that you can approve.",
-    },
-  ]);
+  const [messages, setMessages] = useState<ChatMessage[]>(INITIAL_ADJUSTMENT_MESSAGES);
   const [draft, setDraft] = useState("");
   const [proposal, setProposal] = useState<Proposal | null>(null);
   const [goalChangeConfirmed, setGoalChangeConfirmed] = useState(false);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<{ summary: string; effectiveFrom: string } | null>(null);
+  const [hydratedPlanId, setHydratedPlanId] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
   const router = useRouter();
 
@@ -474,6 +501,58 @@ export default function PlanAdjuster({
   const canSend = draft.trim().length > 0 && !pending;
   const visibleMessages = useMemo(() => messages.slice(-8), [messages]);
   const starterPrompts = useMemo(() => starterPromptsForSport(sport, disciplines), [sport, disciplines]);
+
+  useEffect(() => {
+    setHydratedPlanId(null);
+    setMessages(INITIAL_ADJUSTMENT_MESSAGES);
+    setDraft("");
+    setProposal(null);
+    setGoalChangeConfirmed(false);
+    setDetailsOpen(false);
+    setError(null);
+    setResult(null);
+    try {
+      const raw = window.sessionStorage.getItem(adjustmentStorageKey(planId));
+      if (!raw) {
+        return;
+      }
+
+      const parsed = JSON.parse(raw) as PersistedAdjustmentState;
+      if (validMessages(parsed.messages) && parsed.messages.length > 0) {
+        setMessages(parsed.messages);
+      }
+      if (typeof parsed.draft === "string") setDraft(parsed.draft);
+      setProposal(parsed.proposal ?? null);
+      setGoalChangeConfirmed(Boolean(parsed.goalChangeConfirmed));
+      setDetailsOpen(Boolean(parsed.detailsOpen));
+    } catch {
+      window.sessionStorage.removeItem(adjustmentStorageKey(planId));
+    } finally {
+      setHydratedPlanId(planId);
+    }
+  }, [planId]);
+
+  useEffect(() => {
+    if (hydratedPlanId !== planId) return;
+
+    const payload: PersistedAdjustmentState = {
+      messages,
+      draft,
+      proposal,
+      goalChangeConfirmed,
+      detailsOpen,
+    };
+
+    window.sessionStorage.setItem(adjustmentStorageKey(planId), JSON.stringify(payload));
+  }, [detailsOpen, draft, goalChangeConfirmed, hydratedPlanId, messages, planId, proposal]);
+
+  function clearPersistedSession() {
+    try {
+      window.sessionStorage.removeItem(adjustmentStorageKey(planId));
+    } catch {
+      // Ignore storage failures; the in-memory adjustment flow still works.
+    }
+  }
 
   function setOpen(nextValue: boolean | ((value: boolean) => boolean)) {
     const next = typeof nextValue === "function" ? nextValue(open) : nextValue;
@@ -486,13 +565,8 @@ export default function PlanAdjuster({
   }
 
   function resetSession() {
-    setMessages([
-      {
-        id: "intro",
-        role: "assistant",
-        content: "Tell me what you would like to change, and I will show a proposed new plan that you can approve.",
-      },
-    ]);
+    clearPersistedSession();
+    setMessages(INITIAL_ADJUSTMENT_MESSAGES);
     setDraft("");
     setProposal(null);
     setGoalChangeConfirmed(false);
@@ -531,6 +605,7 @@ export default function PlanAdjuster({
     setProposal(null);
     setGoalChangeConfirmed(false);
     setDetailsOpen(false);
+    setMessages(nextMessages);
 
     const formData = new FormData();
     formData.set("planId", planId);
@@ -538,33 +613,37 @@ export default function PlanAdjuster({
     formData.set("messages", JSON.stringify(nextMessages.map(({ role, content }) => ({ role, content }))));
 
     startTransition(async () => {
-      const response = await continuePlanAdjustmentChat(formData);
-      if (response.error) {
-        setError(response.error);
+      try {
+        const response = await continuePlanAdjustmentChat(formData);
+        if (response.error) {
+          setError(response.error);
+          return;
+        }
+
+        if (response.responseType === "follow_up" && response.assistantMessage) {
+          addAssistant(response.assistantMessage, nextMessages);
+          return;
+        }
+
+        if (response.responseType === "proposal" && response.proposal) {
+          const userFeedback = nextMessages
+            .filter((message) => message.role === "user")
+            .map((message) => message.content)
+            .join("\n");
+          setMessages([
+            ...nextMessages,
+            {
+              id: messageId(),
+              role: "assistant",
+              content: response.assistantMessage ?? "I have enough to propose an adjustment. Review it before applying.",
+            },
+          ]);
+          setProposal(aiProposalFromRaw(response.proposal, userFeedback, weeks));
+          setGoalChangeConfirmed(false);
+        }
+      } catch (requestError) {
+        setError((requestError as Error).message || "The adjustment request failed. Please try again.");
         setMessages(nextMessages);
-        return;
-      }
-
-      if (response.responseType === "follow_up" && response.assistantMessage) {
-        addAssistant(response.assistantMessage, nextMessages);
-        return;
-      }
-
-      if (response.responseType === "proposal" && response.proposal) {
-        const userFeedback = nextMessages
-          .filter((message) => message.role === "user")
-          .map((message) => message.content)
-          .join("\n");
-        setMessages([
-          ...nextMessages,
-          {
-            id: messageId(),
-            role: "assistant",
-            content: response.assistantMessage ?? "I have enough to propose an adjustment. Review it before applying.",
-          },
-        ]);
-        setProposal(aiProposalFromRaw(response.proposal, userFeedback, weeks));
-        setGoalChangeConfirmed(false);
       }
     });
   }
@@ -596,28 +675,36 @@ export default function PlanAdjuster({
     if (proposal.rawProposal) formData.set("proposal", proposal.rawProposal);
 
     startTransition(async () => {
-      const response = await applyConfirmedPlanAdjustment(formData);
-      if (response.error || !response.summary || !response.effectiveFrom) {
-        setError(response.error ?? "The plan could not be adjusted");
-        return;
-      }
+      try {
+        const response = await applyConfirmedPlanAdjustment(formData);
+        if (response.error || !response.summary || !response.effectiveFrom) {
+          setError(response.error ?? "The plan could not be adjusted");
+          return;
+        }
 
-      setResult({
-        summary: response.summary,
-        effectiveFrom: response.effectiveFrom,
-      });
-      onAdjustmentApplied?.({
-        affectedDays: proposal.previewDetails.map((detail) => ({
-          weekNum: detail.weekNum,
-          dayNum: detail.dayNum,
-          planDay: planDayFromWeekDay(detail.weekNum, detail.dayNum),
-          dayName: detail.dayName,
-          summary: detail.summary,
-        })),
-      });
-      setProposal(null);
-      setDetailsOpen(false);
-      router.refresh();
+        setResult({
+          summary: response.summary,
+          effectiveFrom: response.effectiveFrom,
+        });
+        clearPersistedSession();
+        setMessages(INITIAL_ADJUSTMENT_MESSAGES);
+        setDraft("");
+        setProposal(null);
+        setGoalChangeConfirmed(false);
+        setDetailsOpen(false);
+        onAdjustmentApplied?.({
+          affectedDays: proposal.previewDetails.map((detail) => ({
+            weekNum: detail.weekNum,
+            dayNum: detail.dayNum,
+            planDay: planDayFromWeekDay(detail.weekNum, detail.dayNum),
+            dayName: detail.dayName,
+            summary: detail.summary,
+          })),
+        });
+        router.refresh();
+      } catch (applyError) {
+        setError((applyError as Error).message || "The plan could not be adjusted");
+      }
     });
   }
 
@@ -652,6 +739,13 @@ export default function PlanAdjuster({
                 </p>
               </div>
             ))}
+            {pending && !proposal && (
+              <div className="mr-auto max-w-[88%]">
+                <p className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
+                  Working on the adjustment proposal...
+                </p>
+              </div>
+            )}
           </div>
 
           <div>

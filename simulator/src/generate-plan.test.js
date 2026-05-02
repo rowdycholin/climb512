@@ -71,6 +71,52 @@ test("event and ongoing goals use different phase themes", () => {
   assert.notEqual(ongoing.theme, event.theme);
 });
 
+test("deload cadence depends on athlete level", () => {
+  const noviceWeek = generateWeekFromPrompt(
+    promptFor(baseRequest({ currentLevel: "novice", blockLengthWeeks: 8 }), 4),
+    { seed: "deload-novice" },
+  );
+  const intermediateWeek4 = generateWeekFromPrompt(
+    promptFor(baseRequest({ currentLevel: "intermediate", blockLengthWeeks: 8 }), 4),
+    { seed: "deload-intermediate-4" },
+  );
+  const intermediateWeek6 = generateWeekFromPrompt(
+    promptFor(baseRequest({ currentLevel: "intermediate", blockLengthWeeks: 8 }), 6),
+    { seed: "deload-intermediate-6" },
+  );
+  const advancedWeek4 = generateWeekFromPrompt(
+    promptFor(baseRequest({ currentLevel: "V10", blockLengthWeeks: 8 }), 4),
+    { seed: "deload-advanced-4" },
+  );
+  const advancedWeek8 = generateWeekFromPrompt(
+    promptFor(baseRequest({ currentLevel: "V10", blockLengthWeeks: 8 }), 8),
+    { seed: "deload-advanced-8" },
+  );
+
+  assert.match(noviceWeek.theme, /Deload/);
+  assert.doesNotMatch(intermediateWeek4.theme, /Deload/);
+  assert.match(intermediateWeek6.theme, /Deload/);
+  assert.doesNotMatch(advancedWeek4.theme, /Deload/);
+  assert.match(advancedWeek8.theme, /Deload/);
+});
+
+test("simulator RPE bands follow inferred athlete level", () => {
+  const noviceWeek = generateWeekFromPrompt(
+    promptFor(baseRequest({ currentLevel: "novice", blockLengthWeeks: 4 }), 1),
+    { seed: "rpe-novice" },
+  );
+  const advancedWeek = generateWeekFromPrompt(
+    promptFor(baseRequest({ currentLevel: "V10", blockLengthWeeks: 4 }), 1),
+    { seed: "rpe-advanced" },
+  );
+
+  const noviceMain = noviceWeek.days.find((day) => !day.isRest).sessions.find((session) => session.name === "Main Session");
+  const advancedMain = advancedWeek.days.find((day) => !day.isRest).sessions.find((session) => session.name === "Main Session");
+
+  assert.match(noviceMain.intensity, /RPE [3-6]/);
+  assert.match(advancedMain.intensity, /RPE (8|9|10)/);
+});
+
 test("worker next-week prompts generate the requested week", () => {
   const week = generateWeekFromPrompt(nextWeekPromptFor(baseRequest(), 2), { seed: "worker" });
 

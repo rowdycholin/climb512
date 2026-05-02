@@ -53,12 +53,15 @@ model PlanGenerationJob {
   plan        Plan                 @relation(fields: [planId], references: [id], onDelete: Cascade)
   userId      String
   user        User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  jobType     String               @default("initial_plan")
+  baseVersionId String?
   status      String               @default("pending")
   totalWeeks  Int
   nextWeekNum Int                  @default(1)
   lastError   String?
   repairNotes String?
   profileSnapshot Json
+  changeMetadata Json?
   lockedAt    DateTime?            @db.Timestamptz(3)
   createdAt   DateTime             @default(now()) @db.Timestamptz(3)
   updatedAt   DateTime             @updatedAt @db.Timestamptz(3)
@@ -67,6 +70,7 @@ model PlanGenerationJob {
   @@index([status, lockedAt])
   @@index([planId])
   @@index([userId])
+  @@index([jobType])
 }
 
 model PlanGenerationWeek {

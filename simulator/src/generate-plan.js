@@ -119,7 +119,7 @@ function shuffleList(items, rng) {
 
 function getPhaseTheme(input) {
   const { weekNum, weeksDuration, goalType, targetDate } = input;
-  if (weekNum % 4 === 0) return "Deload & Movement";
+  if (isDeloadWeek(input)) return "Deload & Movement";
 
   const progress = weekNum / Math.max(weeksDuration, 1);
   if (goalType === "event" || targetDate) {
@@ -133,6 +133,48 @@ function getPhaseTheme(input) {
   if (progress < 0.6) return "Ongoing Strength Build";
   if (progress < 0.85) return "Ongoing Capacity";
   return "Ongoing Consolidation";
+}
+
+function inferAthleteLevel(input) {
+  const text = [
+    input.currentGrade,
+    input.targetGrade,
+    input.goalDescription,
+  ].filter(Boolean).join(" ").toLowerCase();
+
+  if (/\b(novice|beginner|new|returning|untrained)\b/.test(text)) return "novice";
+  if (/\b(intermediate|recreational)\b/.test(text)) return "intermediate";
+  if (/\b(advanced|expert|elite|competitive|pro)\b/.test(text)) return "advanced";
+
+  const vGrade = text.match(/\bv\s*(\d{1,2})\b/);
+  if (vGrade) {
+    const grade = parseInt(vGrade[1], 10);
+    if (grade <= 2) return "novice";
+    if (grade <= 6) return "intermediate";
+    return "advanced";
+  }
+
+  if (/\b5\.(1[2-9]|[2-9]\d)/.test(text)) return "advanced";
+  return "intermediate";
+}
+
+function deloadInterval(input) {
+  const level = inferAthleteLevel(input);
+  if (level === "novice") return 4;
+  if (level === "intermediate") return 6;
+  return 8;
+}
+
+function isDeloadWeek(input) {
+  const interval = deloadInterval(input);
+  return input.weekNum > 0 && input.weekNum % interval === 0;
+}
+
+function rpeBand(input) {
+  const level = inferAthleteLevel(input);
+  if (level === "novice") return { low: "RPE 3-4", main: "RPE 5-6", hard: "RPE 6" };
+  if (level === "advanced") return { low: "RPE 4-5", main: "RPE 8-9", hard: "RPE 9-10" };
+  return { low: "RPE 4-5", main: "RPE 5-7", hard: "RPE 7" };
 }
 
 function applyScenarioOverrides(input, scenario) {
@@ -262,9 +304,10 @@ function enrichExercise(exercise, input) {
     next.restBetweenSets = next.rest;
   }
   if (!next.intensity) {
-    if (name.includes("limit") || name.includes("power") || name.includes("project")) next.intensity = "RPE 8-9";
-    else if (name.includes("easy") || name.includes("warm")) next.intensity = "RPE 3-4";
-    else next.intensity = "RPE 6-7";
+    const band = rpeBand(input);
+    if (name.includes("limit") || name.includes("power") || name.includes("project")) next.intensity = band.hard;
+    else if (name.includes("easy") || name.includes("warm")) next.intensity = band.low;
+    else next.intensity = band.main;
   }
   if (!next.work && next.duration && /sec|min/.test(String(next.duration))) {
     next.work = next.duration;
@@ -286,13 +329,14 @@ function enrichExercise(exercise, input) {
 }
 
 function warmupExercise(input) {
+  const band = rpeBand(input);
   if (input.discipline === "running") {
-    return { name: "Dynamic Warm-up", duration: "8 min", work: "8 min", intensity: "RPE 3", notes: "Leg swings, skips, easy jog" };
+    return { name: "Dynamic Warm-up", duration: "8 min", work: "8 min", intensity: band.low, notes: "Leg swings, skips, easy jog" };
   }
   if (input.discipline === "strength_training") {
-    return { name: "Movement Prep", duration: "8 min", work: "8 min", intensity: "RPE 3", notes: "Easy ramp sets and mobility" };
+    return { name: "Movement Prep", duration: "8 min", work: "8 min", intensity: band.low, notes: "Easy ramp sets and mobility" };
   }
-  return { name: "Easy Movement Warm-up", duration: "10 min", work: "10 min", grade: "easy", intensity: "RPE 3-4", notes: "Easy climbing and mobility" };
+  return { name: "Easy Movement Warm-up", duration: "10 min", work: "10 min", grade: "easy", intensity: band.low, notes: "Easy climbing and mobility" };
 }
 
 function cooldownExercise(input) {
@@ -303,6 +347,7 @@ function cooldownExercise(input) {
 }
 
 function buildTrainingDay(template, dayNum, input, rng) {
+  const band = rpeBand(input);
   let exercises = addEquipmentTweaks(template.exercises.slice(0, 4), input).map((exercise) => enrichExercise(exercise, input));
   if (input.strengthTraining?.include && input.discipline !== "strength_training") {
     exercises = [...exercises.slice(0, 3), enrichExercise(strengthAccessory(input), input)];
@@ -322,7 +367,7 @@ function buildTrainingDay(template, dayNum, input, rng) {
         description: "Prepare joints, breathing, and movement quality.",
         duration: 10,
         objective: "Start warm without creating fatigue.",
-        intensity: "RPE 3-4",
+        intensity: band.low,
         exercises: [warmupExercise(input)]
       },
       {
@@ -330,7 +375,7 @@ function buildTrainingDay(template, dayNum, input, rng) {
         description: template.description,
         duration: mainDuration,
         objective: template.description,
-        intensity: exercises.some((exercise) => String(exercise.intensity).includes("8")) ? "RPE 8-9" : "RPE 6-7",
+        intensity: exercises.some((exercise) => /8|9|10/.test(String(exercise.intensity))) ? band.hard : band.main,
         exercises
       },
       {

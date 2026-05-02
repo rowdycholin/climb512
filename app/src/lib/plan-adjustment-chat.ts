@@ -153,6 +153,45 @@ export const adjustmentChatProposalSchema = z.object({
   revisedPlanSnapshot: adjustmentPlanSnapshotSchema,
 });
 
+export const adjustmentIntentSchema = z.object({
+  summary: z.string().trim().min(1).max(500),
+  changes: z.array(z.string().trim().min(1).max(300)).min(1).max(12),
+  changedWeeks: z.array(z.number().int().min(1)).min(1),
+  changedDays: z
+    .array(
+      z.object({
+        weekNum: z.number().int().min(1),
+        dayNum: z.number().int().min(1).max(7),
+        planDay: z.number().int().min(1),
+        summary: z.string().trim().min(1).max(300),
+      }),
+    )
+    .min(1),
+  effectiveFromPlanDay: z.number().int().min(1),
+  preservesOriginalGoal: z.boolean(),
+  requiresGoalChangeConfirmation: z.boolean(),
+  goalChange: adjustmentGoalChangeSchema.optional(),
+  safetyRationale: z.string().trim().min(1).max(500),
+  targetWeeks: z.array(z.number().int().min(1)).default([]),
+  targetDayTypes: z.array(z.string().trim().min(1).max(80)).default([]),
+  targetSessionTypes: z.array(z.string().trim().min(1).max(80)).default([]),
+  prescriptionChanges: z.array(z.string().trim().min(1).max(300)).default([]),
+  coachingChanges: z.array(z.string().trim().min(1).max(300)).default([]),
+  richImpact: z
+    .object({
+      planGuidance: z.boolean().default(false),
+      weekSummaries: z.boolean().default(false),
+      dayCoaching: z.boolean().default(false),
+      exercisePrescriptions: z.boolean().default(true),
+    })
+    .default({
+      planGuidance: false,
+      weekSummaries: false,
+      dayCoaching: false,
+      exercisePrescriptions: true,
+    }),
+});
+
 export const adjustmentProposalValidationResultSchema = z.object({
   ok: z.boolean(),
   rejectedReasons: z.array(z.string()),
@@ -164,8 +203,15 @@ const proposalResponseSchema = z.object({
   proposal: adjustmentChatProposalSchema,
 });
 
+const intentResponseSchema = z.object({
+  responseType: z.literal("intent"),
+  assistantMessage: z.string().trim().min(1).max(1000),
+  intent: adjustmentIntentSchema,
+});
+
 export const adjustmentChatModelResponseSchema = z.discriminatedUnion("responseType", [
   followUpResponseSchema,
+  intentResponseSchema,
   proposalResponseSchema,
 ]);
 
@@ -173,6 +219,7 @@ export type AdjustmentChatMessage = z.infer<typeof adjustmentChatMessageSchema>;
 export type AdjustmentChatState = z.infer<typeof adjustmentChatStateSchema>;
 export type AdjustmentChatModelResponse = z.infer<typeof adjustmentChatModelResponseSchema>;
 export type AdjustmentChatProposal = z.infer<typeof adjustmentChatProposalSchema>;
+export type AdjustmentIntent = z.infer<typeof adjustmentIntentSchema>;
 export type AdjustmentProposalValidationResult = z.infer<typeof adjustmentProposalValidationResultSchema>;
 export type AdjustmentRichChangeSummary = z.infer<typeof adjustmentRichChangeSummarySchema>;
 
@@ -409,16 +456,15 @@ Boundaries:
 - Default to preserving the original plan goal, sport, target, schedule, and block length.
 - If the user explicitly asks to change the goal, label it as a goal change and require confirmation.
 - Ask at most one follow-up question at a time.
-- If there is enough information, return a structured proposal.
+- If there is enough information, return a structured adjustment intent.
 - Do not create a brand-new plan. Adjust the existing plan only.
 - Keep injury-related changes conservative and ask one follow-up question when risk is unclear.
-- When returning a proposal, revisedPlanSnapshot must be the complete plan snapshot with every original week and day included.
+- Do not return a full revised plan snapshot.
 - Keep all locked days unchanged.
-- Keep stable keys for existing weeks, days, sessions, and exercises. New sessions or exercises may use new unique keys.
 - Declare every changed day in changedDays and every changed week in changedWeeks.
 - Preserve planGuidance and rich coaching fields unless the user's request intentionally changes the larger training intent.
 - Preserve structured prescription fields such as work, restBetweenSets, load, intensity, grade, tempo, distance, and modifications when changing unrelated text.
-- When work/rest/load/intensity or coaching details change, mention those details in the proposal summary or changedDays summaries.
+- When work/rest/load/intensity or coaching details should change, describe those changes in prescriptionChanges, coachingChanges, and changedDays summaries.
 
 Return JSON only.`;
 }
@@ -435,16 +481,15 @@ ${JSON.stringify(params.state.messages)}
 
 RESPONSE OPTIONS:
 1. Ask exactly one follow-up question if you need more detail.
-2. Return a proposal if you have enough detail.
+2. Return an adjustment intent if you have enough detail.
 
-IMPORTANT PROPOSAL RULES:
-- revisedPlanSnapshot must include every week from the current plan, not just changed weeks.
-- Unchanged weeks and days must still be present.
-- Locked history and logged exercise days must be byte-for-byte unchanged.
-- changedDays must list every day whose snapshot changed.
-- Keep planGuidance in revisedPlanSnapshot. Only change it when the overall plan intent, recovery strategy, progression, or recommendations materially change.
-- Keep rich coaching fields and structured exercise prescriptions on unchanged days exactly as they are.
-- When changing a day, preserve useful coachNotes, session objective/intensity/warmup/cooldown, exercise modifications, and structured prescription fields unless the change intentionally updates them.
+IMPORTANT INTENT RULES:
+- Do NOT return revisedPlanSnapshot.
+- changedDays should list the days the worker should adjust based on the request and effective-from day.
+- Keep logged history protected. effectiveFromPlanDay must be >= ADJUSTMENT_CONTEXT_JSON.effectiveFrom.planDay.
+- Describe the intended training changes precisely enough for a week generator to apply them later.
+- Use prescriptionChanges for work/rest/load/intensity/RPE/volume changes.
+- Use coachingChanges for plan guidance, week summaries, day coach notes, session objective/intensity/warmup/cooldown, or modifications.
 - If the user wants to change sport, goal, target level/date, event, block length, or training days per week, set requiresGoalChangeConfirmation to true.
 
 FOLLOW_UP SHAPE:
@@ -454,19 +499,25 @@ FOLLOW_UP SHAPE:
   "question": "one question"
 }
 
-PROPOSAL SHAPE:
+INTENT SHAPE:
 {
-  "responseType": "proposal",
+  "responseType": "intent",
   "assistantMessage": "short conversational response",
-  "proposal": {
+  "intent": {
     "summary": "what will change",
     "changes": ["specific change"],
     "changedWeeks": [2],
-    "changedDays": [{ "weekNum": 2, "dayNum": 1, "planDay": 8, "summary": "swap fingerboard work for technique volume" }],
+    "changedDays": [{ "weekNum": 2, "dayNum": 1, "planDay": 8, "summary": "reduce fingerboard intensity by 1-2 RPE" }],
     "effectiveFromPlanDay": 8,
     "preservesOriginalGoal": true,
     "requiresGoalChangeConfirmation": false,
-    "revisedPlanSnapshot": { "weeks": [] }
+    "safetyRationale": "keeps logged work fixed and changes future load gradually",
+    "targetWeeks": [2,3,4],
+    "targetDayTypes": ["training days"],
+    "targetSessionTypes": ["fingerboard", "limit bouldering"],
+    "prescriptionChanges": ["reduce fingerboard intensity by 1-2 RPE", "keep warmups and cooldowns unchanged"],
+    "coachingChanges": ["add recovery-focused coach notes on adjusted days"],
+    "richImpact": { "planGuidance": false, "weekSummaries": true, "dayCoaching": true, "exercisePrescriptions": true }
   }
 }`;
 }

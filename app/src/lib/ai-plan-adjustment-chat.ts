@@ -94,7 +94,7 @@ async function repairAdjustmentJson(rawContent: string): Promise<AdjustmentChatM
     },
     {
       role: "user",
-      content: `Repair this malformed JSON into one valid AdjustmentChatModelResponse JSON object. Preserve the user's proposal content as much as possible. If the proposal is too incomplete to repair, return a follow_up response asking the user to narrow the requested adjustment.\n\nMALFORMED_JSON:\n${rawContent.slice(0, 24000)}`,
+      content: `Repair this malformed JSON into one valid AdjustmentChatModelResponse JSON object. Prefer the compact "intent" response shape. Preserve the user's adjustment intent as much as possible. If the response is too incomplete to repair, return a follow_up response asking the user to narrow the requested adjustment.\n\nMALFORMED_JSON:\n${rawContent.slice(0, 24000)}`,
     },
   ]);
 

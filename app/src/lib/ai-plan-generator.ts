@@ -1,6 +1,7 @@
 import type { PlanInput, WeekData, DayData, SessionData, ExerciseData } from "./plan-types";
 import type { PlanRequest } from "./plan-request";
 import type { WeekSnapshot } from "./plan-snapshot";
+import type { AdjustmentIntent } from "./plan-adjustment-chat";
 
 const MODEL = process.env.ANTHROPIC_MODEL ?? "anthropic/claude-haiku-4-5";
 const MAX_TOKENS = parseInt(process.env.ANTHROPIC_MAX_TOKENS ?? "5000", 10);
@@ -12,6 +13,55 @@ const API_KEY = process.env.ANTHROPIC_API_KEY ?? "";
 const SEND_SIMULATOR_USER_HEADER = /^https?:\/\/(simulator|localhost|127\.0\.0\.1)(:\d+)?$/i.test(BASE_URL);
 
 const DAY_NAMES = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+const CALENDAR_DAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+
+export function dayNamesForPlanStart(startDate?: string | null) {
+  if (!startDate || !/^\d{4}-\d{2}-\d{2}$/.test(startDate)) return DAY_NAMES;
+  const parsed = new Date(`${startDate}T00:00:00Z`);
+  if (Number.isNaN(parsed.getTime())) return DAY_NAMES;
+  const startIndex = parsed.getUTCDay();
+  return Array.from({ length: 7 }, (_, index) => CALENDAR_DAY_NAMES[(startIndex + index) % 7]);
+}
+
+function dayNameRules(expectedDayNames: string[]) {
+  return `Day labels for every generated week must follow the plan start date order: ${expectedDayNames.map((day, index) => `dayNum ${index + 1} = ${day}`).join(", ")}.`;
+}
+
+function weekOutputShape(weekNum: number, expectedDayNames = DAY_NAMES) {
+  return `{"weekNum":${weekNum},"theme":"<short theme>","summary":"<week purpose>","progressionNote":"<how this week progresses>","days":[{"dayNum":1,"dayName":"${expectedDayNames[0]}","focus":"<focus>","isRest":false,"coachNotes":"<day intent>","sessions":[{"name":"Warm-up","description":"<one sentence>","duration":10,"objective":"<what to accomplish>","intensity":"RPE 3-4","exercises":[{"name":"<name>","duration":"5 min","notes":"<cue>"}]},{"name":"Main Session","description":"<one sentence>","duration":45,"objective":"<what to accomplish>","intensity":"<RPE/grade/effort>","exercises":[{"name":"<name>","sets":"3","reps":"5","work":"10s","restBetweenSets":"3 min","intensity":"RPE 7","grade":"<optional grade>","notes":"<cue>","modifications":"<easier/harder option>"}]},{"name":"Cooldown","description":"<one sentence>","duration":8,"cooldown":"<short cooldown guidance>","exercises":[{"name":"<name>","duration":"5 min","notes":"<cue>"}]}]},{"dayNum":2,"dayName":"${expectedDayNames[1]}","focus":"Rest","isRest":true,"sessions":[]},...7 days total]}`;
+}
+
+function athleteLevelLabel(currentLevel?: string | null, targetLevel?: string | null) {
+  const text = `${currentLevel ?? ""} ${targetLevel ?? ""}`.toLowerCase();
+  if (/\b(novice|beginner|new|returning|untrained)\b/.test(text)) return "novice";
+  if (/\b(intermediate|recreational)\b/.test(text)) return "intermediate";
+  if (/\b(expert|elite|advanced|competitive|pro)\b/.test(text)) return "advanced/expert";
+  const vGrade = text.match(/\bv\s*(\d{1,2})\b/);
+  if (vGrade) {
+    const grade = parseInt(vGrade[1], 10);
+    if (grade <= 2) return "novice";
+    if (grade <= 6) return "intermediate";
+    return "advanced/expert";
+  }
+  if (/\b5\.(1[2-9]|[2-9]\d)/.test(text)) return "advanced/expert";
+  return "intermediate";
+}
+
+function rpeGuidanceForLevel(currentLevel?: string | null, targetLevel?: string | null) {
+  const level = athleteLevelLabel(currentLevel, targetLevel);
+  const band = level === "novice"
+    ? "RPE 3-6"
+    : level === "advanced/expert"
+      ? "RPE 8-10"
+      : "RPE 5-7";
+  return `RPE guidance: athlete appears ${level}; productive main work should generally live around ${band}, while warm-ups, cooldowns, recovery days, and injury-constrained work should stay easier.`;
+}
+
+function deloadGuidance(totalWeeks: number) {
+  return totalWeeks <= 4
+    ? "Do not automatically make the final week a deload in a short block. Use consolidation, testing, or normal progression unless prior weeks are genuinely high load, the athlete requested a deload, or injury/recovery risk justifies unloading."
+    : "Do not deload on a fixed calendar rule. Add a deload only when accumulated load, prior-week intensity, athlete constraints, or the overall block structure justify it.";
+}
 
 export const PLAN_GENERATION_SYSTEM_PROMPT = `You are a JSON API for training plan generation.
 
@@ -58,7 +108,7 @@ function buildWeekPrompt(input: PlanInput, weekNum: number): string {
 
   const phaseNote = (() => {
     const progress = weekNum / input.weeksDuration;
-    if (weekNum % 4 === 0) return "This is a DELOAD week — reduce intensity and volume by 40%, focus on recovery.";
+    if (weekNum % 4 === 0 && input.weeksDuration > 4) return "Consider whether this week should be deload, consolidation, or normal progression based on accumulated load.";
     if (progress < 0.3) return "FOUNDATION phase — build base fitness and technique. Moderate intensity.";
     if (progress < 0.6) return "STRENGTH phase — increase load and difficulty progressively.";
     if (progress < 0.85) return "POWER phase — high intensity limit climbing and recruitment work.";
@@ -77,6 +127,8 @@ ATHLETE:
 WEEK ${weekNum} of ${input.weeksDuration}:
 - ${phaseNote}
 - DISCIPLINE: ${disciplineNote}
+- ${rpeGuidanceForLevel(input.currentGrade, input.targetGrade)}
+- ${deloadGuidance(input.weeksDuration)}
 
 ${PLAN_QUALITY_RULES}
 
@@ -86,7 +138,7 @@ ${input.equipment.includes("campus board") ? "- Campus board available: include 
 ${input.equipment.includes("weights") || input.equipment.includes("gym") ? "- Weights available: include weighted pull-ups and antagonist work." : "- No weights: use bodyweight only."}
 
 OUTPUT: Return ONLY a single JSON object (not an array) in this exact shape:
-{"weekNum":${weekNum},"theme":"<short theme>","summary":"<week purpose>","progressionNote":"<how this week progresses>","days":[{"dayNum":1,"dayName":"Monday","focus":"<focus>","isRest":false,"coachNotes":"<day intent>","sessions":[{"name":"Warm-up","description":"<one sentence>","duration":10,"objective":"<what to accomplish>","intensity":"RPE 3-4","exercises":[{"name":"<name>","duration":"5 min","notes":"<cue>"}]},{"name":"Main Session","description":"<one sentence>","duration":45,"objective":"<what to accomplish>","intensity":"<RPE/grade/effort>","exercises":[{"name":"<name>","sets":"3","reps":"5","work":"10s","restBetweenSets":"3 min","intensity":"RPE 7","grade":"<optional grade>","notes":"<cue>","modifications":"<easier/harder option>"}]},{"name":"Cooldown","description":"<one sentence>","duration":8,"cooldown":"<short cooldown guidance>","exercises":[{"name":"<name>","duration":"5 min","notes":"<cue>"}]}]},{"dayNum":2,"dayName":"Tuesday","focus":"Rest","isRest":true,"sessions":[]},...7 days total]}
+${weekOutputShape(weekNum)}
 
 RULES:
 - Exactly 7 days (Monday–Sunday), dayNum 1–7
@@ -165,7 +217,7 @@ function cappedString(v: unknown, maxLength: number): string | undefined {
   return value.length > maxLength ? value.slice(0, maxLength).trim() : value;
 }
 
-function normalizeWeek(raw: unknown, weekNum: number): WeekData {
+function normalizeWeek(raw: unknown, weekNum: number, expectedDayNames = DAY_NAMES): WeekData {
   const week = (raw && typeof raw === "object") ? raw as Record<string, unknown> : {};
   const theme = asString(week.theme) ?? `Week ${weekNum}`;
   const rawDays = Array.isArray(week.days) ? (week.days as unknown[]) : [];
@@ -180,7 +232,7 @@ function normalizeWeek(raw: unknown, weekNum: number): WeekData {
     if (!Number.isInteger(dayNum) || dayNum < 1 || dayNum > 7) continue;
 
     const isRest = day.isRest === true;
-    const dayName = asString(day.dayName) ?? DAY_NAMES[dayNum - 1];
+    const dayName = expectedDayNames[dayNum - 1];
     const focus = asString(day.focus) ?? (isRest ? "Rest" : "Training");
 
     const rawSessions = Array.isArray(day.sessions) ? (day.sessions as unknown[]) : [];
@@ -250,7 +302,7 @@ function normalizeWeek(raw: unknown, weekNum: number): WeekData {
 
   for (let d = 1; d <= 7; d++) {
     if (!daysByNum.has(d)) {
-      daysByNum.set(d, { dayNum: d, dayName: DAY_NAMES[d - 1], focus: "Rest", isRest: true, sessions: [] });
+      daysByNum.set(d, { dayNum: d, dayName: expectedDayNames[d - 1], focus: "Rest", isRest: true, sessions: [] });
     }
   }
 
@@ -323,7 +375,7 @@ export function summarizeGeneratedWeeks(weeks: Array<WeekData | WeekSnapshot>): 
     });
 }
 
-export function validateGeneratedWeek(week: WeekData, expectedWeekNum: number): WeekData {
+export function validateGeneratedWeek(week: WeekData, expectedWeekNum: number, expectedDayNames = DAY_NAMES): WeekData {
   const errors: string[] = [];
 
   if (week.weekNum !== expectedWeekNum) errors.push(`weekNum must be ${expectedWeekNum}`);
@@ -338,7 +390,7 @@ export function validateGeneratedWeek(week: WeekData, expectedWeekNum: number): 
       continue;
     }
     if (day.dayNum !== expectedDayNum) errors.push(`day ${expectedDayNum} has invalid dayNum`);
-    if (day.dayName !== DAY_NAMES[index]) errors.push(`day ${expectedDayNum} must be ${DAY_NAMES[index]}`);
+    if (day.dayName !== expectedDayNames[index]) errors.push(`day ${expectedDayNum} must be ${expectedDayNames[index]}`);
     if (!day.focus.trim()) errors.push(`day ${expectedDayNum} focus is required`);
     if (day.isRest && day.sessions.length > 0) errors.push(`day ${expectedDayNum} rest day must not have sessions`);
     if (!day.isRest && day.sessions.length < 1) errors.push(`day ${expectedDayNum} training day must have at least one session`);
@@ -364,6 +416,7 @@ export function validateGeneratedWeek(week: WeekData, expectedWeekNum: number): 
 }
 
 function buildPlanRequestWeekPrompt(request: PlanRequest, athleteAge: number, weekNum: number): string {
+  const expectedDayNames = dayNamesForPlanStart(request.startDate);
   const equipmentList = request.equipment.length > 0
     ? request.equipment.join(", ")
     : "no special equipment listed";
@@ -373,7 +426,7 @@ function buildPlanRequestWeekPrompt(request: PlanRequest, athleteAge: number, we
 
   const phaseNote = (() => {
     const progress = weekNum / request.blockLengthWeeks;
-    if (weekNum % 4 === 0) return "This is a DELOAD week - reduce intensity and volume by 40%, focus on recovery.";
+    if (weekNum % 4 === 0 && request.blockLengthWeeks > 4) return "Consider whether this week should be deload, consolidation, or normal progression based on accumulated load.";
     if (progress < 0.3) return "FOUNDATION phase - build base fitness, skill, and movement quality.";
     if (progress < 0.6) return "BUILD phase - increase workload progressively.";
     if (progress < 0.85) return "SPECIFIC phase - shift toward goal-specific sessions.";
@@ -405,14 +458,17 @@ ATHLETE_CONTEXT:
 
 WEEK ${weekNum} of ${request.blockLengthWeeks}:
 - ${phaseNote}
+- ${rpeGuidanceForLevel(request.currentLevel, request.targetLevel)}
+- ${deloadGuidance(request.blockLengthWeeks)}
 
 ${PLAN_QUALITY_RULES}
 
 OUTPUT: Return ONLY a single JSON object (not an array) in this exact shape:
-{"weekNum":${weekNum},"theme":"<short theme>","summary":"<week purpose>","progressionNote":"<how this week progresses>","days":[{"dayNum":1,"dayName":"Monday","focus":"<focus>","isRest":false,"coachNotes":"<day intent>","sessions":[{"name":"Warm-up","description":"<one sentence>","duration":10,"objective":"<what to accomplish>","intensity":"RPE 3-4","exercises":[{"name":"<name>","duration":"5 min","notes":"<cue>"}]},{"name":"Main Session","description":"<one sentence>","duration":45,"objective":"<what to accomplish>","intensity":"<RPE/grade/effort>","exercises":[{"name":"<name>","sets":"3","reps":"5","work":"10s","restBetweenSets":"3 min","intensity":"RPE 7","grade":"<optional grade>","notes":"<cue>","modifications":"<easier/harder option>"}]},{"name":"Cooldown","description":"<one sentence>","duration":8,"cooldown":"<short cooldown guidance>","exercises":[{"name":"<name>","duration":"5 min","notes":"<cue>"}]}]},{"dayNum":2,"dayName":"Tuesday","focus":"Rest","isRest":true,"sessions":[]},...7 days total]}
+${weekOutputShape(weekNum, expectedDayNames)}
 
 RULES:
-- Exactly 7 days (Monday-Sunday), dayNum 1-7
+- Exactly 7 days, dayNum 1-7
+- ${dayNameRules(expectedDayNames)}
 - Rest days: isRest=true, sessions=[], focus="Rest"
 - Training days may have multiple sessions when useful. Warm-up, Main Session, and Cooldown are examples, not a hard limit or required structure.
 - Main Session should contain 2-4 exercises; Warm-up/Cooldown should contain 1-2 exercises.
@@ -434,6 +490,7 @@ export function buildNextWeekPrompt(params: {
   repairFeedback?: string | null;
 }) {
   const { request, athleteAge, weekNum } = params;
+  const expectedDayNames = dayNamesForPlanStart(request.startDate);
   const totalWeeks = params.totalWeeks ?? request.blockLengthWeeks;
   const previousWeekSummaries = params.previousWeekSummaries.slice(-6);
   const previousWeekContext = previousWeekSummaries.length
@@ -448,7 +505,7 @@ export function buildNextWeekPrompt(params: {
 
   const phaseNote = (() => {
     const progress = weekNum / totalWeeks;
-    if (weekNum % 4 === 0) return "This is a deload or consolidation week unless the prior weeks were already very light.";
+    if (weekNum % 4 === 0 && totalWeeks > 4) return "Consider whether this week should be deload, consolidation, or normal progression based on prior-week load.";
     if (progress < 0.3) return "Foundation phase: build repeatable skill, base capacity, and movement quality.";
     if (progress < 0.6) return "Build phase: progress workload from prior weeks without a sudden spike.";
     if (progress < 0.85) return "Specific phase: make sessions more goal-specific while preserving recovery.";
@@ -483,6 +540,8 @@ ATHLETE_CONTEXT:
 WEEK_TO_GENERATE:
 - Week ${weekNum} of ${totalWeeks}
 - ${phaseNote}
+- ${rpeGuidanceForLevel(request.currentLevel, request.targetLevel)}
+- ${deloadGuidance(totalWeeks)}
 
 PREVIOUS_WEEK_SUMMARIES_JSON:
 ${previousWeekContext}
@@ -493,17 +552,18 @@ PROGRESSION RULES:
 - Do not repeat the exact same week unless repair feedback explicitly asks for a reset.
 - Progress volume, intensity, exercise difficulty, or specificity gradually.
 - Keep recovery load coherent with prior training days, rest days, and total exercises.
-- If prior weeks were heavy, choose a more conservative week.
+- If prior weeks were heavy, choose a more conservative week; if prior weeks were light, keep progressing instead of defaulting to a deload.
 - If this is Week 1, create a measured baseline week.
 ${params.repairFeedback ? `- Repair feedback from the athlete/coach: ${params.repairFeedback}` : "- No repair feedback provided."}
 
 ${PLAN_QUALITY_RULES}
 
 OUTPUT: Return ONLY a single JSON object (not an array) in this exact shape:
-{"weekNum":${weekNum},"theme":"<short theme>","summary":"<week purpose>","progressionNote":"<how this week progresses>","days":[{"dayNum":1,"dayName":"Monday","focus":"<focus>","isRest":false,"coachNotes":"<day intent>","sessions":[{"name":"Warm-up","description":"<one sentence>","duration":10,"objective":"<what to accomplish>","intensity":"RPE 3-4","exercises":[{"name":"<name>","duration":"5 min","notes":"<cue>"}]},{"name":"Main Session","description":"<one sentence>","duration":45,"objective":"<what to accomplish>","intensity":"<RPE/grade/effort>","exercises":[{"name":"<name>","sets":"3","reps":"5","work":"10s","restBetweenSets":"3 min","intensity":"RPE 7","grade":"<optional grade>","notes":"<cue>","modifications":"<easier/harder option>"}]},{"name":"Cooldown","description":"<one sentence>","duration":8,"cooldown":"<short cooldown guidance>","exercises":[{"name":"<name>","duration":"5 min","notes":"<cue>"}]}]},{"dayNum":2,"dayName":"Tuesday","focus":"Rest","isRest":true,"sessions":[]},...7 days total]}
+${weekOutputShape(weekNum, expectedDayNames)}
 
 RULES:
-- Exactly 7 days (Monday-Sunday), dayNum 1-7
+- Exactly 7 days, dayNum 1-7
+- ${dayNameRules(expectedDayNames)}
 - Rest days: isRest=true, sessions=[], focus="Rest"
 - Training days may have multiple sessions when useful. Warm-up, Main Session, and Cooldown are examples, not a hard limit or required structure.
 - Choose exercises appropriate to the sport, goal, available equipment, and constraints
@@ -565,7 +625,12 @@ async function callApiWithPrompt(prompt: string, weekNum: number, username?: str
   return { text, finishReason };
 }
 
-async function generateWeekFromPrompt(prompt: string, weekNum: number, username?: string): Promise<WeekData> {
+async function generateWeekFromPrompt(
+  prompt: string,
+  weekNum: number,
+  username?: string,
+  expectedDayNames = DAY_NAMES,
+): Promise<WeekData> {
   const errors: string[] = [];
 
   for (let attempt = 1; attempt <= 2; attempt++) {
@@ -602,7 +667,7 @@ async function generateWeekFromPrompt(prompt: string, weekNum: number, username?
     }
 
     if (parseOk) {
-      return validateGeneratedWeek(normalizeWeek(raw, weekNum), weekNum);
+      return validateGeneratedWeek(normalizeWeek(raw, weekNum, expectedDayNames), weekNum, expectedDayNames);
     }
 
     errors.push(`attempt ${attempt}: unparseable (finish_reason=${apiResult.finishReason}). Raw head: ${cleaned.slice(0, 200)}`);
@@ -617,7 +682,12 @@ async function generateWeek(input: PlanInput, weekNum: number, username?: string
 }
 
 async function generateWeekFromPlanRequest(request: PlanRequest, athleteAge: number, weekNum: number, username?: string): Promise<WeekData> {
-  return generateWeekFromPrompt(buildPlanRequestWeekPrompt(request, athleteAge, weekNum), weekNum, username);
+  return generateWeekFromPrompt(
+    buildPlanRequestWeekPrompt(request, athleteAge, weekNum),
+    weekNum,
+    username,
+    dayNamesForPlanStart(request.startDate),
+  );
 }
 
 export async function generateNextWeekFromPlanContext(params: GenerateNextWeekContext): Promise<WeekData> {
@@ -632,7 +702,62 @@ export async function generateNextWeekFromPlanContext(params: GenerateNextWeekCo
     repairFeedback: params.repairFeedback,
   });
 
-  return generateWeekFromPrompt(prompt, params.weekNum, params.username);
+  return generateWeekFromPrompt(prompt, params.weekNum, params.username, dayNamesForPlanStart(params.request.startDate));
+}
+
+export async function generateAdjustedWeekFromIntent(params: {
+  originalWeek: WeekSnapshot;
+  previousAdjustedWeeks: WeekSnapshot[];
+  planGuidance: unknown;
+  adjustmentIntent: AdjustmentIntent;
+  athleteAge: number;
+  username?: string;
+  repairFeedback?: string | null;
+}): Promise<WeekData> {
+  const expectedDayNames = params.originalWeek.days
+    .slice()
+    .sort((a, b) => a.dayNum - b.dayNum)
+    .map((day) => day.dayName);
+  const prompt = `You are an experienced training coach. Adjust ONE week of an existing training plan as JSON.
+
+ATHLETE:
+- Age: ${params.athleteAge}
+
+ORIGINAL_WEEK_JSON:
+${JSON.stringify(params.originalWeek)}
+
+PLAN_GUIDANCE_JSON:
+${JSON.stringify(params.planGuidance ?? null)}
+
+PREVIOUS_ADJUSTED_WEEKS_JSON:
+${JSON.stringify(params.previousAdjustedWeeks.map((week) => ({
+  weekNum: week.weekNum,
+  theme: week.theme,
+  summary: week.summary ?? null,
+  progressionNote: week.progressionNote ?? null,
+})))}
+
+ADJUSTMENT_INTENT_JSON:
+${JSON.stringify(params.adjustmentIntent)}
+
+${params.repairFeedback ? `REPAIR_FEEDBACK:\n${params.repairFeedback}\n` : ""}
+
+RULES:
+- Return exactly one WeekData JSON object for weekNum ${params.originalWeek.weekNum}.
+- Preserve dayNum/dayName order and exactly 7 days.
+- Apply the adjustment intent only to days listed in changedDays for this week, unless a week-level note clearly requires supporting changes.
+- Keep days before effectiveFromPlanDay unchanged.
+- Preserve useful warmups, cooldowns, session objectives, exercise modifications, and structured prescription fields unless the intent says to change them.
+- Update week.summary and week.progressionNote so they accurately describe the adjusted prescription. If RPE, intensity, volume, duration, distance, rest, or load changes, the week summary/progression note must mention the new targets instead of old ones.
+- Update affected day coachNotes and session intensity fields so they match changed exercise prescription fields.
+- Keep rest days as rest days unless the intent explicitly changes schedule placement.
+- Keep all string values short.
+- Return ONLY JSON, no markdown.
+
+OUTPUT SHAPE:
+{"weekNum":${params.originalWeek.weekNum},"theme":"<theme>","summary":"<week purpose>","progressionNote":"<progression>","days":[{"dayNum":1,"dayName":"${expectedDayNames[0] ?? "Monday"}","focus":"<focus>","isRest":false,"coachNotes":"<day intent>","sessions":[{"name":"Main Session","description":"<one sentence>","duration":45,"objective":"<objective>","intensity":"RPE 6-7","exercises":[{"name":"<name>","sets":"3","reps":"5","duration":null,"rest":"2 min","intensity":"RPE 7","notes":"<cue>","modifications":"<option>"}]}]}]}`;
+
+  return generateWeekFromPrompt(prompt, params.originalWeek.weekNum, params.username, expectedDayNames.length === 7 ? expectedDayNames : DAY_NAMES);
 }
 
 export async function generatePlanWithAI(input: PlanInput, username?: string): Promise<WeekData[]> {

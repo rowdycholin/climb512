@@ -19,12 +19,18 @@ function snapshotForGenerationState(params: {
   currentSnapshot: PlanSnapshot | null;
   generationStatus: string;
   generationJobs: Array<{
+    jobType?: string;
     weeks: Array<{
       weekSnapshot: unknown;
     }>;
   }>;
 }) {
-  const rows = params.generationJobs[0]?.weeks ?? [];
+  const latestJob = params.generationJobs[0] ?? null;
+  const rows = latestJob?.weeks ?? [];
+  if (latestJob?.jobType === "adjustment" && params.currentSnapshot) {
+    return params.currentSnapshot;
+  }
+
   if (rows.length === 0) return params.currentSnapshot ?? { weeks: [] };
 
   const generatedSnapshot = composePlanSnapshotFromGeneratedWeeks(

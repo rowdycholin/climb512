@@ -93,7 +93,7 @@ const INTAKE_REFUSAL_MESSAGE =
   "I can only help create training plans here. Tell me about your sport, goal, schedule, equipment, current level, or limitations.";
 
 export const INTAKE_VALIDATION_FALLBACK_MESSAGE =
-  "I had trouble reading that plan intake response. Please answer the current training-plan question again.";
+  "I had trouble reading that answer.";
 
 export const INTAKE_TRUNCATED_MESSAGE =
   "That response got cut off. Please send your last answer again.";
@@ -102,11 +102,12 @@ export const INTAKE_READY_MESSAGE =
   "I have enough information to build your plan. Click the magic wand button to generate it.";
 
 export const FINAL_INTAKE_REVIEW_QUESTION =
-  "Is there anything else I should know about you or your goals before I am ready to generate the plan?";
+  "Great, I have the main pieces. Is there anything else I should know about you or your goals before I am ready to generate the plan?";
 export const PREFERRED_WORKOUT_DAYS_QUESTION =
-  "Are there specific days you like to work out?";
+  "Good, that gives me the weekly shape. Are there specific days you like to work out?";
 export const PREFERRED_REST_DAYS_QUESTION =
-  "Are there specific days you would prefer as rest days?";
+  "Got it. Are there specific days you would prefer as rest days?";
+const GENERAL_FINAL_REVIEW_PATTERN = /\b(any other|anything else).*\b(constraints?|preferences?|account for|know)\b/i;
 
 const TEST_INVALID_AI_OUTPUT_MESSAGE = "__test_invalid_ai_output__";
 
@@ -170,12 +171,44 @@ function refusalResponse(draft: PartialIntakeDraft): IntakeResponse {
   };
 }
 
-function validationFallbackResponse(draft: PartialIntakeDraft): IntakeResponse {
+function validationFallbackResponse(draft: PartialIntakeDraft, previousPrompt?: string): IntakeResponse {
+  const prompt = previousPrompt?.trim();
   return {
     draft,
     ready: false,
-    assistantMessage: INTAKE_VALIDATION_FALLBACK_MESSAGE,
+    assistantMessage: prompt
+      ? `${INTAKE_VALIDATION_FALLBACK_MESSAGE} Let me ask that again: ${prompt}`
+      : `${INTAKE_VALIDATION_FALLBACK_MESSAGE} Please answer the previous training-plan question again.`,
   };
+}
+
+function isNoPreferenceAnswer(answer: string) {
+  return /^(?:no|nope|none|nothing|no constraints?|no preferences?|that's all|that is all|done)[.!]?\s*$/i.test(answer.trim());
+}
+
+function parseAvoidExercisePreference(answer: string) {
+  const trimmed = answer.trim();
+  if (!trimmed || isNoPreferenceAnswer(trimmed)) return undefined;
+  const match = trimmed.match(/\b(?:no|avoid|skip|exclude|don't include|do not include)\s+(.+?)(?:\s+exercises?)?\.?$/i);
+  return match?.[1]?.trim() || undefined;
+}
+
+function appendAvoidExercise(draft: PartialIntakeDraft, avoidExercise: string) {
+  const avoid = avoidExercise.trim();
+  if (!avoid) return;
+  const constraints = draft.constraints ?? { injuries: [], limitations: [], avoidExercises: [] };
+  const avoidExercises = new Set([...(constraints.avoidExercises ?? [])]);
+  avoidExercises.add(avoid);
+  draft.constraints = {
+    injuries: constraints.injuries ?? [],
+    limitations: constraints.limitations ?? [],
+    avoidExercises: Array.from(avoidExercises),
+  };
+}
+
+function isFinalReviewPrompt(prompt: string) {
+  const trimmed = prompt.trim();
+  return trimmed === FINAL_INTAKE_REVIEW_QUESTION || GENERAL_FINAL_REVIEW_PATTERN.test(trimmed);
 }
 
 function latestAssistantMessage(messages: IntakeMessage[]) {
@@ -324,9 +357,13 @@ function withDirectAnswerHints(input: PlanIntakeAiInput): PlanIntakeAiInput {
     }
   }
 
-  if (previousPrompt.trim() === FINAL_INTAKE_REVIEW_QUESTION) {
+  if (isFinalReviewPrompt(previousPrompt)) {
     draft.finalIntakeReviewAsked = true;
-    if (answer && !/\b(no|nope|nothing|that's all|that is all|done)\b/i.test(answer)) {
+    const avoidExercise = parseAvoidExercisePreference(answer);
+    if (avoidExercise) {
+      appendAvoidExercise(draft, avoidExercise);
+      appendPlanStructureNote(draft, `Avoid exercises: ${avoidExercise}`);
+    } else if (answer && !isNoPreferenceAnswer(answer)) {
       appendPlanStructureNote(draft, answer);
     }
   }
@@ -637,9 +674,9 @@ function mergeDrafts(previous: PartialIntakeDraft, next: PartialIntakeDraft): Pa
     ...next,
     constraints: next.constraints
       ? {
-          injuries: next.constraints.injuries ?? [],
-          limitations: next.constraints.limitations ?? [],
-          avoidExercises: next.constraints.avoidExercises ?? [],
+          injuries: Array.from(new Set([...(previous.constraints?.injuries ?? []), ...(next.constraints.injuries ?? [])])),
+          limitations: Array.from(new Set([...(previous.constraints?.limitations ?? []), ...(next.constraints.limitations ?? [])])),
+          avoidExercises: Array.from(new Set([...(previous.constraints?.avoidExercises ?? []), ...(next.constraints.avoidExercises ?? [])])),
         }
       : previous.constraints,
     strengthTraining: next.strengthTraining
@@ -662,6 +699,50 @@ function constraintsAnswered(draft: PartialIntakeDraft) {
 
 function asksAboutConstraints(message: string) {
   return /\b(injur|injuries|hurt|pain|limitation|limitations|avoid|exercise(?:s)? to avoid|movement limitation)\b/i.test(message);
+}
+
+function isStrengthPrimaryRequest(draft: PartialIntakeDraft | Record<string, unknown>) {
+  const strengthTraining = draft.strengthTraining && typeof draft.strengthTraining === "object"
+    ? draft.strengthTraining as { include?: unknown }
+    : null;
+  if (typeof strengthTraining?.include === "boolean") return false;
+
+  const text = [
+    typeof draft.sport === "string" ? draft.sport : "",
+    Array.isArray(draft.disciplines) ? draft.disciplines.filter((item): item is string => typeof item === "string").join(" ") : "",
+    typeof draft.goalType === "string" ? draft.goalType : "",
+    typeof draft.goalDescription === "string" ? draft.goalDescription : "",
+  ].join(" ").toLowerCase();
+
+  const sportText = [
+    typeof draft.sport === "string" ? draft.sport : "",
+    Array.isArray(draft.disciplines) ? draft.disciplines.filter((item): item is string => typeof item === "string").join(" ") : "",
+  ].join(" ").toLowerCase();
+
+  if (/\b(strength training|weight training|weight lifting|weightlifting|powerlifting|bodybuilding|lifting)\b/.test(sportText)) {
+    return true;
+  }
+
+  return /\b(strength training|weight training|weight lifting|weightlifting|powerlifting|bodybuilding|barbell|hypertrophy)\b/.test(text)
+    || draft.goalType === "strength";
+}
+
+function withInferredStrengthTraining<T extends PartialIntakeDraft | Record<string, unknown>>(draft: T): T {
+  if (!isStrengthPrimaryRequest(draft)) return draft;
+  const typedDraft = draft as T & PartialIntakeDraft;
+  const focus = new Set([...(typedDraft.trainingFocus ?? []), "strength"]);
+  const focusAreas = new Set([...(typedDraft.strengthTraining?.focusAreas ?? [])]);
+  const sportText = [typedDraft.sport, typedDraft.goalDescription].filter(Boolean).join(" ");
+  if (sportText.trim()) focusAreas.add(sportText.trim());
+  return {
+    ...typedDraft,
+    trainingFocus: Array.from(focus),
+    strengthTraining: {
+      ...typedDraft.strengthTraining,
+      include: true,
+      focusAreas: Array.from(focusAreas),
+    },
+  };
 }
 
 function strengthTrainingAnswered(draft: PartialIntakeDraft) {
@@ -687,6 +768,7 @@ function asksAboutCompletedField(message: string, draft: PartialIntakeDraft) {
 }
 
 export function nextNonDuplicateQuestion(response: PlanIntakeAiResponse) {
+  const draft = withInferredStrengthTraining(response.planRequestDraft);
   const message = firstQuestionOnly(response.message);
   if (looksLikeTruncatedAssistantMessage(message)) {
     return INTAKE_TRUNCATED_MESSAGE;
@@ -700,13 +782,13 @@ export function nextNonDuplicateQuestion(response: PlanIntakeAiResponse) {
     return message;
   }
 
-  if (asksAboutCompletedField(message, response.planRequestDraft)) {
-    return nextQuestionForDraft(response.planRequestDraft);
+  if (asksAboutCompletedField(message, draft)) {
+    return nextQuestionForDraft(draft);
   }
 
-  if (!constraintsAnswered(response.planRequestDraft) || !asksAboutConstraints(message)) return message;
+  if (!constraintsAnswered(draft) || !asksAboutConstraints(message)) return message;
 
-  const fallback = nextQuestionForDraft(response.planRequestDraft);
+  const fallback = nextQuestionForDraft(draft);
   return asksAboutConstraints(fallback)
     ? "Any training preferences I should account for before I build the plan?"
     : fallback;
@@ -717,7 +799,7 @@ function normalizeAiResponse(response: unknown, clientToday?: string) {
   const raw = response as Record<string, unknown>;
   const planRequestDraft = normalizeAiDraft(raw.planRequestDraft, clientToday);
   const message = cleanString(raw.message) ?? nextQuestionForDraft(planRequestDraft);
-  if (message.trim() === FINAL_INTAKE_REVIEW_QUESTION) {
+  if (isFinalReviewPrompt(message)) {
     planRequestDraft.finalIntakeReviewAsked = true;
   }
   return {
@@ -728,38 +810,43 @@ function normalizeAiResponse(response: unknown, clientToday?: string) {
 }
 
 export function validatePlanIntakeAiResponse(response: unknown, clientToday?: string) {
-  return planIntakeAiResponseSchema.parse(normalizeAiResponse(response, clientToday));
+  const parsed = planIntakeAiResponseSchema.parse(normalizeAiResponse(response, clientToday));
+  return {
+    ...parsed,
+    planRequestDraft: withInferredStrengthTraining(parsed.planRequestDraft),
+  };
 }
 
 function requiredFieldStatus(draft: PartialIntakeDraft) {
+  const inferredDraft = withInferredStrengthTraining(draft);
   const missing: string[] = [];
-  if (!draft.sport) missing.push("sport");
-  if (!draft.goalDescription) missing.push("goalDescription");
-  if (!draft.goalType) missing.push("goalType");
-  if (!draft.blockLengthWeeks) missing.push("blockLengthWeeks");
-  if (!draft.daysPerWeek) missing.push("daysPerWeek");
-  if (!draft.startDate) missing.push("startDate");
-  if (!draft.currentLevel) missing.push("currentLevel");
-  if (!draft.equipment?.length) missing.push("equipment");
-  if (!draft.constraints) missing.push("constraints");
-  if (!strengthTrainingAnswered(draft)) missing.push("strengthTraining");
+  if (!inferredDraft.sport) missing.push("sport");
+  if (!inferredDraft.goalDescription) missing.push("goalDescription");
+  if (!inferredDraft.goalType) missing.push("goalType");
+  if (!inferredDraft.blockLengthWeeks) missing.push("blockLengthWeeks");
+  if (!inferredDraft.daysPerWeek) missing.push("daysPerWeek");
+  if (!inferredDraft.startDate) missing.push("startDate");
+  if (!inferredDraft.currentLevel) missing.push("currentLevel");
+  if (!inferredDraft.equipment?.length) missing.push("equipment");
+  if (!inferredDraft.constraints) missing.push("constraints");
+  if (!strengthTrainingAnswered(inferredDraft)) missing.push("strengthTraining");
   return missing;
 }
 
 function nextQuestionForDraft(draft: PartialIntakeDraft | Record<string, unknown>) {
   const missing = requiredFieldStatus(draft as PartialIntakeDraft);
   const next = missing[0];
-  if (next === "sport") return "What sport or discipline would you like to train for?";
-  if (next === "goalDescription") return "What goal do you want this training plan to support?";
-  if (next === "goalType") return "Is this for a specific event or an ongoing training goal?";
-  if (next === "blockLengthWeeks") return "How many weeks should this training block be?";
-  if (next === "daysPerWeek") return "How many days per week can you train?";
-  if (next === "startDate") return "When would you like to start?";
-  if (next === "currentLevel") return "What is your current training level?";
-  if (next === "equipment") return "What equipment do you have available?";
-  if (next === "constraints") return "Do you have any injuries or pain I should account for?";
-  if (next === "strengthTraining") return "Do you want strength training included in this plan?";
-  return "Any other constraints or preferences I should account for?";
+  if (next === "sport") return "Let’s build this around the right target. What sport or discipline would you like to train for?";
+  if (next === "goalDescription") return "Got it. What goal do you want this training plan to support?";
+  if (next === "goalType") return "That helps. Is this for a specific event or an ongoing training goal?";
+  if (next === "blockLengthWeeks") return "Good, now we need the size of the block. How many weeks should this training block be?";
+  if (next === "daysPerWeek") return "Nice, that gives me the direction. How many days per week can you train?";
+  if (next === "startDate") return "Perfect, let’s anchor this on the calendar. When would you like to start?";
+  if (next === "currentLevel") return "Good context. What is your current training level?";
+  if (next === "equipment") return "Great, now I can match the work to what you actually have. What equipment do you have available?";
+  if (next === "constraints") return "Before I load this up, I want to keep it sane. Do you have any injuries or pain I should account for?";
+  if (next === "strengthTraining") return "One more programming choice. Do you want strength training included in this plan?";
+  return FINAL_INTAKE_REVIEW_QUESTION;
 }
 
 export function buildCoachIntakePrompt(input: PlanIntakeAiInput) {
@@ -956,6 +1043,10 @@ export async function continuePlanIntakeWithAiContract(input: PlanIntakeAiInput)
     });
   } catch (error) {
     console.warn(`[ai-intake] Falling back after invalid or failed intake response: ${(error as Error).message}`);
-    return validationFallbackResponse(input.draft);
+    const previousPrompt = latestAssistantMessage(input.messages);
+    const fallbackDraft = isFinalReviewPrompt(previousPrompt)
+      ? hintedInput.draft
+      : input.draft;
+    return validationFallbackResponse(fallbackDraft, previousPrompt);
   }
 }

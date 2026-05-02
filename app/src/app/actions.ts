@@ -46,11 +46,13 @@ import { AiAdjustmentJsonError, generateAdjustmentChatResponse, shouldUseModelBa
 import {
   buildAdjustmentChatContext,
   createAdjustmentChatState,
+  adjustmentIntentSchema,
   adjustmentChatProposalSchema,
   summarizeRichSnapshotChanges,
   validateAdjustmentChatProposal,
   type AdjustmentChatMessage,
   type AdjustmentChatProposal,
+  type AdjustmentIntent,
 } from "@/lib/plan-adjustment-chat";
 import {
   buildPlanAdjustmentRequest,
@@ -1819,6 +1821,14 @@ export async function continuePlanAdjustmentChat(formData: FormData): Promise<Pl
       };
     }
 
+    if (response.responseType === "intent") {
+      return {
+        responseType: "proposal",
+        assistantMessage: response.assistantMessage,
+        proposal: JSON.stringify(response.intent),
+      };
+    }
+
     const normalizedProposal = normalizedAdjustmentProposal({
       proposal: response.proposal,
       originalSnapshot: currentSnapshot,
@@ -1843,7 +1853,25 @@ export async function continuePlanAdjustmentChat(formData: FormData): Promise<Pl
     };
   } catch (error) {
     if (error instanceof AiAdjustmentJsonError) {
-      return { error: error.message };
+      console.warn(`[ai-adjustment] falling back to deterministic proposal after malformed live response: ${error.message}`);
+      try {
+        const fallbackProposal = fallbackAdjustmentChatProposal({
+          currentSnapshot,
+          feedback: latestFeedback,
+          effectiveFromPlanDay: effectiveFrom.planDay,
+          lockedPlanDays,
+        });
+
+        return {
+          responseType: "proposal",
+          assistantMessage: "The live coach response came back malformed, so I built a conservative adjustment proposal locally. Review it before applying.",
+          proposal: JSON.stringify(fallbackProposal),
+        };
+      } catch (fallbackError) {
+        return {
+          error: `Adjustment proposal was rejected after live response repair failed: ${(fallbackError as Error).message}`,
+        };
+      }
     }
     return { error: (error as Error).message };
   }
@@ -1970,6 +1998,16 @@ async function saveConfirmedAiAdjustmentProposal(input: {
     return { error: "Adjustment proposal could not be read" };
   }
 
+  const parsedIntent = adjustmentIntentSchema.safeParse(rawProposalJson);
+  if (parsedIntent.success) {
+    return saveConfirmedAiAdjustmentIntent({
+      planId: input.planId,
+      intent: parsedIntent.data,
+      feedback: input.feedback,
+      goalChangeConfirmed: input.goalChangeConfirmed,
+    });
+  }
+
   const parsedProposal = adjustmentChatProposalSchema.safeParse(rawProposalJson);
   if (!parsedProposal.success) {
     return { error: "Adjustment proposal could not be read" };
@@ -2041,33 +2079,176 @@ async function saveConfirmedAiAdjustmentProposal(input: {
     summary: day.summary,
   }));
 
-  await createPlanVersion({
-    planId: input.planId,
-    profileSnapshot,
-    planSnapshot: normalizedProposal.revisedPlanSnapshot,
-    changeType: "ai_chat_adjustment",
-    changeSummary: summary,
-    changeMetadata: {
-      type: "ai_chat_adjustment",
-      summary,
-      changes: [
-        ...normalizedProposal.changes,
-        ...richChanges.planGuidance,
-        ...richChanges.coaching,
-        ...richChanges.prescriptions,
-      ],
-      scope: null,
-      affectedDays,
-      richChanges,
-    },
-    basedOnVersionId: plan.currentVersion.id,
-    effectiveFromWeek: proposalEffective.weekNum,
-    effectiveFromDay: normalizedProposal.effectiveFromPlanDay,
+  await prisma.$transaction(async (tx) => {
+    await tx.planGenerationJob.create({
+      data: {
+        planId: input.planId,
+        userId: plan.userId,
+        jobType: "adjustment",
+        baseVersionId: plan.currentVersion.id,
+        status: "pending",
+        totalWeeks: normalizedProposal.revisedPlanSnapshot.weeks.length,
+        nextWeekNum: proposalEffective.weekNum,
+        profileSnapshot: toStoredJson(profileSnapshot),
+        changeMetadata: toStoredJson({
+          type: "ai_chat_adjustment",
+          summary,
+          proposalSummary: summary,
+          proposalChanges: [
+            ...normalizedProposal.changes,
+            ...richChanges.planGuidance,
+            ...richChanges.coaching,
+            ...richChanges.prescriptions,
+          ],
+          effectiveFromPlanDay: normalizedProposal.effectiveFromPlanDay,
+          scope: null,
+          affectedDays,
+          richChanges,
+          revisedPlanSnapshot: normalizedProposal.revisedPlanSnapshot,
+        }),
+      },
+    });
+
+    await tx.plan.update({
+      where: { id: input.planId },
+      data: {
+        generationStatus: "pending",
+        generationError: null,
+        generatedWeeks: 0,
+        updatedAt: new Date(),
+      },
+    });
   });
 
   return {
     ok: true,
-    summary,
+    summary: `${summary} Generation has started and will apply after the adjusted weeks finish.`,
+    effectiveFrom: effectiveLabel,
+  };
+}
+
+async function saveConfirmedAiAdjustmentIntent(input: {
+  planId: string;
+  intent: AdjustmentIntent;
+  feedback: string;
+  goalChangeConfirmed?: boolean;
+}): Promise<FuturePlanAdjustmentResponse> {
+  const session = await getSession();
+  if (!session.isLoggedIn) return { error: "Please sign in again" };
+
+  const plan = await findOwnedPlanWithLogs(input.planId, session.userId);
+  if (!plan?.currentVersion) return { error: "Plan not found" };
+
+  if (input.intent.requiresGoalChangeConfirmation && !input.goalChangeConfirmed) {
+    return { error: "Confirm the goal change before applying this adjustment" };
+  }
+
+  const currentSnapshot = plan.currentVersion.planSnapshot;
+  const profileSnapshot = parseProfileSnapshot(plan.currentVersion.profileSnapshot);
+  const logs: WorkoutLogDayMarker[] = plan.workoutLogs
+    .filter(hasMeaningfulWorkoutLog)
+    .map((log) => ({
+      weekNum: log.weekNum,
+      dayNum: log.dayNum,
+      sessionKey: log.sessionKey,
+      exerciseKey: log.exerciseKey,
+      exerciseName: log.exerciseName,
+      completed: log.completed,
+    }));
+  const lockedPlanDays = new Set(logs.map((log) => planDayFromWeekDay(log.weekNum, log.dayNum)));
+  const effectiveFrom = findNextUnloggedPlanDay({
+    planStartDate: plan.startDate,
+    currentDate: new Date(),
+    snapshot: currentSnapshot,
+    logs,
+  });
+  if (!effectiveFrom) {
+    return { error: "There are no unlogged days left to adjust in this plan" };
+  }
+  if (input.intent.effectiveFromPlanDay < effectiveFrom.planDay) {
+    return { error: "Adjustment intent starts before the first editable plan day" };
+  }
+
+  const changedDays = input.intent.changedDays.filter((day) => day.planDay >= effectiveFrom.planDay && !lockedPlanDays.has(day.planDay));
+  if (changedDays.length === 0) {
+    return { error: "Adjustment intent did not include any editable future days" };
+  }
+
+  const adjustedWeekNums = Array.from(new Set(changedDays.map((day) => day.weekNum))).sort((a, b) => a - b);
+  const firstWeek = adjustedWeekNums[0];
+  const lastWeek = adjustedWeekNums[adjustedWeekNums.length - 1];
+  const totalWeeks = lastWeek;
+  const proposalEffective = dayRefForPlanDayFromStart(plan.startDate, input.intent.effectiveFromPlanDay);
+  const effectiveLabel = formatEffectiveFrom(proposalEffective);
+  const summary = formatAdjustmentSummary({
+    feedback: input.feedback || input.intent.summary,
+    effectiveLabel,
+  });
+  const dayNames = new Map<string, string>();
+  for (const week of currentSnapshot.weeks) {
+    for (const day of week.days) {
+      dayNames.set(`${week.weekNum}:${day.dayNum}`, day.dayName);
+    }
+  }
+  const affectedDays = changedDays.map((day) => ({
+    weekNum: day.weekNum,
+    dayNum: day.dayNum,
+    planDay: day.planDay,
+    dayName: dayNames.get(`${day.weekNum}:${day.dayNum}`) ?? `Day ${day.dayNum}`,
+    summary: day.summary,
+  }));
+
+  await prisma.$transaction(async (tx) => {
+    await tx.planGenerationJob.create({
+      data: {
+        planId: input.planId,
+        userId: plan.userId,
+        jobType: "adjustment",
+        baseVersionId: plan.currentVersion.id,
+        status: "pending",
+        totalWeeks,
+        nextWeekNum: firstWeek,
+        profileSnapshot: toStoredJson(profileSnapshot),
+        changeMetadata: toStoredJson({
+          type: "ai_chat_adjustment_intent",
+          summary,
+          proposalSummary: summary,
+          proposalChanges: [
+            ...input.intent.changes,
+            ...input.intent.prescriptionChanges,
+            ...input.intent.coachingChanges,
+          ],
+          effectiveFromPlanDay: input.intent.effectiveFromPlanDay,
+          affectedDays,
+          richChanges: {
+            planGuidance: input.intent.richImpact.planGuidance ? input.intent.coachingChanges : [],
+            coaching: input.intent.richImpact.dayCoaching || input.intent.richImpact.weekSummaries ? input.intent.coachingChanges : [],
+            prescriptions: input.intent.richImpact.exercisePrescriptions ? input.intent.prescriptionChanges : [],
+          },
+          adjustmentIntent: {
+            ...input.intent,
+            changedDays,
+            changedWeeks: adjustedWeekNums,
+            targetWeeks: input.intent.targetWeeks.length ? input.intent.targetWeeks : adjustedWeekNums,
+          },
+        }),
+      },
+    });
+
+    await tx.plan.update({
+      where: { id: input.planId },
+      data: {
+        generationStatus: "pending",
+        generationError: null,
+        generatedWeeks: 0,
+        updatedAt: new Date(),
+      },
+    });
+  });
+
+  return {
+    ok: true,
+    summary: `${summary} Generation has started and will apply after the adjusted weeks finish.`,
     effectiveFrom: effectiveLabel,
   };
 }

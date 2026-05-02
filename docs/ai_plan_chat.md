@@ -82,6 +82,10 @@ The live guided interview is now coach-led rather than template-led. It sends th
 
 The intake prompt includes the browser's local date and time zone, and the date boundary normalizes relative or ambiguous date answers. `today`, `now`, `as soon as possible`, slash dates, and month-name dates such as `Monday May 4th` are normalized to `YYYY-MM-DD`. If the model returns a past year for a start date, the app rolls it forward to the next future occurrence.
 
+Generated plan day labels must follow the requested start date rather than assuming Monday-first weeks. For example, a plan starting Sunday May 3 should display day 1 as Sunday, day 2 as Monday, and continue that same start-date-relative order for every generated week.
+
+Generated intensity should be guided by the athlete's inferred level rather than always starting very low. Use rough productive-session RPE bands of novice `RPE 3-6`, intermediate `RPE 5-7`, and advanced/expert `RPE 8-10`, while keeping warm-ups, cooldowns, recovery sessions, and injury-constrained work easier. Deloads should be coach/model-decided rather than automatically forced every fourth week in live generation. The simulator keeps deterministic deload cadence for repeatable tests: every 4 weeks for novice, every 6 weeks for intermediate, and every 8 weeks for advanced/expert.
+
 The guided intake screen no longer shows an editable manual draft form or a visible Plan Draft panel. It submits the structured draft behind the scenes once enough information has been collected. The magic-wand generate button stays disabled until the draft passes the full `PlanRequest` schema, and the assistant tells the user to click the magic wand when the plan can be generated.
 
 The intake should feel like a professional coach conversation. The opening message introduces Alex/Alix as the user's personal training coach and explains that more detailed information leads to a better plan. The assistant should ask only one question and one topic at a time. Before marking the intake ready, the live AI prompt should give the user a clear chance to mention injuries, pain, exercises to avoid, and exercises or workout styles they especially want included. It should also collect preferred workout days, preferred rest days, and one final open-ended review question before generation, but those questions should be handled as natural coaching checkpoints rather than a rigid second checklist layered on top of the AI conversation.
@@ -95,6 +99,12 @@ Detailed preferences from the chat, such as "do intervals on Wednesday" or "keep
 The intake server keeps direct-answer hints and merged draft state after each turn, so detailed answers about a specific route, race, event, lift, season, or project are retained as user-provided goal and structure context. Production intake code should not hard-code named objectives, routes, races, or sport-specific projects. If a live AI response tries to ask again for an already collected field like sport, goal, start date, schedule, level, equipment, or constraints, the app replaces that stale prompt with the next missing intake question.
 
 Live AI intake interpretation should stay model-led rather than phrase-fenced in web code. The app validates response shape, preserves the structured draft, and requires a complete `PlanRequest` before generation, but it should not locally enumerate every possible way a user might answer a coach question. Negative answers to safety or constraint questions, such as "no", "no injuries", "none", or "nothing to avoid", should be represented by the AI as empty `constraints` arrays and the interview should move on. App fallback questions should stay narrow, for example asking about injuries or pain first instead of combining injuries, limitations, and avoid-list preferences into one brittle prompt.
+
+If the user's requested sport or primary goal is weight lifting, weight training, strength training, powerlifting, bodybuilding, or another clearly strength-primary plan, the app should infer `strengthTraining.include = true` instead of asking whether strength training should be included. The strength-training inclusion question is only useful when strength is optional support for another sport, such as climbing or running.
+
+The final open-ended review prompt, including fallback variants such as "Any other constraints or preferences I should account for?", must be treated as a real final checkpoint. Natural negative answers like "no" or "no constraints" should complete the intake instead of repeating the same prompt. If the user answers with an avoid-list preference such as "no leg extension exercises", capture it in `constraints.avoidExercises` and preserve it in `planStructureNotes`.
+
+When the app cannot parse or validate an intake response, the assistant should say it had trouble reading the answer and then repeat the original question when available. Avoid vague retry copy like "Please answer the current training-plan question again" because the user may not remember which question the app means.
 
 The live intake prompt should use missing required fields as background state, not as a script. The initial system prompt should fence the chat to training-plan intake, safety, and JSON output shape, while the per-turn prompt should give the model the current draft, recent conversation, latest user message, and any still-missing fields as context. The model should be instructed to infer reasonable structured values from natural answers, avoid asking for information already present in the draft, and choose the most useful next question based on the conversation rather than marching through the same generic sequence every time.
 
@@ -1086,6 +1096,8 @@ Development note: this is a development environment, so old generated plan data 
 
 **Batch 4: Adjustment And Versioning**
 
+Direction update: rich plans have made the old live-adjustment response contract too large. The AI should no longer be asked to return one complete revised `PlanSnapshot` for the whole plan in a single chat response. That forces the model to echo a large amount of unchanged JSON and has already produced malformed/truncated provider responses. The next implementation should mirror worker-based initial plan generation: first collect a small validated adjustment intent, then regenerate or patch editable future weeks serially.
+
 - [x] Include plan-level guidance in adjustment context when it helps preserve the larger training intent.
 - [x] Include rich coaching fields in adjustment context so the AI understands the original programming intent.
 - [x] Include richer exercise prescription fields in adjustment context so the AI can modify precise work/rest/load/intensity details without flattening them into notes.
@@ -1101,17 +1113,26 @@ Development note: this is a development environment, so old generated plan data 
 
 Batch 4 implementation notes:
 
-- The adjustment chat context now carries `planGuidance`, week summaries/progression notes, day coach notes, session objectives/intensity/warmup/cooldown, and structured exercise prescription fields.
-- Adjustment prompts now explicitly tell the AI to preserve rich coaching and prescription fields unless the requested change intentionally updates them.
-- Adjustment proposals are enriched with computed `richChanges` for plan guidance, coaching detail, and prescription detail. The review panel shows those changes before apply.
-- Confirmed adjustment versions store the computed rich-change summary in version metadata. Historical preview/revert continue to use the exact stored plan snapshot, so rich fields round-trip with the version.
+- The current implementation still uses a full-snapshot live proposal contract. It works for small/simulator cases, but it is now considered an interim implementation rather than the long-term adjustment architecture.
+- The adjustment chat context currently carries `planGuidance`, week summaries/progression notes, day coach notes, session objectives/intensity/warmup/cooldown, and structured exercise prescription fields.
+- Current adjustment prompts explicitly tell the AI to preserve rich coaching and prescription fields unless the requested change intentionally updates them.
+- Current adjustment proposals are enriched with computed `richChanges` for plan guidance, coaching detail, and prescription detail. The review panel shows those changes before apply.
+- Current confirmed adjustment proposals create a durable `PlanGenerationJob` with `jobType: "adjustment"` and apply adjusted weeks serially through `PlanGenerationWeek` before creating the final user-facing `PlanVersion`.
+- Adjustment jobs keep the current version visible while adjusted weeks are being processed, then switch `Plan.currentVersionId` only after all adjusted weeks are ready.
+- Current confirmed adjustment versions store the computed rich-change summary in version metadata. Historical preview/revert continue to use the exact stored plan snapshot, so rich fields round-trip with the version.
 
 Follow-up for next pass:
 
-- Investigate the live adjustment case where a user sent an RPE ramp-up request and the UI appeared to lose the in-progress adjustment. This was probably not caused by `ANTHROPIC_MAX_TOKENS=5000` before the token fallback change, because interactive adjustment chat previously defaulted to `ANTHROPIC_ADJUSTMENT_MAX_TOKENS` or `12000`.
-- Check whether the request timed out, returned malformed/rejected JSON, or the `PlanAdjuster` component remounted/reset while the request was pending.
-- Consider persisting adjustment draft state per plan in browser `sessionStorage`: chat messages, draft text, pending proposal, selected scope, and UI expansion state. Clear it after successful apply or explicit start-over.
-- Improve pending and error UI so a long live adjustment call cannot feel like it disappeared.
+- [x] Replace full-snapshot live adjustment proposals with a smaller `AdjustmentIntent` contract. The AI chat now returns effective-from day, target weeks/days/session types, requested prescription/coaching changes, safety/recovery rationale, goal-change flags, and a short preview summary instead of a full revised plan snapshot.
+- [x] Validate the adjustment intent before applying it: scope must not touch logged days, goal-changing requests must require explicit confirmation, and the intent declares whether it changes plan-level guidance, week summaries, day coaching, or exercise prescription fields.
+- [x] Generate adjusted weeks from the smaller intent. Each week request includes the original week snapshot, prior adjusted week context, plan guidance, the adjustment intent, and protected-day rules. The model returns one adjusted `WeekData`/week at a time, and the worker converts it into the stored week snapshot.
+- [x] Protect unchanged days in the worker after generation: days before the effective-from day and days not declared in the intent are restored from the base snapshot before saving.
+- Keep the deterministic local fallback for malformed live responses during the transition, but treat it as a conservative fallback, not the desired long-term live adjustment path.
+- [x] The first UI issue was that `PlanAdjuster` cleared the text box but did not show the user's sent message until the live AI request returned, so a slow adjustment could look like it disappeared.
+- [x] `PlanAdjuster` now adds the user's message immediately, shows a pending "Working on the adjustment proposal..." message, and catches unexpected send/apply exceptions so they surface as visible errors.
+- [x] `PlanAdjuster` now persists adjustment state per plan in browser `sessionStorage`: chat messages, draft text, pending proposal, goal-change confirmation, and affected-day detail expansion. It clears that state after successful apply or explicit start-over.
+- [x] If the live provider returns malformed adjustment JSON and repair fails, the server now falls back to the deterministic local proposal builder instead of returning the parser error directly to the user.
+- Still check live logs if the backend rejects the request, times out, or the deterministic fallback proposal is too generic for the requested change.
 
 **Batch 5: Tests And Docs**
 
@@ -1135,7 +1156,98 @@ Open questions:
 - How should logging evolve later so users can log actual work against richer prescription fields without turning the log form into a burden?
 - Should the plan viewer show rich coaching text by default or collapse it for dense plans? Current preference: logger-first by default, with drill-down details available at week, day, session, and exercise level.
 
-## Phase 10: Add More Sports
+## Phase 10: NeMo Guardrails Staged Implementation
+
+Use the findings in `docs/NeMo-Guardrails.md` as the implementation guide. The goal is not to move product logic out of the app. The goal is to evaluate whether NeMo can provide a centralized, configurable safety/style gateway around live AI calls while the TypeScript app remains the source of truth for intake state, schemas, plan validation, adjustment protection, and database/versioning rules.
+
+Primary direction:
+
+- Start with a narrow intake-only proof of concept.
+- Use NeMo for safety, prompt-injection, topic-boundary, and output-shape guardrails.
+- Do not use NeMo as a second rigid interviewer.
+- Do not hard-code sport-specific questions or project names in NeMo rails.
+- Keep normal short training answers valid, including `no`, `none`, `5 days`, `May 3`, and similar concise responses.
+- Keep all app-side validation after NeMo: JSON parsing, `PlanIntakeAiResponse`, draft merging, readiness checks, `PlanRequest`, generated week validation, locked-day protection, and versioning.
+
+**Batch 1: Guardrails Architecture And Config Skeleton**
+
+- [ ] Add a `guardrails/` directory for NeMo configuration and local documentation.
+- [ ] Create an intake-only NeMo config structure, such as:
+  - `guardrails/intake/config.yml`
+  - `guardrails/intake/rails/input.co`
+  - `guardrails/intake/rails/output.co`
+  - optional `guardrails/intake/actions.py`
+- [ ] Add environment switches:
+  - `AI_GUARDRAILS_MODE=off|intake`
+  - `AI_GUARDRAILS_BASE_URL=http://guardrails:8000`
+- [ ] Keep direct AI backend mode as the default unless `AI_GUARDRAILS_MODE=intake`.
+- [ ] Document how to switch between direct AI, simulator, and NeMo-gated intake mode.
+- [ ] Add the NeMo service to Docker Compose behind an explicit opt-in path.
+- [ ] Confirm the app can still run without the NeMo service when guardrails mode is off.
+
+**Batch 2: Intake Security Rails**
+
+- [ ] Add input rails for prompt injection and jailbreak attempts.
+- [ ] Add input rails for requests to reveal hidden prompts, system messages, environment variables, API keys, or internal instructions.
+- [ ] Add input rails for credential/secret extraction and unrelated hacking requests.
+- [ ] Add topic-boundary rails that keep intake focused on training-plan creation without rejecting normal fitness, schedule, injury, equipment, or preference answers.
+- [ ] Ensure short valid user answers are allowed, especially `no`, `none`, `no constraints`, `no injuries`, dates, numbers, days of week, sport names, and equipment lists.
+- [ ] Add a friendly refusal style for unsafe or unrelated inputs that redirects back to the current training-plan question.
+- [ ] Add a small manual test script or documented prompt list for common injection/security checks.
+
+**Batch 3: Intake Output And Style Rails**
+
+- [ ] Add output rails that require the AI intake response to remain JSON-like.
+- [ ] Require the response to stay within the expected top-level contract: `status`, `message`, and `planRequestDraft`.
+- [ ] Block or flag visibly truncated assistant messages before they reach the app.
+- [ ] Encourage a coach-like acknowledgement plus the next question, but do not enforce a rigid exact phrase.
+- [ ] Keep tone guardrails generic: no sport-specific hard-coded examples such as a specific climb or race.
+- [ ] Verify NeMo does not rewrite or wrap JSON in a way that breaks the existing parser.
+- [ ] Preserve the app's current validation fallback: if the app cannot process the AI response, it should say it had trouble processing the response and repeat the prior question.
+
+**Batch 4: App Integration For Live Intake**
+
+- [ ] Route only model-backed intake calls through NeMo when `AI_GUARDRAILS_MODE=intake`.
+- [ ] Keep simulator intake behavior unchanged.
+- [ ] Keep plan generation and adjustment generation on the direct AI backend during the first NeMo pass.
+- [ ] Keep TypeScript parsing, schema validation, draft merge behavior, no-duplicate-question logic, and readiness checks after the NeMo response.
+- [ ] Add logging that clearly shows whether an intake response came through direct AI or NeMo-gated AI, without logging secrets or full sensitive payloads.
+- [ ] Add graceful fallback or clear error handling if the NeMo service is unavailable while guardrails mode is enabled.
+- [ ] Rebuild/restart only the services required for the selected mode.
+
+**Batch 5: Validation, Red-Team Scenarios, And Decision Point**
+
+- [ ] Run a side-by-side intake comparison:
+  - direct AI backend
+  - NeMo-gated AI backend
+  - simulator baseline where applicable
+- [ ] Test normal intake flows for multiple sports, including climbing, running, strength training, cycling, and a generic custom goal.
+- [ ] Test terse answers and no-preference answers to make sure NeMo does not recreate the repeated-question issue.
+- [ ] Test prompt-injection attempts, hidden-prompt requests, API-key requests, and unrelated malicious requests.
+- [ ] Test that valid but unusual user preferences still pass through, such as avoided exercises, unusual schedules, high-level goals, or sport-specific equipment.
+- [ ] Measure rough latency impact and note whether the interaction still feels conversational.
+- [ ] Decide whether to keep NeMo for intake, revise the rails, or remove the experiment.
+- [ ] Update `docs/NeMo-Guardrails.md` with the implementation result and final recommendation.
+
+**Batch 6: Optional Expansion After Intake Is Stable**
+
+Only consider this after the intake-only path proves useful.
+
+- [ ] Evaluate output rails for live plan-generation responses, starting with small week-level responses only.
+- [ ] Evaluate security/style rails for adjustment chat.
+- [ ] Evaluate retrieval rails if the app later adds RAG, training references, or user-uploaded documents.
+- [ ] Evaluate execution rails only if the AI later gains tool/action access beyond generating structured plans.
+- [ ] Do not route full multi-week plan snapshots through NeMo until week-by-week generation and validation are already reliable.
+
+Open questions:
+
+- Should NeMo run only in local/dev at first, or should it be deployable but disabled by default?
+- Should security rails use NeMo's LLM self-checks, NVIDIA NemoGuard models/NIMs, simpler deterministic checks, or a mix?
+- How much latency is acceptable during intake?
+- Should blocked security events be stored for debugging, and if so how do we avoid storing sensitive user content?
+- Should the app expose a visible "guarded mode" indicator for development/testing?
+
+## Phase 11: Add More Sports
 
 Do this only after `PlanRequest`, the generator, the adjustment flow, and worker-based generation are stable.
 

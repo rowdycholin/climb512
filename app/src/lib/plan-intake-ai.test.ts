@@ -260,7 +260,7 @@ describe("plan intake AI contract", () => {
       },
     });
 
-    expect(response.message).toBe("Is this for a specific event or an ongoing training goal?");
+    expect(response.message).toBe("That helps. Is this for a specific event or an ongoing training goal?");
   });
 
   test("rejects ready responses without a complete PlanRequest draft", () => {
@@ -324,7 +324,27 @@ describe("plan intake AI contract", () => {
 
     expect(response.ready).toBe(false);
     expect(response.draft).toEqual(draft);
-    expect(response.assistantMessage).toBe(INTAKE_VALIDATION_FALLBACK_MESSAGE);
+    expect(response.assistantMessage).toBe(
+      `${INTAKE_VALIDATION_FALLBACK_MESSAGE} Please answer the previous training-plan question again.`,
+    );
+  });
+
+  test("fallback repeats the original question when the AI cannot read an answer", async () => {
+    const draft = {
+      ...createInitialIntakeDraft(),
+      sport: "climbing",
+    };
+
+    const response = await continuePlanIntakeWithAiContract({
+      draft,
+      userMessage: "__test_invalid_ai_output__",
+      messages: [{ role: "assistant", content: "How many days per week can you train?" }],
+    });
+
+    expect(response.ready).toBe(false);
+    expect(response.assistantMessage).toBe(
+      `${INTAKE_VALIDATION_FALLBACK_MESSAGE} Let me ask that again: How many days per week can you train?`,
+    );
   });
 
   test("accepts a bare number when the current prompt asks for training days per week", async () => {
@@ -419,7 +439,26 @@ describe("plan intake AI contract", () => {
       planRequestDraft: draftWithoutStrength,
     });
 
-    expect(response.message).toBe("Do you want strength training included in this plan?");
+    expect(response.message).toBe("One more programming choice. Do you want strength training included in this plan?");
+  });
+
+  test("infers strength training for primary weight lifting plans", () => {
+    const { strengthTraining: _strengthTraining, ...draftWithoutStrength } = completeDraft;
+    const response = validatePlanIntakeAiResponse({
+      status: "needs_more_info",
+      message: "",
+      planRequestDraft: {
+        ...draftWithoutStrength,
+        sport: "weight lifting",
+        goalType: "strength",
+        goalDescription: "Build full-body strength with barbell training",
+        trainingFocus: [],
+      },
+    });
+
+    expect(response.planRequestDraft.strengthTraining?.include).toBe(true);
+    expect(response.planRequestDraft.trainingFocus).toContain("strength");
+    expect(response.message).not.toMatch(/Do you want strength training included/i);
   });
 
   test("ready intake responses point users to the magic wand button", async () => {
@@ -441,7 +480,9 @@ describe("plan intake AI contract", () => {
     });
 
     expect(response.ready).toBe(false);
-    expect(response.assistantMessage).toBe("Is there anything else I should know about you or your goals before I am ready to generate the plan?");
+    expect(response.assistantMessage).toBe(
+      "Great, I have the main pieces. Is there anything else I should know about you or your goals before I am ready to generate the plan?",
+    );
     expect(response.draft.finalIntakeReviewAsked).toBe(true);
   });
 
@@ -458,7 +499,7 @@ describe("plan intake AI contract", () => {
     });
 
     expect(response.ready).toBe(false);
-    expect(response.assistantMessage).toBe("Are there specific days you like to work out?");
+    expect(response.assistantMessage).toBe("Good, that gives me the weekly shape. Are there specific days you like to work out?");
     expect(response.draft.preferredWorkoutDaysAsked).toBe(true);
   });
 
@@ -471,11 +512,11 @@ describe("plan intake AI contract", () => {
         finalIntakeReviewAsked: undefined,
       },
       userMessage: "Monday, Wednesday, and Saturday are best.",
-      messages: [{ role: "assistant", content: "Are there specific days you like to work out?" }],
+      messages: [{ role: "assistant", content: "Good, that gives me the weekly shape. Are there specific days you like to work out?" }],
     });
 
     expect(response.ready).toBe(false);
-    expect(response.assistantMessage).toBe("Are there specific days you would prefer as rest days?");
+    expect(response.assistantMessage).toBe("Got it. Are there specific days you would prefer as rest days?");
     expect(response.draft.planStructureNotes).toContain("Preferred workout days: Monday, Wednesday, and Saturday are best.");
   });
 
@@ -493,6 +534,42 @@ describe("plan intake AI contract", () => {
 
     expect(response.ready).toBe(true);
     expect(response.assistantMessage).toBe(INTAKE_READY_MESSAGE);
+  });
+
+  test("treats generic final constraints prompt as answered by no", async () => {
+    const response = await continuePlanIntakeWithAiContract({
+      draft: { ...completeDraft, finalIntakeReviewAsked: undefined },
+      userMessage: "No constraints",
+      messages: [
+        {
+          role: "assistant",
+          content: "Almost there. Any other constraints or preferences I should account for?",
+        },
+      ],
+    });
+
+    expect(response.ready).toBe(true);
+    expect(response.assistantMessage).toBe(INTAKE_READY_MESSAGE);
+    expect(response.draft.finalIntakeReviewAsked).toBe(true);
+  });
+
+  test("captures avoid exercise answers from generic final constraints prompt", async () => {
+    const response = await continuePlanIntakeWithAiContract({
+      draft: { ...completeDraft, finalIntakeReviewAsked: undefined },
+      userMessage: "No leg extension exercises",
+      messages: [
+        {
+          role: "assistant",
+          content: "Almost there. Any other constraints or preferences I should account for?",
+        },
+      ],
+    });
+
+    expect(response.ready).toBe(true);
+    expect(response.assistantMessage).toBe(INTAKE_READY_MESSAGE);
+    expect(response.draft.finalIntakeReviewAsked).toBe(true);
+    expect(response.draft.constraints?.avoidExercises).toContain("leg extension");
+    expect(response.draft.planStructureNotes).toContain("Avoid exercises: leg extension");
   });
 
   test("keeps only one assistant question for model-backed intake responses", () => {

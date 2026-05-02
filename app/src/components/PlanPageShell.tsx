@@ -23,6 +23,18 @@ function DisclosureArrowHead({ open, className = "" }: { open: boolean; classNam
   );
 }
 
+function storedBoolean(key: string, fallback: boolean) {
+  if (typeof window === "undefined") return fallback;
+  const value = window.localStorage.getItem(key);
+  if (value === "true") return true;
+  if (value === "false") return false;
+  return fallback;
+}
+
+function storeBoolean(key: string, value: boolean) {
+  window.localStorage.setItem(key, String(value));
+}
+
 interface PlanPageShellProps {
   planId: string;
   weeks: Parameters<typeof PlanWorkspace>[0]["weeks"];
@@ -97,6 +109,8 @@ interface PlanPageShellProps {
       error: string | null;
     };
     generationJob: {
+      jobType: string;
+      nextWeekNum: number;
       failedWeekNum: number | null;
       lastError: string | null;
       repairNotes: string | null;
@@ -119,11 +133,9 @@ export default function PlanPageShell({
   const [coachOpen, setCoachOpen] = useState(false);
   const [completionPanelOpen, setCompletionPanelOpen] = useState(false);
   const [versionHistoryOpen, setVersionHistoryOpen] = useState(false);
-  const [summaryOpen, setSummaryOpen] = useState(true);
+  const planSummaryStorageKey = `climb512.plan.${planId}.plan-summary-open`;
+  const [summaryOpen, setSummaryOpen] = useState(() => storedBoolean(planSummaryStorageKey, true));
   const [repairNotes, setRepairNotes] = useState(summary.generationJob?.repairNotes ?? "");
-  const [transientAdjustmentMetadata, setTransientAdjustmentMetadata] =
-    useState<typeof summary.version.changeMetadata>(null);
-
   const activeWeek = weeks[activeWeekIndex] ?? null;
   const activeWeekLocked = useMemo(
     () =>
@@ -151,6 +163,14 @@ export default function PlanPageShell({
     if (!summary.generation.isFailed) return;
     setRepairNotes(summary.generationJob?.repairNotes ?? "");
   }, [summary.generation.isFailed, summary.generationJob?.repairNotes]);
+
+  useEffect(() => {
+    storeBoolean(planSummaryStorageKey, summaryOpen);
+  }, [planSummaryStorageKey, summaryOpen]);
+
+  useEffect(() => {
+    setActiveWeekIndex(initialWeekIndex);
+  }, [initialWeekIndex]);
 
   function toggleEditor() {
     setEditorOpen((value) => {
@@ -187,7 +207,13 @@ export default function PlanPageShell({
                 aria-expanded={summaryOpen}
                 aria-label={summaryOpen ? "Collapse plan summary" : "Expand plan summary"}
                 title={summaryOpen ? "Collapse summary" : "Expand summary"}
-                onClick={() => setSummaryOpen((value) => !value)}
+                onClick={() => {
+                  setSummaryOpen((value) => {
+                    const next = !value;
+                    storeBoolean(planSummaryStorageKey, next);
+                    return next;
+                  });
+                }}
                 className="rounded p-0.5 text-slate-800 transition-colors hover:text-slate-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400"
               >
                 <DisclosureArrowHead open={summaryOpen} />
@@ -431,12 +457,16 @@ export default function PlanPageShell({
             <p className="font-medium">
               {summary.generation.isFailed
                 ? `Week ${summary.generationJob?.failedWeekNum ?? summary.generation.nextWeekNum ?? summary.generation.generatedWeeks + 1} needs repair`
-                : `Generating week ${summary.generation.nextWeekNum ?? summary.generation.generatedWeeks} of ${summary.generation.totalWeeks}`}
+                : summary.generationJob?.jobType === "adjustment"
+                  ? `Applying adjustment week ${summary.generationJob.nextWeekNum} of ${summary.generation.totalWeeks}`
+                  : `Generating week ${summary.generation.nextWeekNum ?? summary.generation.generatedWeeks} of ${summary.generation.totalWeeks}`}
             </p>
             <p className="mt-1">
               {summary.generation.isFailed
                 ? summary.generationJob?.lastError ?? summary.generation.error ?? "The already generated weeks are still available."
-                : `${summary.generation.generatedWeeks}/${summary.generation.totalWeeks} weeks ready (${summary.generation.percent}%).`}
+                : summary.generationJob?.jobType === "adjustment"
+                  ? `${summary.generation.generatedWeeks} adjusted weeks ready. Current plan stays visible until the adjustment is complete.`
+                  : `${summary.generation.generatedWeeks}/${summary.generation.totalWeeks} weeks ready (${summary.generation.percent}%).`}
             </p>
             {summary.generation.isFailed && (
               <form action={repairPlanGeneration} className="mt-3 rounded-lg border border-red-200 bg-white/80 p-3 text-slate-800">
@@ -546,8 +576,7 @@ export default function PlanPageShell({
         generation={summary.generation}
         sport={summary.sport}
         disciplines={summary.disciplines}
-        adjustmentMetadata={transientAdjustmentMetadata}
-        onAdjustmentApplied={setTransientAdjustmentMetadata}
+        adjustmentMetadata={summary.generation.isReady ? summary.version.changeMetadata : null}
         activeWeekIndex={activeWeekIndex}
         initialDayIndex={initialDayIndex}
         editorOpen={editorOpen}

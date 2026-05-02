@@ -278,7 +278,34 @@ function SmallChip({ children, tone = "slate" }: { children: ReactNode; tone?: "
   );
 }
 
-function PlanGuidancePanel({ planGuidance }: { planGuidance?: PlanGuidance | null }) {
+function storedBoolean(key: string, fallback: boolean) {
+  if (typeof window === "undefined") return fallback;
+  const value = window.localStorage.getItem(key);
+  if (value === "true") return true;
+  if (value === "false") return false;
+  return fallback;
+}
+
+function storeBoolean(key: string, value: boolean) {
+  window.localStorage.setItem(key, String(value));
+}
+
+function scrollToPlanDay(dayId: string) {
+  const target = document.getElementById(`plan-day-heading-${dayId}`);
+  target?.scrollIntoView({
+    behavior: "smooth",
+    block: "start",
+  });
+}
+
+function PlanGuidancePanel({ planId, planGuidance }: { planId: string; planGuidance?: PlanGuidance | null }) {
+  const storageKey = `climb512.plan.${planId}.coach-guidance-open`;
+  const [guidanceOpen, setGuidanceOpen] = useState(() => storedBoolean(storageKey, true));
+
+  useEffect(() => {
+    storeBoolean(storageKey, guidanceOpen);
+  }, [guidanceOpen, storageKey]);
+
   if (!planGuidance) return null;
   const hasGuidance = Boolean(planGuidance.overview)
     || planGuidance.intensityDistribution.length > 0
@@ -289,75 +316,91 @@ function PlanGuidancePanel({ planGuidance }: { planGuidance?: PlanGuidance | nul
   if (!hasGuidance) return null;
 
   return (
-    <details className="mb-5 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700">
-      <summary className="cursor-pointer text-sm font-semibold text-slate-800">Coach Guidance</summary>
-      <div className="mt-3 space-y-4">
-        {planGuidance.overview && <p className="leading-relaxed text-slate-600">{planGuidance.overview}</p>}
-        {planGuidance.intensityDistribution.length > 0 && (
-          <div>
-            <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Intensity Distribution</p>
-            <div className="grid gap-2 sm:grid-cols-2">
-              {planGuidance.intensityDistribution.map((item, index) => (
-                <div key={`${item.label}-${index}`} className="rounded-lg border border-slate-100 bg-slate-50 px-3 py-2">
-                  <span className="text-xs font-semibold text-slate-700">{item.label}</span>
-                  <p className="mt-0.5 text-xs text-slate-500">{item.detail}</p>
-                </div>
-              ))}
+    <div className="mb-5 overflow-hidden rounded-xl border border-slate-200 bg-white text-sm text-slate-700">
+      <button
+        type="button"
+        onClick={() => {
+          setGuidanceOpen((value) => {
+            const next = !value;
+            storeBoolean(storageKey, next);
+            return next;
+          });
+        }}
+        className="flex w-full items-center gap-1.5 px-4 py-3 text-left text-sm font-semibold text-slate-800 transition-colors hover:bg-slate-50"
+        aria-expanded={guidanceOpen}
+      >
+        <DisclosureArrowHead open={guidanceOpen} className="text-slate-800" />
+        Coach Guidance
+      </button>
+      {guidanceOpen && (
+        <div className="space-y-4 px-4 pb-3">
+          {planGuidance.overview && <p className="leading-relaxed text-slate-600">{planGuidance.overview}</p>}
+          {planGuidance.intensityDistribution.length > 0 && (
+            <div>
+              <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Intensity Distribution</p>
+              <div className="grid gap-2 sm:grid-cols-2">
+                {planGuidance.intensityDistribution.map((item, index) => (
+                  <div key={`${item.label}-${index}`} className="rounded-lg border border-slate-100 bg-slate-50 px-3 py-2">
+                    <span className="text-xs font-semibold text-slate-700">{item.label}</span>
+                    <p className="mt-0.5 text-xs text-slate-500">{item.detail}</p>
+                  </div>
+                ))}
+              </div>
             </div>
-          </div>
-        )}
-        {(planGuidance.progressionPrinciples.length > 0 || planGuidance.recoveryPrinciples.length > 0) && (
-          <div className="grid gap-3 sm:grid-cols-2">
-            {planGuidance.progressionPrinciples.length > 0 && (
-              <div>
-                <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-500">Progression</p>
-                <ul className="space-y-1 text-xs leading-relaxed text-slate-600">
-                  {planGuidance.progressionPrinciples.map((item) => <li key={item}>{item}</li>)}
-                </ul>
-              </div>
-            )}
-            {planGuidance.recoveryPrinciples.length > 0 && (
-              <div>
-                <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-500">Recovery</p>
-                <ul className="space-y-1 text-xs leading-relaxed text-slate-600">
-                  {planGuidance.recoveryPrinciples.map((item) => <li key={item}>{item}</li>)}
-                </ul>
-              </div>
-            )}
-          </div>
-        )}
-        {planGuidance.recommendations.length > 0 && (
-          <div>
-            <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-500">Recommendations</p>
-            <ul className="space-y-1 text-xs leading-relaxed text-slate-600">
-              {planGuidance.recommendations.map((item) => <li key={item}>{item}</li>)}
-            </ul>
-          </div>
-        )}
-        {planGuidance.progressionTable.length > 0 && (
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[420px] border-collapse text-xs">
-              <thead>
-                <tr className="border-b border-slate-200 text-left text-slate-500">
-                  {Object.keys(planGuidance.progressionTable[0]).map((key) => (
-                    <th key={key} className="py-1.5 pr-3 font-semibold capitalize">{key}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {planGuidance.progressionTable.map((row, index) => (
-                  <tr key={index} className="border-b border-slate-100 last:border-0">
+          )}
+          {(planGuidance.progressionPrinciples.length > 0 || planGuidance.recoveryPrinciples.length > 0) && (
+            <div className="grid gap-3 sm:grid-cols-2">
+              {planGuidance.progressionPrinciples.length > 0 && (
+                <div>
+                  <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-500">Progression</p>
+                  <ul className="space-y-1 text-xs leading-relaxed text-slate-600">
+                    {planGuidance.progressionPrinciples.map((item) => <li key={item}>{item}</li>)}
+                  </ul>
+                </div>
+              )}
+              {planGuidance.recoveryPrinciples.length > 0 && (
+                <div>
+                  <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-500">Recovery</p>
+                  <ul className="space-y-1 text-xs leading-relaxed text-slate-600">
+                    {planGuidance.recoveryPrinciples.map((item) => <li key={item}>{item}</li>)}
+                  </ul>
+                </div>
+              )}
+            </div>
+          )}
+          {planGuidance.recommendations.length > 0 && (
+            <div>
+              <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-500">Recommendations</p>
+              <ul className="space-y-1 text-xs leading-relaxed text-slate-600">
+                {planGuidance.recommendations.map((item) => <li key={item}>{item}</li>)}
+              </ul>
+            </div>
+          )}
+          {planGuidance.progressionTable.length > 0 && (
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[420px] border-collapse text-xs">
+                <thead>
+                  <tr className="border-b border-slate-200 text-left text-slate-500">
                     {Object.keys(planGuidance.progressionTable[0]).map((key) => (
-                      <td key={key} className="py-1.5 pr-3 text-slate-600">{row[key]}</td>
+                      <th key={key} className="py-1.5 pr-3 font-semibold capitalize">{key}</th>
                     ))}
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
-    </details>
+                </thead>
+                <tbody>
+                  {planGuidance.progressionTable.map((row, index) => (
+                    <tr key={index} className="border-b border-slate-100 last:border-0">
+                      {Object.keys(planGuidance.progressionTable[0]).map((key) => (
+                        <td key={key} className="py-1.5 pr-3 text-slate-600">{row[key]}</td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -802,7 +845,8 @@ function DayCard({
       }`}
     >
       <AccordionTrigger
-        className="px-4 py-3 hover:bg-slate-50 hover:no-underline [&[data-state=open]]:bg-slate-50 [&_[data-slot=accordion-trigger-icon]]:!hidden"
+        id={`plan-day-heading-${day.id}`}
+        className="scroll-mt-28 px-4 py-3 hover:bg-slate-50 hover:no-underline [&[data-state=open]]:bg-slate-50 [&_[data-slot=accordion-trigger-icon]]:!hidden"
         onClick={() => onSelect(day.id)}
       >
         <div className="flex w-full items-center gap-2 text-left">
@@ -901,10 +945,11 @@ function WeekCard({
   const completedCount = allExercises.filter((exercise) => exercise.logs[0]?.completed).length;
   const initialDayId = week.days[initialDayIndex]?.id ?? null;
   const hasWeekSummary = Boolean(week.summary || week.progressionNote || week.days.length);
+  const weekSummaryStorageKey = `climb512.plan.${planId}.week-summary-open`;
 
   const [openDayIds, setOpenDayIds] = useState<string[]>(() => (initialDayId ? [initialDayId] : []));
   const [highlightedDayId, setHighlightedDayId] = useState<string | null>(initialDayId);
-  const [weekSummaryOpen, setWeekSummaryOpen] = useState(true);
+  const [weekSummaryOpen, setWeekSummaryOpen] = useState(() => storedBoolean(weekSummaryStorageKey, true));
   const adjustedByDay = useMemo(() => {
     const entries = adjustmentMetadata?.affectedDays.filter((day) => day.weekNum === week.weekNum) ?? [];
     return new Map(entries.map((day) => [day.dayNum, day.summary]));
@@ -913,6 +958,21 @@ function WeekCard({
   useEffect(() => {
     setOpenDayIds(initialDayId ? [initialDayId] : []);
     setHighlightedDayId(initialDayId);
+  }, [initialDayId, week.id]);
+
+  useEffect(() => {
+    setWeekSummaryOpen(storedBoolean(weekSummaryStorageKey, true));
+  }, [weekSummaryStorageKey]);
+
+  useEffect(() => {
+    storeBoolean(weekSummaryStorageKey, weekSummaryOpen);
+  }, [weekSummaryOpen, weekSummaryStorageKey]);
+
+  useEffect(() => {
+    if (!initialDayId) return;
+    const timers = [100, 350, 800].map((delay) => window.setTimeout(() => scrollToPlanDay(initialDayId), delay));
+
+    return () => timers.forEach((timer) => window.clearTimeout(timer));
   }, [initialDayId, week.id]);
 
   return (
@@ -933,7 +993,13 @@ function WeekCard({
         <div className="mb-4 overflow-hidden rounded-xl border border-slate-200 bg-white">
           <button
             type="button"
-            onClick={() => setWeekSummaryOpen((value) => !value)}
+            onClick={() => {
+              setWeekSummaryOpen((value) => {
+                const next = !value;
+                storeBoolean(weekSummaryStorageKey, next);
+                return next;
+              });
+            }}
             className="flex w-full items-center justify-between gap-3 bg-slate-50 px-3 py-2 text-left text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-100"
             aria-expanded={weekSummaryOpen}
           >
@@ -1053,7 +1119,7 @@ export default function PlanViewer({
 
   return (
     <div>
-      <PlanGuidancePanel planGuidance={planGuidance} />
+      <PlanGuidancePanel planId={planId} planGuidance={planGuidance} />
       <div ref={weekScrollRef} className="mb-6 flex gap-2 overflow-x-auto pb-2" style={{ scrollbarWidth: "thin" }}>
         {Array.from({ length: resolvedTotalWeeks }, (_, index) => {
           const week = weeks[index] ?? null;
