@@ -113,7 +113,7 @@ Plan adjustment:
 
 The app uses an OpenAI-compatible `chat/completions` transport via plain `fetch`.
 
-There are currently two backend modes:
+There are currently two primary backend modes, plus an opt-in guardrails gateway mode for live guided intake:
 
 ### Simulator/local
 
@@ -127,9 +127,26 @@ There are currently two backend modes:
 - `ANTHROPIC_BASE_URL=https://openrouter.ai/api`
 - intake, generation, and adjustment go to the configured remote provider
 
+### NeMo-gated intake POC
+
+- `AI_GUARDRAILS_MODE=intake`
+- `AI_GUARDRAILS_BASE_URL=http://guardrails:8000`
+- scope: guided-intake calls only
+- guarded mode takes precedence over simulator/local intake so NeMo is not silently bypassed during testing
+- generation and adjustment remain on the direct AI backend during the first NeMo pass
+- app-side validation remains authoritative after NeMo returns a response
+
 The app appends `/v1/chat/completions` itself.
 
 In Docker, `web` and `plan-worker` read backend settings from `app/.env`. Copy `app/.env-simulator` or `app/.env-aibackend` to `app/.env`, then recreate those containers to switch modes. Editing `app/.env` alone does not change the already-running container process environment.
+
+The NeMo service is behind an explicit Docker Compose profile and is not started by default:
+
+```bash
+docker compose --profile guardrails up -d --build guardrails
+```
+
+When `AI_GUARDRAILS_MODE=intake`, the web app sends guided-intake model requests to `AI_GUARDRAILS_BASE_URL` even if `ANTHROPIC_BASE_URL` points at the simulator or `AI_INTAKE_MODE=local` is still set. This is intentional: guarded mode should fail visibly if NeMo is misconfigured instead of silently using the deterministic intake fallback. The plan worker, plan generation, and adjustment chat still use `ANTHROPIC_BASE_URL` directly.
 
 ## Environment variables
 
@@ -142,6 +159,8 @@ In Docker, `web` and `plan-worker` read backend settings from `app/.env`. Copy `
 | `ANTHROPIC_INTAKE_MAX_TOKENS` | intake response token cap |
 | `ANTHROPIC_ADJUSTMENT_MAX_TOKENS` | adjustment response token cap |
 | `AI_INTAKE_MODE=local` | force deterministic local intake fallback |
+| `AI_GUARDRAILS_MODE=off\|intake` | opt-in mode for the NeMo intake gateway |
+| `AI_GUARDRAILS_BASE_URL` | OpenAI-compatible NeMo Guardrails server base URL |
 
 ## Privacy note
 

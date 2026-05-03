@@ -40,6 +40,7 @@ model Plan {
   completedAt      DateTime?            @db.Timestamptz(3)
   completionReason String?
   completionNotes  String?
+  uiState          Json?
   createdAt        DateTime             @default(now()) @db.Timestamptz(3)
   updatedAt        DateTime             @updatedAt @db.Timestamptz(3)
 

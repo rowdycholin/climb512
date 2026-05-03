@@ -98,9 +98,19 @@ curl -I http://localhost:8080/login
 | `ANTHROPIC_MAX_TOKENS` | output cap |
 | `ANTHROPIC_INTAKE_MAX_TOKENS` | guided-intake output cap |
 | `ANTHROPIC_ADJUSTMENT_MAX_TOKENS` | adjustment-chat output cap |
+| `AI_GUARDRAILS_MODE` | optional NeMo guardrails mode, defaults to `off` |
+| `AI_GUARDRAILS_BASE_URL` | optional NeMo Guardrails server URL for guarded intake |
 | `PLAN_WORKER_STEP_DELAY_MS` | optional pause between sequential week generations so partial progress is visible |
 
 In Docker, the `web` and `plan-worker` services read backend AI settings from `app/.env`. Copy `app/.env-simulator` or `app/.env-aibackend` to `app/.env`, then recreate `web` and `plan-worker` to switch modes. Do not print or commit real provider API keys.
+
+The NeMo guardrails service is opt-in and uses the `guardrails` Compose profile:
+
+```bash
+docker compose --profile guardrails up -d --build guardrails
+```
+
+The app should still run normally without this service when `AI_GUARDRAILS_MODE=off`.
 
 ### Simulator service
 

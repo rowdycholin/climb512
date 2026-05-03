@@ -248,12 +248,13 @@ function addEquipmentTweaks(exercises, input) {
   const equipmentText = input.equipment.join(" ");
 
   return exercises.map((exercise) => {
-    if (equipmentText.includes("hangboard") && exercise.name === "Wall Crimp Holds") {
+    if (equipmentText.includes("hangboard") && exercise.name === "Wall Half-crimp Holds") {
       return {
         ...exercise,
         name: "Hangboard Hangs",
         duration: "7 sec",
-        notes: "Half-crimp, shoulders active, strict form"
+        holdType: "half crimp",
+        notes: "Half crimp, open hand, or slopers only"
       };
     }
 

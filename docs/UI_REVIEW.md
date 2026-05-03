@@ -1,148 +1,341 @@
 # UI Review
 
-Date: 2026-04-25
+Date reviewed: 2026-05-03
 
-## Current state
+Perspective: product/UI review of the current React/Tailwind implementation, with emphasis on making the app feel more polished, easier to use repeatedly, and more trustworthy for training-plan work.
 
-The app is in a better place than it was during the first review pass:
+## Executive Summary
 
-- authenticated navigation is now shared through a hamburger-style header
-- the plan page has clearer entry points for editing and coaching
-- editor controls now use icon actions instead of full text buttons
-- the product feels more consistent across login, dashboard, onboarding, and plan pages
+Climb512 already has a strong product foundation: guided intake, plan generation progress, version history, logging, editing, and AI adjustment are all present. The current UI also has a clear attempt at warmth through coach-like chat, soft cards, gradients, and friendly copy.
 
-The main remaining issue is not basic consistency anymore. It is polish. The UI is usable and coherent, but it still feels flatter and more utilitarian than a finished product should.
+The main design issue is not lack of features. It is that many features are competing visually at the same level. The app often feels like a capable engineering tool wearing a decorative skin, instead of a calm training workspace with clear hierarchy. The highest-impact improvements would be:
 
-## What is working
+1. Create one cohesive visual system.
+2. Reduce header and plan-summary density.
+3. Make the active plan workflow more task-oriented.
+4. Improve mobile ergonomics for logging and plan review.
+5. Add clearer state, progress, and latency feedback for AI interactions.
 
-- information architecture is straightforward
-- the plan viewer is readable and generally easy to scan
-- onboarding and dashboard flows are easy to follow
-- cards, pills, and soft borders fit the coaching product well
-- the shared header/menu is a real improvement
-- edit-mode entry on the plan page is now clearer
+## What Is Working Well
 
-## What still needs attention
+- The chat intake concept is strong. It fits the product better than a long intake form and makes plan creation feel coached.
+- The plan viewer has useful information architecture: week tabs, week summary, day accordions, session blocks, logging details, and coach guidance.
+- The app already handles important product states: generating, failed generation, historical preview, version history, completed plans, locked logged days, and adjustments.
+- The use of icons for main actions helps scanability.
+- The persistent collapse state for plan sections is the right direction because users will revisit the same plans repeatedly.
+- The app has meaningful domain-specific details: RPE, sessions, warmup/cooldown, exercise prescription chips, adjustment highlights, and protected history.
 
-- visual identity is still too muted
-- typography hierarchy could be stronger
-- dashboard still feels more functional than premium
-- onboarding still feels heavier than the rest of the app
-- plan editing is usable, but not yet elegant
-- the plan page still has too many competing surfaces and chips
+## Main Design Concerns
 
-## Highest-priority next steps
+### 1. The Visual Language Is Split
 
-## 1. Strengthen the visual identity
+The app mixes neutral shadcn-style tokens with custom glossy gradient cards, large rounded panels, radial highlights, soft shadows, blue focus states, slate forms, amber accents, and occasional marketing-like hero blocks.
 
-The app is more consistent now, but it still does not feel distinctive enough as "Climb512".
+This creates a slightly inconsistent feeling:
 
-Recommendation:
+- Login/register feel like a polished consumer SaaS entry screen.
+- Dashboard/intake use decorative gradient hero cards.
+- Plan review is a dense operational workspace.
+- Manual onboarding uses simpler shadcn cards.
 
-- establish one stronger visual direction across all authenticated screens
-- make the brand lockup and accent system feel more intentional
-- use one recurring motif across surfaces, such as subtle route-grid or topo-inspired texture
+Recommendation: move toward a restrained "training cockpit" style.
 
-## 2. Improve typography hierarchy
+- Use mostly white and slate surfaces with one strong brand accent.
+- Reserve gradients for the login/background or very rare top-level moments.
+- Standardize radius around `8px` or `12px` for app surfaces. Avoid mixing `rounded-lg`, `rounded-xl`, `rounded-2xl`, `rounded-[1.4rem]`, and `rounded-[1.6rem]` unless there is a clear hierarchy.
+- Standardize shadows. Use subtle shadows for floating elements only; use borders for most cards and sections.
 
-Text is readable, but not yet expressive enough.
+### 2. The Plan Summary Header Is Too Busy
 
-Recommendation:
+The plan page header is carrying too many jobs:
 
-- strengthen page and section headings
-- reduce the weight of metadata and helper copy
-- standardize a smaller set of text roles:
-  - page title
-  - section title
-  - card title
-  - body
-  - metadata
-  - caption
+- page title
+- collapse control
+- plan metadata
+- status banners
+- version history
+- edit day
+- adjust plan
+- complete/reopen
+- generation status
+- completion panel
+- equipment chips
+- locked-week warnings
 
-## 3. Keep refining the plan page
+That makes the first screen visually heavy and causes action layout issues.
 
-This is the most important screen in the product.
+Recommendation: split the plan page into a stable command bar plus a plan overview panel.
 
-Current positives:
+Suggested structure:
 
-- summary header is cleaner than before
-- pencil and coach actions are compact and understandable
-- edit mode is easier to discover
+- Top sticky app header: brand, current section, menu.
+- Plan command bar: `Versions`, `Edit`, `Adjust`, `Complete` as compact icon buttons with labels on desktop.
+- Plan overview: collapsible metadata, goals, dates, equipment, status.
+- Main plan workspace: week tabs, guidance, week/day content.
 
-Remaining issues:
+The key is that actions should be predictable and always in the same visual zone, while summary content can expand/collapse below them.
 
-- summary card, week tabs, day accordions, and editing surfaces still compete visually
-- too many pills and small bordered elements carry similar weight
-- editing still feels like a tool panel, not a polished interaction mode
+### 3. The Dashboard Should Be More Action-Oriented
 
-Recommendation:
+The dashboard currently shows a large decorative "Your climbing workspace" panel and then saved plans. It is pleasant, but it does not quickly answer the user’s most important questions:
 
-- make the plan viewer feel like the main object on the page
-- reduce equal visual emphasis across chips, pills, badges, and borders
-- keep improving the spacing and hierarchy between summary, week tabs, and day cards
-
-## 4. Improve plan editing ergonomics
-
-The current editor works, but it is still closer to a draft editor than a polished product interaction.
-
-Current state:
-
-- day reordering still lives in the separate `Day order` list
-- detailed editing includes rest days, and adding an exercise converts that day to training
-- add / duplicate / delete controls are icon-based
-- the old move dropdown is gone
+- What should I do today?
+- Which plan is active?
+- Which plans are generating or need attention?
+- Where do I start a new plan?
 
 Recommendation:
 
-- move toward a unified editing surface
-- reduce vertical sprawl in edit mode
-- continue aligning actions tightly with the content they affect
-- eventually support richer gesture-based reordering inside the day itself
+- Replace the decorative dashboard hero with a compact operational header.
+- Add a primary action button: `New AI Plan`.
+- Add a secondary action: `Manual Setup`.
+- Add a "Current Plan" or "Today" section above saved plans when an active plan exists.
+- Make plan cards more informative at a glance: current day/week, next workout focus, generated/completed status, and last activity.
 
-## 5. Upgrade the dashboard
+The dashboard should feel like a home base, not just a library.
 
-The dashboard works, but it still feels sparse and transactional.
+### 4. AI Chat Needs Better Waiting And Recovery States
 
-Recommendation:
-
-- give the dashboard a stronger home-base feel
-- improve plan-card hierarchy and presence
-- make the primary CTA feel more like a product action than a utility button
-- move destructive actions into a quieter interaction pattern over time
-
-## 6. Refine onboarding
-
-Onboarding is serviceable, but still feels heavier than the other screens.
+The chat UI is simple and approachable, but it can feel stalled when the backend is slow. Given the latency findings, this matters.
 
 Recommendation:
 
-- keep it aligned with the shared app shell
-- reduce repeated "stack of cards" fatigue
-- introduce stronger guided rhythm and progress framing
+- Show an assistant "thinking" row immediately after send.
+- Include subtle text such as `Checking your answer...` or `Building the next question...` after 1-2 seconds.
+- After 8-10 seconds, show a non-alarming message: `Still working. The AI backend is taking longer than usual.`
+- Keep the user’s sent answer visible immediately, which intake mostly does already.
+- Consider a compact debug-only latency marker in development mode.
 
-## 7. Continue cleaning up text artifacts
+Also consider adding a small "What I know so far" drawer or summary strip in intake. It would help users notice when the AI misunderstood or invented a field, without turning the chat into a form.
 
-Small text and encoding issues have an outsized effect on perceived quality.
+### 5. Logging Forms Are Powerful But Dense
+
+The exercise logging UI supports sets, intervals, attempts, summaries, notes, and completion. That is valuable, but the row-based inputs can become hard to use on small screens.
+
+Risks:
+
+- Many small fields in grid rows.
+- Horizontal overflow for detailed logging.
+- Similar visual weight for prescription, actuals, notes, and completion.
+- Hard to distinguish "read plan" vs "log result" mode.
 
 Recommendation:
 
-- keep sweeping visible UI strings for malformed punctuation or symbols
-- prefer plain ASCII unless a verified UTF-8 character clearly improves the UI
+- Separate exercise cards into two modes: `Plan` and `Log`.
+- Default collapsed exercise view should emphasize what to do.
+- When logging opens, show the logging form as a focused panel with clearer field labels.
+- For mobile, stack fields vertically or use fewer primary fields per row.
+- Make `Done` or `Save log` visually primary only inside the active exercise.
 
-## Recommended focus order
+For repeated workouts, speed matters. Users should be able to log the basics quickly and only expand detailed actuals when needed.
 
-1. Strengthen the visual system and typography.
-2. Polish the plan page hierarchy and editing surfaces.
-3. Upgrade the dashboard into a stronger home base.
-4. Refine onboarding and logging interactions.
+### 6. Navigation Is Too Hidden For A Multi-Workflow App
 
-## Summary
+The hamburger menu works, but the app now has several core workflows:
 
-The app no longer needs a basic consistency rescue. It now needs a product-polish pass.
+- My Plans
+- AI Chat
+- Manual Setup
+- Plan Detail
+- Edit Day
+- Adjust Plan
+- Version History
 
-The biggest gains will come from:
+Recommendation:
 
-- stronger brand expression
-- better typography hierarchy
-- calmer plan-page composition
-- more elegant edit-mode interactions
+- On desktop, consider a visible top nav or segmented navigation in the header: `Plans`, `New AI Plan`, `Manual Setup`.
+- Keep the hamburger for mobile.
+- Rename `AI Chat` to something more outcome-focused, such as `New AI Plan`.
+- Rename `Manual Setup` to `Manual Plan` or `Create Manually`.
+
+The app should make the primary path obvious without requiring the menu.
+
+### 7. Brand And Product Positioning Are Too Climbing-Specific For The New Scope
+
+The app is called Climb512 and much of the copy says climbing, but intake now supports climbing, running, cycling, and strength/conditioning.
+
+Recommendation:
+
+- Decide whether this is still a climbing-first product with extra sport support, or a broader training-plan product.
+- If climbing-first: keep the brand, but phrase support as "Climbing-first plans, now with running, cycling, and strength/conditioning support."
+- If broader: adjust dashboard and intake copy so non-climbing plans do not feel bolted on.
+
+Right now, a runner or strength user may feel like they entered the wrong product.
+
+## Priority Recommendations
+
+### Priority 1: Establish A Design System Pass
+
+Create a small design-system layer before adding more UI.
+
+Define:
+
+- App background
+- Page header
+- Command bar
+- Section panel
+- Repeated item card
+- Status banner
+- Chat bubble
+- Week tab
+- Day accordion
+- Exercise row/card
+- Primary, secondary, destructive, and icon button usage
+
+This does not require a big redesign. It means consolidating the existing good patterns so every screen feels like the same product.
+
+### Priority 2: Redesign The Plan Page Header
+
+The plan page is the core product surface. Give it the most attention.
+
+Recommended layout:
+
+- Compact title row: plan title/status/current week.
+- Right-aligned action group: versions, edit, adjust, complete.
+- Collapsible plan details below.
+- Generation/completion/preview warnings as separate full-width banners.
+- Equipment chips below metadata, not mixed with action controls.
+
+This will reduce visual noise and make the page feel more professional.
+
+### Priority 3: Improve Intake Feedback
+
+Because AI latency varies, the chat must communicate progress.
+
+Add:
+
+- immediate pending assistant bubble
+- delayed "still working" state
+- clear retry state for failed responses
+- optional collected-info summary
+
+This will make NeMo/direct-AI differences feel less confusing and reduce repeated-answer frustration.
+
+### Priority 4: Make Dashboard A Real Home Screen
+
+Replace the decorative dashboard intro with:
+
+- `Continue Current Plan`
+- `Today's Work`
+- `New AI Plan`
+- `Saved Plans`
+
+This turns the dashboard from a plan list into a useful daily entry point.
+
+### Priority 5: Mobile Logging Pass
+
+Review the exercise logging UI at phone width.
+
+Focus on:
+
+- tap target size
+- field stacking
+- sticky save affordance
+- reducing horizontal scroll
+- making completed state obvious
+
+This app will likely be used around workouts, where mobile usability matters more than desktop polish.
+
+## Screen-Specific Notes
+
+### Login And Register
+
+Good:
+
+- Polished first impression.
+- Clear account form.
+- Brand mark is memorable enough.
+
+Improve:
+
+- The background is more decorative than the rest of the product. Consider simplifying after sign-in for consistency.
+- Registration is a long form; group profile fields and account fields more clearly.
+- Add inline password requirement feedback instead of a paragraph users must interpret after submission.
+
+### Dashboard
+
+Good:
+
+- Saved plan cards are simple and understandable.
+- Bulk delete exists.
+
+Improve:
+
+- Add primary creation actions directly on the dashboard.
+- Surface active/current plan first.
+- Show plan progress visually.
+- Make checkboxes less visually disconnected from plan cards.
+
+### Guided Intake
+
+Good:
+
+- Conversational format is appropriate.
+- The final wand action is a nice moment.
+- Message bubbles are readable.
+
+Improve:
+
+- Add pending/long-running states.
+- Consider a collected-info side panel on desktop or collapsible summary on mobile.
+- The "magic wand" button may be cute but can be ambiguous; pair it with `Generate Plan` text on desktop.
+- Initial copy should avoid overloading the first assistant message.
+
+### Plan Detail
+
+Good:
+
+- Rich functionality.
+- Week navigation is clear.
+- Day accordions make long plans manageable.
+- Version history and protected logged days are important and thoughtfully handled.
+
+Improve:
+
+- Reduce header density.
+- Make primary actions stable and predictable.
+- Use clearer hierarchy between plan metadata, coach guidance, week summary, day cards, and exercise logging.
+- Consider making week navigation sticky below the page header.
+
+### AI Adjustment
+
+Good:
+
+- Matching intake chat is smart.
+- Starter prompts are helpful.
+- Proposal review is safer than direct mutation.
+
+Improve:
+
+- Distinguish "chatting" from "reviewing proposal" more strongly.
+- Make scope selection feel like part of the proposal, not another cluster of pills.
+- For high-risk changes, use a clearer confirmation banner.
+
+## Suggested Visual Direction
+
+A stronger visual direction for this app would be:
+
+- Calm, utilitarian, training-focused.
+- Mostly neutral surfaces with a restrained blue/teal accent.
+- Amber only for warnings or adjusted-history states.
+- Green only for completion/logged work.
+- Red only for destructive/error states.
+- Fewer gradients; more clean panels and readable data.
+- Compact but not cramped.
+
+The product should feel like a coach's notebook crossed with a workout logger, not a marketing site.
+
+## Suggested Implementation Sequence
+
+1. Define shared layout components: `PageShell`, `PageIntro`, `CommandBar`, `StatusBanner`, `SectionPanel`.
+2. Refactor dashboard and intake to use the same page intro and panel language.
+3. Redesign the plan summary/action header.
+4. Add AI pending/long-running states to intake and adjustment chat.
+5. Improve mobile logging forms.
+6. Revisit branding/copy for multi-sport support.
+
+## Final Take
+
+The application is feature-rich and already useful. The next design step is restraint: fewer competing decorative surfaces, clearer hierarchy, and workflows organized around what the user is trying to do right now.
+
+If the plan page becomes calmer and the chat flows get better feedback during slow AI calls, the whole product will feel much more mature without needing a dramatic redesign.

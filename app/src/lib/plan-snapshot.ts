@@ -223,7 +223,7 @@ export function buildPlanGuidance(profile: ProfileSnapshot, weeks: Array<WeekDat
       "Prioritize consistency over making up missed work all at once.",
     ],
     recommendations: uniqueShort([
-      equipment.some((item) => item.includes("hangboard")) ? "Use hangboard work only when fully warm and stop before finger pain." : "",
+      equipment.some((item) => item.includes("hangboard")) ? "Use hangboard work only when fully warm; prefer half crimp, open hand, and slopers, never full crimp." : "",
       equipment.some((item) => item.includes("board") || item.includes("kilter") || item.includes("tb2")) ? "Use board sessions for repeatable intensity and track the same problems over time." : "",
       equipment.some((item) => item.includes("weight") || item.includes("gym")) ? "Keep strength accessories crisp and supportive rather than turning them into exhaustion work." : "",
       `Keep the main goal in view: ${profile.goals.join(", ")}.`,

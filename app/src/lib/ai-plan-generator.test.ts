@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vitest";
 import {
   buildNextWeekPrompt,
+  CLIMBING_GRIP_SAFETY_RULES,
   dayNamesForPlanStart,
   summarizeGeneratedWeeks,
   validateGeneratedWeek,
@@ -173,6 +174,20 @@ describe("ai plan generator sequential core", () => {
     expect(prompt).toContain("productive main work should generally live around RPE 8-10");
     expect(prompt).toContain("Do not automatically make the final week a deload in a short block");
     expect(prompt).not.toContain("This is a deload or consolidation week unless");
+  });
+
+  test("climbing generation prompts forbid full-crimp hangboard work", () => {
+    const prompt = buildNextWeekPrompt({
+      request,
+      athleteAge: 34,
+      weekNum: 1,
+      totalWeeks: 8,
+      previousWeekSummaries: [],
+    });
+
+    expect(CLIMBING_GRIP_SAFETY_RULES).toContain("Never prescribe or suggest full-crimp");
+    expect(prompt).toContain(CLIMBING_GRIP_SAFETY_RULES);
+    expect(prompt).toContain("half crimp, open hand, and sloper");
   });
 
   test("validates a well-formed generated week", () => {

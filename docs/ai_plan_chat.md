@@ -1162,72 +1162,116 @@ Use the findings in `docs/NeMo-Guardrails.md` as the implementation guide. The g
 
 Primary direction:
 
-- Start with a narrow intake-only proof of concept.
+- Keep the narrow intake-only NeMo gateway as the current direction.
 - Use NeMo for safety, prompt-injection, topic-boundary, and output-shape guardrails.
 - Do not use NeMo as a second rigid interviewer.
 - Do not hard-code sport-specific questions or project names in NeMo rails.
 - Keep normal short training answers valid, including `no`, `none`, `5 days`, `May 3`, and similar concise responses.
 - Keep all app-side validation after NeMo: JSON parsing, `PlanIntakeAiResponse`, draft merging, readiness checks, `PlanRequest`, generated week validation, locked-day protection, and versioning.
+- Keep app-side conversational cleanup after NeMo so live responses can remain friendly while still asking only one question per turn.
 
 **Batch 1: Guardrails Architecture And Config Skeleton**
 
-- [ ] Add a `guardrails/` directory for NeMo configuration and local documentation.
-- [ ] Create an intake-only NeMo config structure, such as:
+- [x] Add a `guardrails/` directory for NeMo configuration and local documentation.
+- [x] Create an intake-only NeMo config structure, such as:
   - `guardrails/intake/config.yml`
   - `guardrails/intake/rails/input.co`
   - `guardrails/intake/rails/output.co`
   - optional `guardrails/intake/actions.py`
-- [ ] Add environment switches:
+- [x] Add environment switches:
   - `AI_GUARDRAILS_MODE=off|intake`
   - `AI_GUARDRAILS_BASE_URL=http://guardrails:8000`
-- [ ] Keep direct AI backend mode as the default unless `AI_GUARDRAILS_MODE=intake`.
-- [ ] Document how to switch between direct AI, simulator, and NeMo-gated intake mode.
-- [ ] Add the NeMo service to Docker Compose behind an explicit opt-in path.
-- [ ] Confirm the app can still run without the NeMo service when guardrails mode is off.
+- [x] Keep direct AI backend mode as the default unless `AI_GUARDRAILS_MODE=intake`.
+- [x] Document how to switch between direct AI, simulator, and NeMo-gated intake mode.
+- [x] Add the NeMo service to Docker Compose behind an explicit opt-in path.
+- [x] Confirm the app can still run without the NeMo service when guardrails mode is off.
 
 **Batch 2: Intake Security Rails**
 
-- [ ] Add input rails for prompt injection and jailbreak attempts.
-- [ ] Add input rails for requests to reveal hidden prompts, system messages, environment variables, API keys, or internal instructions.
-- [ ] Add input rails for credential/secret extraction and unrelated hacking requests.
-- [ ] Add topic-boundary rails that keep intake focused on training-plan creation without rejecting normal fitness, schedule, injury, equipment, or preference answers.
-- [ ] Ensure short valid user answers are allowed, especially `no`, `none`, `no constraints`, `no injuries`, dates, numbers, days of week, sport names, and equipment lists.
-- [ ] Add a friendly refusal style for unsafe or unrelated inputs that redirects back to the current training-plan question.
-- [ ] Add a small manual test script or documented prompt list for common injection/security checks.
+- [x] Add input rails for prompt injection and jailbreak attempts.
+- [x] Add input rails for requests to reveal hidden prompts, system messages, environment variables, API keys, or internal instructions.
+- [x] Add input rails for credential/secret extraction and unrelated hacking requests.
+- [x] Add topic-boundary rails that keep intake focused on training-plan creation without rejecting normal fitness, schedule, injury, equipment, or preference answers.
+- [x] Ensure short valid user answers are allowed, especially `no`, `none`, `no constraints`, `no injuries`, dates, numbers, days of week, sport names, and equipment lists.
+- [x] Add a friendly refusal style for unsafe or unrelated inputs that redirects back to the current training-plan question.
+- [x] Add a small manual test script or documented prompt list for common injection/security checks.
 
 **Batch 3: Intake Output And Style Rails**
 
-- [ ] Add output rails that require the AI intake response to remain JSON-like.
-- [ ] Require the response to stay within the expected top-level contract: `status`, `message`, and `planRequestDraft`.
-- [ ] Block or flag visibly truncated assistant messages before they reach the app.
-- [ ] Encourage a coach-like acknowledgement plus the next question, but do not enforce a rigid exact phrase.
-- [ ] Keep tone guardrails generic: no sport-specific hard-coded examples such as a specific climb or race.
-- [ ] Verify NeMo does not rewrite or wrap JSON in a way that breaks the existing parser.
-- [ ] Preserve the app's current validation fallback: if the app cannot process the AI response, it should say it had trouble processing the response and repeat the prior question.
+- [x] Add output rails that require the AI intake response to remain JSON-like.
+- [x] Require the response to stay within the expected top-level contract: `status`, `message`, and `planRequestDraft`.
+- [x] Block or flag visibly truncated assistant messages before they reach the app.
+- [x] Encourage a coach-like acknowledgement plus the next question, but do not enforce a rigid exact phrase.
+- [x] Keep tone guardrails generic: no sport-specific hard-coded examples such as a specific climb or race.
+- [x] Verify NeMo does not rewrite or wrap JSON in a way that breaks the existing parser.
+- [x] Preserve the app's current validation fallback: if the app cannot process the AI response, it should say it had trouble processing the response and repeat the prior question.
 
 **Batch 4: App Integration For Live Intake**
 
-- [ ] Route only model-backed intake calls through NeMo when `AI_GUARDRAILS_MODE=intake`.
-- [ ] Keep simulator intake behavior unchanged.
-- [ ] Keep plan generation and adjustment generation on the direct AI backend during the first NeMo pass.
-- [ ] Keep TypeScript parsing, schema validation, draft merge behavior, no-duplicate-question logic, and readiness checks after the NeMo response.
-- [ ] Add logging that clearly shows whether an intake response came through direct AI or NeMo-gated AI, without logging secrets or full sensitive payloads.
-- [ ] Add graceful fallback or clear error handling if the NeMo service is unavailable while guardrails mode is enabled.
-- [ ] Rebuild/restart only the services required for the selected mode.
+- [x] Route only model-backed intake calls through NeMo when `AI_GUARDRAILS_MODE=intake`.
+- [x] Avoid silently bypassing NeMo in guarded mode, even when simulator/local intake settings are present.
+- [x] Keep plan generation and adjustment generation on the direct AI backend during the first NeMo pass.
+- [x] Keep TypeScript parsing, schema validation, draft merge behavior, no-duplicate-question logic, and readiness checks after the NeMo response.
+- [x] Add logging that clearly shows whether an intake response came through direct AI or NeMo-gated AI, without logging secrets or full sensitive payloads.
+- [x] Add graceful fallback or clear error handling if the NeMo service is unavailable while guardrails mode is enabled.
+- [x] Rebuild/restart only the services required for the selected mode.
+
+Batch 4 implementation notes:
+
+- `app/src/lib/plan-intake-ai.ts` now chooses a per-call intake transport. Guarded live intake uses `AI_GUARDRAILS_BASE_URL/v1/chat/completions`, while direct live intake uses `ANTHROPIC_BASE_URL/v1/chat/completions`.
+- `AI_GUARDRAILS_MODE=intake` takes precedence over simulator/local intake settings so guarded-mode testing cannot accidentally exercise the deterministic fallback.
+- The app still validates and merges the NeMo response with the same TypeScript intake contract before the UI sees it.
+- Intake logs include only sanitized routing metadata such as `source=direct-ai` or `source=nemo-guardrails`, response status, and draft key count.
 
 **Batch 5: Validation, Red-Team Scenarios, And Decision Point**
 
-- [ ] Run a side-by-side intake comparison:
+- [x] Add a repeatable validation runbook and harness for Batch 5 comparisons.
+- [x] Run an initial NeMo-gated live intake validation pass and compare behavior against the prior direct/simulator behavior:
   - direct AI backend
   - NeMo-gated AI backend
-  - simulator baseline where applicable
-- [ ] Test normal intake flows for multiple sports, including climbing, running, strength training, cycling, and a generic custom goal.
-- [ ] Test terse answers and no-preference answers to make sure NeMo does not recreate the repeated-question issue.
-- [ ] Test prompt-injection attempts, hidden-prompt requests, API-key requests, and unrelated malicious requests.
-- [ ] Test that valid but unusual user preferences still pass through, such as avoided exercises, unusual schedules, high-level goals, or sport-specific equipment.
-- [ ] Measure rough latency impact and note whether the interaction still feels conversational.
-- [ ] Decide whether to keep NeMo for intake, revise the rails, or remove the experiment.
-- [ ] Update `docs/NeMo-Guardrails.md` with the implementation result and final recommendation.
+  - direct simulator/local baseline where applicable
+  - NeMo-gated simulator baseline from Batch 5A
+- [x] Test normal intake behavior for the currently supported plan types: climbing, running, cycling, and strength/conditioning training.
+- [x] Test terse answers and no-preference answers enough to confirm NeMo is not recreating the repeated-question issue in the active live route.
+- [x] Test that valid but unusual user preferences still pass through, including answers like `energy systems training for climbing`.
+- [x] Decide whether to keep NeMo for intake, revise the rails, or remove the experiment.
+- [x] Update `docs/NeMo-Guardrails.md` with the implementation result and final recommendation.
+- [x] Continue red-team testing prompt-injection attempts, hidden-prompt requests, API-key requests, and unrelated malicious requests before any production enablement.
+- [ ] Capture rough latency notes from several real guided-intake runs.
+
+Batch 5 implementation notes:
+
+- `docs/nemo-intake-validation.md` defines the comparison routes, commands, scenarios, and decision notes to capture.
+- `cd app && npm run validate:nemo-intake` runs synthetic app-level intake scenarios against the currently configured route.
+- `cd app && npm run validate:nemo-intake -- --rails-smoke` adds small direct NeMo smoke checks so app-side refusals are not mistaken for NeMo-side refusals.
+- Decision: keep NeMo for initial guided intake. The observed live NeMo-gated route is much improved and should remain the active direction for intake validation.
+- NeMo remains a gateway, not the owner of intake state. The app still recovers and merges answers into required fields, prevents repeated completed-field questions, enforces one user-facing question per turn, and validates the final `PlanRequest`.
+- Recent validation-driven app fixes include preserving combined first answers such as `energy systems training for climbing`, preventing array-field merge loss for `trainingFocus`, allowing supported options questions through to the AI, and trimming multi-question model responses while preserving a friendly acknowledgement.
+- Initial latency log mining shows guarded intake can be noticeably variable. Recent NeMo logs included completed turns around 11s and 41s, plus a slower partial sample around 53s. The slow samples were dominated by NeMo's internal LLM calls for input self-check, main intake generation, and output self-check, so the delay appears mostly backend/self-check related rather than UI processing.
+- `app/src/lib/plan-intake-ai.ts` now logs `durationMs` on `[ai-intake]` success and failure lines so future direct-AI vs NeMo comparisons can use app-observed total route latency.
+- Batch 5A is still useful for a fully local NeMo-gated simulator baseline, but it is no longer a blocker for the intake direction decision because the live NeMo-gated route has been exercised successfully.
+
+**Batch 5A: Simulator-Backed NeMo Intake Path**
+
+Purpose: close the local testing blind spot where simulator-backed development can look healthy without exercising NeMo. Guarded simulator mode should run the same app -> NeMo -> OpenAI-compatible backend shape as live guarded mode, while keeping outputs deterministic enough for regression tests.
+
+- [ ] Add intake-compatible chat-completions support to the simulator for `PlanIntakeAiResponse` prompts.
+- [ ] Detect intake prompts in the simulator separately from plan-generation prompts, without weakening the existing plan-generation simulator path.
+- [ ] Return deterministic `PlanIntakeAiResponse` JSON from the simulator for common guided-intake turns, including sport, goal, schedule, start date, level, equipment, constraints, strength preferences, preferred days/rest days, and final review answers.
+- [ ] Preserve the existing simulator plan-generation behavior for `plan-worker` and direct generation calls.
+- [ ] Ensure NeMo can call the simulator as its backing OpenAI-compatible model when `ANTHROPIC_BASE_URL=http://simulator:8787` inside the `guardrails` service.
+- [ ] Add a guarded-simulator env/documentation recipe, such as simulator backend plus `AI_GUARDRAILS_MODE=intake`, so developers can intentionally test `web -> guardrails -> simulator`.
+- [ ] Add unit coverage for simulator intake prompt detection and deterministic intake responses.
+- [ ] Add a simulator-gated integration or Playwright smoke test that proves guarded intake reaches NeMo instead of the app's local intake fallback.
+- [ ] Add logging or test assertions that distinguish all three paths: direct simulator/local fallback, direct live AI, and NeMo-gated simulator/live AI.
+- [ ] Document known limitations, especially any differences between deterministic simulator intake and live model behavior behind NeMo.
+
+Batch 5A notes:
+
+- Guarded simulator mode should not require a live AI key.
+- Guarded simulator mode may be less conversational than live AI, but it must preserve the same top-level transport and validation path.
+- The simulator should remain a deterministic test helper, not a second production intake implementation. Keep app-side TypeScript validation authoritative.
+- If the simulator cannot confidently interpret an intake prompt, it should return a valid conservative `needs_more_info` JSON response or a clear simulated provider error, not malformed JSON unless an explicit error mode requests it.
 
 **Batch 6: Optional Expansion After Intake Is Stable**
 

@@ -1,0 +1,5 @@
+# Output rails are configured through the built-in `self check output` flow.
+#
+# The actual policy prompt lives in `guardrails/intake/prompts.yml`.
+# Keep these checks generic and avoid hard-coded sports, projects, races, or
+# exact question wording.

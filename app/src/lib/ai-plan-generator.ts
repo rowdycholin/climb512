@@ -92,6 +92,27 @@ export const PLAN_QUALITY_RULES = `COACHING QUALITY:
 - Make exercise prescriptions unambiguous with optional work/restBetweenReps/restBetweenSets/load/intensity/tempo/grade/sides/rounds fields when they clarify the assignment.
 - Do not include medical claims, diagnosis, nutrition prescriptions, supplement advice, or unrelated coaching.`;
 
+export const CLIMBING_GRIP_SAFETY_RULES = `CLIMBING GRIP SAFETY:
+- Never prescribe or suggest full-crimp hangboard/fingerboard training.
+- For hangboard/fingerboard work, use only half crimp, open hand, and sloper grips.
+- If a user asks for full crimp hangs, replace them with half crimp, open hand, or sloper work and note the safer grip choice.`;
+
+function climbingGripSafetyRulesForRequest(request: PlanRequest) {
+  const text = [
+    request.sport,
+    ...request.disciplines,
+    request.goalDescription,
+    request.currentLevel,
+    request.targetLevel ?? "",
+    ...request.equipment,
+    ...request.trainingFocus,
+  ].join(" ");
+
+  return /\b(climb|boulder|hangboard|fingerboard|crimp|sloper)\b/i.test(text)
+    ? CLIMBING_GRIP_SAFETY_RULES
+    : "";
+}
+
 function buildWeekPrompt(input: PlanInput, weekNum: number): string {
   const equipmentList = input.equipment.length > 0
     ? input.equipment.join(", ")
@@ -131,9 +152,10 @@ WEEK ${weekNum} of ${input.weeksDuration}:
 - ${deloadGuidance(input.weeksDuration)}
 
 ${PLAN_QUALITY_RULES}
+${CLIMBING_GRIP_SAFETY_RULES}
 
 EQUIPMENT RULES:
-${input.equipment.includes("hangboard") ? "- Hangboard available: include hangboard hangs on strength days." : "- No hangboard: use wall crimps instead."}
+${input.equipment.includes("hangboard") ? "- Hangboard available: include hangboard hangs on strength days using only half crimp, open hand, or sloper grips." : "- No hangboard: use wall holds, but do not prescribe full-crimp work."}
 ${input.equipment.includes("campus board") ? "- Campus board available: include campus moves on power days." : "- No campus board: do not mention it."}
 ${input.equipment.includes("weights") || input.equipment.includes("gym") ? "- Weights available: include weighted pull-ups and antagonist work." : "- No weights: use bodyweight only."}
 
@@ -462,6 +484,7 @@ WEEK ${weekNum} of ${request.blockLengthWeeks}:
 - ${deloadGuidance(request.blockLengthWeeks)}
 
 ${PLAN_QUALITY_RULES}
+${climbingGripSafetyRulesForRequest(request)}
 
 OUTPUT: Return ONLY a single JSON object (not an array) in this exact shape:
 ${weekOutputShape(weekNum, expectedDayNames)}
@@ -557,6 +580,7 @@ PROGRESSION RULES:
 ${params.repairFeedback ? `- Repair feedback from the athlete/coach: ${params.repairFeedback}` : "- No repair feedback provided."}
 
 ${PLAN_QUALITY_RULES}
+${climbingGripSafetyRulesForRequest(request)}
 
 OUTPUT: Return ONLY a single JSON object (not an array) in this exact shape:
 ${weekOutputShape(weekNum, expectedDayNames)}
@@ -748,6 +772,7 @@ RULES:
 - Apply the adjustment intent only to days listed in changedDays for this week, unless a week-level note clearly requires supporting changes.
 - Keep days before effectiveFromPlanDay unchanged.
 - Preserve useful warmups, cooldowns, session objectives, exercise modifications, and structured prescription fields unless the intent says to change them.
+- For climbing adjustments, never prescribe or suggest full-crimp hangboard/fingerboard training. Use only half crimp, open hand, and sloper grips for hangboard/fingerboard work.
 - Update week.summary and week.progressionNote so they accurately describe the adjusted prescription. If RPE, intensity, volume, duration, distance, rest, or load changes, the week summary/progression note must mention the new targets instead of old ones.
 - Update affected day coachNotes and session intensity fields so they match changed exercise prescription fields.
 - Keep rest days as rest days unless the intent explicitly changes schedule placement.

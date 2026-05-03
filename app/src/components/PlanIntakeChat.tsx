@@ -36,7 +36,7 @@ export default function PlanIntakeChat({ coachName }: PlanIntakeChatProps) {
   const [messages, setMessages] = useState<IntakeMessage[]>([
     {
       role: "assistant",
-      content: `Hi, I'm ${coachName}, your personal training coach. I’ll use what you tell me to build a plan that fits your goals, schedule, experience, equipment, and recovery needs. The more specific you can be about what you like, what you want to avoid, and any limitations, the better the plan will be. What sport or discipline would you like to train for?`,
+      content: `Hi, I'm ${coachName}, your personal training coach. I’ll use what you tell me to build a plan that fits your goals, schedule, experience, equipment, and recovery needs. For now I can build plans for climbing, running, cycling, and strength/conditioning training. Which one would you like to train for?`,
     },
   ]);
   const [entry, setEntry] = useState("");

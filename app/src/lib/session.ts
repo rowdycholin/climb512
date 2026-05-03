@@ -51,7 +51,7 @@ async function getSessionOptions() {
       secure: isSecureRequest(headerStore),
       httpOnly: true,
       sameSite: "lax" as const,
-      maxAge: SESSION_TIMEOUT_SECONDS,
+      maxAge: undefined,
     },
   };
 }

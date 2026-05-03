@@ -3,9 +3,11 @@
 import PlanEditor from "@/components/PlanEditor";
 import PlanAdjuster from "@/components/PlanAdjuster";
 import PlanViewer from "@/components/PlanViewer";
+import type { PlanUiState } from "@/lib/plan-ui-state";
 
 export default function PlanWorkspace({
   planId,
+  initialUiState,
   weeks,
   planGuidance,
   totalWeeks,
@@ -24,6 +26,7 @@ export default function PlanWorkspace({
   readOnly = false,
 }: {
   planId: string;
+  initialUiState: PlanUiState;
   weeks: Parameters<typeof PlanViewer>[0]["weeks"];
   planGuidance: Parameters<typeof PlanViewer>[0]["planGuidance"];
   totalWeeks: number;
@@ -67,6 +70,7 @@ export default function PlanWorkspace({
       )}
       <PlanViewer
         planId={planId}
+        initialUiState={initialUiState}
         weeks={weeks}
         planGuidance={planGuidance}
         totalWeeks={totalWeeks}

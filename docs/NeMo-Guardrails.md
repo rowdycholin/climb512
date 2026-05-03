@@ -4,9 +4,9 @@ Date reviewed: 2026-05-02
 
 ## Summary
 
-NVIDIA NeMo Guardrails could help centralize some of our AI boundary logic, especially topic safety, prompt-injection checks, output checks, and reusable conversation policies. It is probably not a good replacement for our core typed intake state machine or plan-generation validators. The best fit is as an optional guardrails gateway around live AI calls, starting with intake safety/style rails and leaving `PlanIntakeAiResponse`, `PlanRequest`, generated week validation, and database/versioning rules in the TypeScript app.
+NVIDIA NeMo Guardrails can help centralize some of our AI boundary logic, especially topic safety, prompt-injection checks, output checks, and reusable conversation policies. It is not a replacement for our core typed intake state machine or plan-generation validators. The selected path is to keep NeMo as an optional guardrails gateway around live guided-intake calls, while leaving `PlanIntakeAiResponse`, `PlanRequest`, generated week validation, and database/versioning rules in the TypeScript app.
 
-Recommendation: do not move the whole intake flow into NeMo right now. Consider a small proof of concept where NeMo fronts only the live intake LLM call, while the app continues to own structured draft merging and readiness validation.
+Recommendation: keep NeMo for initial guided intake only. Do not move the whole intake flow into NeMo, and do not expand NeMo to AI Adjust or plan generation until the intake route has more red-team coverage.
 
 ## What NeMo Provides
 
@@ -133,7 +133,7 @@ Cons:
 
 ## Recommended Implementation Path
 
-Start with Option 2 as a contained proof of concept.
+Continue with Option 2 as the selected contained direction.
 
 1. Add a `guardrails/` directory:
 
@@ -230,7 +230,7 @@ actions.py
 
 ## Decision
 
-NeMo is worth exploring, but only as a narrow guardrails gateway. It should centralize safety and style policy, not own our product state.
+NeMo is worth keeping for initial guided intake, but only as a narrow guardrails gateway. It should centralize safety and style policy, not own our product state.
 
 Use it if:
 
@@ -244,5 +244,113 @@ Do not use it if:
 - We are not ready for another Docker service.
 - We expect it to eliminate the need for app-side validation.
 
-My suggested next step is a small spike: create a guarded intake-only service and run the same guided-intake scenarios through direct AI vs NeMo-gated AI. If the NeMo path improves consistency without adding form-like behavior or JSON brittleness, then we can keep it. If it adds latency or rigidity, we leave the current TypeScript guardrails in place.
+The current decision is to keep the guarded intake-only service because the live NeMo-gated route is behaving much better than the earlier direct/simulator-only path. The next step is continued validation and red-team coverage, not immediate expansion to every AI surface.
+
+## Implementation Status
+
+### Phase 10 Batch 1
+
+The repository now includes an opt-in guardrails service skeleton:
+
+- `guardrails/Dockerfile`
+- `guardrails/entrypoint.sh`
+- `guardrails/requirements.txt`
+- `guardrails/intake/config.template.yml`
+- `guardrails/intake/rails/input.co`
+- `guardrails/intake/rails/output.co`
+- `guardrails/intake/actions.py`
+
+Docker Compose includes a `guardrails` service behind the explicit `guardrails` profile. It is not started by default.
+
+Environment defaults:
+
+- `AI_GUARDRAILS_MODE=off`
+- `AI_GUARDRAILS_BASE_URL=http://guardrails:8000`
+
+Batch 1 does not route application traffic through NeMo yet. That is intentionally deferred until the app integration batch so the current simulator/direct-AI paths keep working unchanged.
+
+### Phase 10 Batch 2
+
+The intake config now enables NeMo's built-in `self check input` flow with a custom prompt in `guardrails/intake/prompts.yml`.
+
+The first-pass input rail is designed to block:
+
+- prompt injection and jailbreak attempts
+- requests to reveal hidden prompts, system/developer messages, internal instructions, or guardrail policy
+- requests for API keys, credentials, environment variables, database URLs, private files, or internal configuration
+- clearly malicious cyber requests such as credential theft, malware, or data exfiltration
+- unrelated unsafe requests that would pull intake away from training-plan creation
+
+The prompt explicitly allows concise normal intake answers, including `no`, `none`, `no constraints`, `no injuries`, dates, numbers, days of week, sport names, equipment lists, injury/limitation details, and avoided-exercise preferences.
+
+The refusal style is defined in `guardrails/intake/rails/input.co` and redirects the user back to the current training-plan question.
+
+Manual smoke-test prompts live in `docs/nemo-guardrails-test-prompts.md`.
+
+This is still a gateway-only experiment. The app is not yet routing intake calls through NeMo, and TypeScript validation remains authoritative.
+
+### Phase 10 Batch 3
+
+The intake config now also enables NeMo's built-in `self check output` flow with a custom prompt in `guardrails/intake/prompts.yml`.
+
+The first-pass output rail is designed to block:
+
+- responses that are not JSON-like
+- responses that include markdown fences or prose outside the JSON object
+- visibly truncated responses
+- responses that reveal hidden prompts, system/developer messages, guardrail policy, secrets, environment variables, API keys, database URLs, private files, or internal configuration
+- unsafe cyber instructions or credential/data-exfiltration guidance
+- hostile, shaming, or unrelated intake messages
+
+The output rail intentionally does not replace TypeScript parsing and schema validation. It only checks whether the response appears suitable to hand back to the app. The app remains responsible for authoritative validation of `PlanIntakeAiResponse`, draft merging, duplicate-question prevention, and readiness.
+
+The prompt encourages a brief coach-like acknowledgement plus the next useful question, but it should not block safe JSON only because the tone is plain.
+
+## Batch 4 Implementation Result
+
+The web app now routes only model-backed guided-intake calls through NeMo when `AI_GUARDRAILS_MODE=intake`.
+
+- Guarded intake calls use `AI_GUARDRAILS_BASE_URL/v1/chat/completions`.
+- Direct live intake calls keep using `ANTHROPIC_BASE_URL/v1/chat/completions` when guardrails mode is off.
+- Guarded mode takes precedence over simulator/local intake so NeMo is not silently bypassed during testing.
+- Plan generation, the plan worker, and adjustment generation still use the direct AI backend.
+- The response still passes through the TypeScript `PlanIntakeAiResponse` parser, draft merge, no-duplicate-question guard, and readiness checks after NeMo returns.
+- Intake logs include a sanitized source marker such as `source=direct-ai` or `source=nemo-guardrails`, response status, and draft key count. They do not log API keys, prompts, full payloads, or user answers.
+- If the guardrails service is unavailable or returns a non-OK response, the user sees the existing intake retry flow and the server logs a concise fallback reason.
+
+Only the services required for the selected mode need to be recreated. For guarded intake in Docker, start or rebuild the `guardrails` service and recreate `web`; `plan-worker` does not need to be recreated unless the direct generation backend settings changed.
+
+Important limitation: the current local simulator primarily supports plan-generation prompts. If NeMo is configured to call the simulator as its backing model, guarded intake may fail visibly until the simulator grows an intake-compatible chat-completions response. That failure is preferable to silently bypassing NeMo and producing misleading green tests.
+
+## Batch 5 Validation Result
+
+The validation runbook lives in `docs/nemo-intake-validation.md`.
+
+The app includes a synthetic validation harness:
+
+```bash
+cd app
+npm run validate:nemo-intake
+npm run validate:nemo-intake -- --rails-smoke
+```
+
+The harness compares normal intake scenarios, terse answers, and app-level red-team refusals through the currently configured intake route. The optional `--rails-smoke` mode sends a small direct smoke set to the NeMo OpenAI-compatible endpoint, which helps distinguish app-side refusals from NeMo-side refusals.
+
+Decision status: keep NeMo for initial guided intake.
+
+The live NeMo-gated intake route has been exercised and is now the preferred direction for intake validation. The app remains the final authority after NeMo returns:
+
+- It parses and normalizes the `PlanIntakeAiResponse`.
+- It merges the response with locally recovered draft state.
+- It preserves combined answers such as `energy systems training for climbing` as both sport context and goal/focus context.
+- It prevents completed-field repeated questions.
+- It trims model responses to one user-facing question while preserving a friendly acknowledgement.
+- It enforces final `PlanRequest` validation before generation.
+
+Known follow-ups:
+
+- Continue red-team testing for prompt injection, hidden-prompt extraction, secrets, unrelated malicious requests, terse valid answers, and unusual but valid training preferences.
+- Capture real transcript regressions as unit tests.
+- Keep Batch 5A as the path to a fully local `web -> guardrails -> simulator` baseline.
+- Defer NeMo for AI Adjust and plan generation until guided intake remains stable under additional testing.
 

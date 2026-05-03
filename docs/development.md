@@ -234,6 +234,18 @@ Then verify without printing secrets:
 docker compose -f docker-compose.yml -f docker-compose.dev.yml exec web printenv ANTHROPIC_MODEL ANTHROPIC_BASE_URL
 ```
 
+### Starting the optional NeMo guardrails service
+
+Phase 10 adds an opt-in NeMo Guardrails service for an intake-only proof of concept. It is not started by default, and the app keeps using the direct AI backend while `AI_GUARDRAILS_MODE=off`.
+
+Start it explicitly:
+
+```bash
+docker compose --profile guardrails up -d --build guardrails
+```
+
+The local guardrails scaffold lives in `guardrails/`. To route guided-intake calls through NeMo, set `AI_GUARDRAILS_MODE=intake` and `AI_GUARDRAILS_BASE_URL=http://guardrails:8000` for the `web` service, then recreate `web`. Guarded mode intentionally takes precedence over simulator/local intake so you do not accidentally test the deterministic fallback and assume NeMo is healthy. Plan generation plus adjustment generation keep using `ANTHROPIC_BASE_URL` directly.
+
 ### Old session survives longer than expected
 
 Sessions are boot-scoped and time-limited. Recreating the `web` container should invalidate old sessions from a previous boot.

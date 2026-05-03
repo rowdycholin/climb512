@@ -59,6 +59,14 @@ function exerciseNames(week) {
   );
 }
 
+function exerciseText(week) {
+  return week.days.flatMap((day) =>
+    day.sessions.flatMap((session) =>
+      session.exercises.map((exercise) => JSON.stringify(exercise)),
+    ),
+  ).join("\n");
+}
+
 test("event and ongoing goals use different phase themes", () => {
   const ongoing = generateWeekFromPrompt(promptFor(baseRequest({ goalType: "ongoing" }), 7), { seed: "phase" });
   const event = generateWeekFromPrompt(
@@ -136,6 +144,18 @@ test("generated weeks include rich coaching and prescription fields", () => {
   assert(mainSession.objective);
   assert(mainSession.intensity);
   assert(mainSession.exercises.some((exercise) => exercise.intensity || exercise.work || exercise.restBetweenSets));
+});
+
+test("climbing hangboard work never prescribes full crimp", () => {
+  const week = generateWeekFromPrompt(promptFor(baseRequest({
+    equipment: ["hangboard", "climbing gym"],
+    trainingFocus: ["finger strength"],
+  })), { seed: "grip-safety" });
+  const text = exerciseText(week);
+
+  assert.doesNotMatch(text, /full[-\s]?crimp/i);
+  assert.doesNotMatch(text, /full recruitment/i);
+  assert.match(text, /half crimp|open hand|sloper/i);
 });
 
 test("running requests generate running-specific sessions", () => {

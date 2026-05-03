@@ -2,9 +2,10 @@
 
 import { type ReactNode, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { logExercise } from "@/app/actions";
+import { logExercise, updatePlanUiState } from "@/app/actions";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { Badge } from "@/components/ui/badge";
+import type { PlanUiState } from "@/lib/plan-ui-state";
 
 interface ExerciseLog {
   id: string;
@@ -278,18 +279,6 @@ function SmallChip({ children, tone = "slate" }: { children: ReactNode; tone?: "
   );
 }
 
-function storedBoolean(key: string, fallback: boolean) {
-  if (typeof window === "undefined") return fallback;
-  const value = window.localStorage.getItem(key);
-  if (value === "true") return true;
-  if (value === "false") return false;
-  return fallback;
-}
-
-function storeBoolean(key: string, value: boolean) {
-  window.localStorage.setItem(key, String(value));
-}
-
 function scrollToPlanDay(dayId: string) {
   const target = document.getElementById(`plan-day-heading-${dayId}`);
   target?.scrollIntoView({
@@ -298,13 +287,16 @@ function scrollToPlanDay(dayId: string) {
   });
 }
 
-function PlanGuidancePanel({ planId, planGuidance }: { planId: string; planGuidance?: PlanGuidance | null }) {
-  const storageKey = `climb512.plan.${planId}.coach-guidance-open`;
-  const [guidanceOpen, setGuidanceOpen] = useState(() => storedBoolean(storageKey, true));
-
-  useEffect(() => {
-    storeBoolean(storageKey, guidanceOpen);
-  }, [guidanceOpen, storageKey]);
+function PlanGuidancePanel({
+  planId,
+  planGuidance,
+  initialOpen,
+}: {
+  planId: string;
+  planGuidance?: PlanGuidance | null;
+  initialOpen: boolean;
+}) {
+  const [guidanceOpen, setGuidanceOpen] = useState(initialOpen);
 
   if (!planGuidance) return null;
   const hasGuidance = Boolean(planGuidance.overview)
@@ -322,7 +314,7 @@ function PlanGuidancePanel({ planId, planGuidance }: { planId: string; planGuida
         onClick={() => {
           setGuidanceOpen((value) => {
             const next = !value;
-            storeBoolean(storageKey, next);
+            void updatePlanUiState({ planId, key: "coachGuidanceOpen", value: next });
             return next;
           });
         }}
@@ -895,6 +887,11 @@ function DayCard({
 }
 
 function WeekOverview({ week }: { week: Week }) {
+  function primaryIntensity(day: Day) {
+    const mainSession = day.sessions.find((session) => /\b(main|primary)\b/i.test(session.name));
+    return mainSession?.intensity ?? day.sessions.find((session) => session.intensity)?.intensity ?? null;
+  }
+
   return (
     <div className="overflow-hidden bg-white">
       <div className="grid grid-cols-[88px_minmax(0,1fr)_72px] gap-2 border-b border-slate-100 bg-slate-50 px-3 py-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
@@ -905,7 +902,7 @@ function WeekOverview({ week }: { week: Week }) {
       <div className="divide-y divide-slate-100">
         {week.days.map((day) => {
           const totalDuration = day.sessions.reduce((sum, session) => sum + session.duration, 0);
-          const intensity = day.sessions.map((session) => session.intensity).find(Boolean);
+          const intensity = primaryIntensity(day);
           return (
             <div
               key={`overview-${day.id}`}
@@ -930,12 +927,14 @@ function WeekOverview({ week }: { week: Week }) {
 function WeekCard({
   planId,
   week,
+  initialUiState,
   initialDayIndex,
   adjustmentMetadata,
   readOnly,
 }: {
   planId: string;
   week: Week;
+  initialUiState: PlanUiState;
   initialDayIndex: number;
   adjustmentMetadata?: AdjustmentMetadata | null;
   readOnly?: boolean;
@@ -945,11 +944,10 @@ function WeekCard({
   const completedCount = allExercises.filter((exercise) => exercise.logs[0]?.completed).length;
   const initialDayId = week.days[initialDayIndex]?.id ?? null;
   const hasWeekSummary = Boolean(week.summary || week.progressionNote || week.days.length);
-  const weekSummaryStorageKey = `climb512.plan.${planId}.week-summary-open`;
 
   const [openDayIds, setOpenDayIds] = useState<string[]>(() => (initialDayId ? [initialDayId] : []));
   const [highlightedDayId, setHighlightedDayId] = useState<string | null>(initialDayId);
-  const [weekSummaryOpen, setWeekSummaryOpen] = useState(() => storedBoolean(weekSummaryStorageKey, true));
+  const [weekSummaryOpen, setWeekSummaryOpen] = useState(() => initialUiState.weekSummaryOpen ?? true);
   const adjustedByDay = useMemo(() => {
     const entries = adjustmentMetadata?.affectedDays.filter((day) => day.weekNum === week.weekNum) ?? [];
     return new Map(entries.map((day) => [day.dayNum, day.summary]));
@@ -959,14 +957,6 @@ function WeekCard({
     setOpenDayIds(initialDayId ? [initialDayId] : []);
     setHighlightedDayId(initialDayId);
   }, [initialDayId, week.id]);
-
-  useEffect(() => {
-    setWeekSummaryOpen(storedBoolean(weekSummaryStorageKey, true));
-  }, [weekSummaryStorageKey]);
-
-  useEffect(() => {
-    storeBoolean(weekSummaryStorageKey, weekSummaryOpen);
-  }, [weekSummaryOpen, weekSummaryStorageKey]);
 
   useEffect(() => {
     if (!initialDayId) return;
@@ -996,7 +986,7 @@ function WeekCard({
             onClick={() => {
               setWeekSummaryOpen((value) => {
                 const next = !value;
-                storeBoolean(weekSummaryStorageKey, next);
+                void updatePlanUiState({ planId, key: "weekSummaryOpen", value: next });
                 return next;
               });
             }}
@@ -1064,6 +1054,7 @@ function MissingWeekCard({ weekNum, generation }: { weekNum: number; generation:
 
 export default function PlanViewer({
   planId,
+  initialUiState,
   weeks,
   planGuidance,
   totalWeeks = weeks.length,
@@ -1076,6 +1067,7 @@ export default function PlanViewer({
   readOnly = false,
 }: {
   planId: string;
+  initialUiState: PlanUiState;
   weeks: Week[];
   planGuidance?: PlanGuidance | null;
   totalWeeks?: number;
@@ -1119,7 +1111,11 @@ export default function PlanViewer({
 
   return (
     <div>
-      <PlanGuidancePanel planId={planId} planGuidance={planGuidance} />
+      <PlanGuidancePanel
+        planId={planId}
+        planGuidance={planGuidance}
+        initialOpen={initialUiState.coachGuidanceOpen ?? true}
+      />
       <div ref={weekScrollRef} className="mb-6 flex gap-2 overflow-x-auto pb-2" style={{ scrollbarWidth: "thin" }}>
         {Array.from({ length: resolvedTotalWeeks }, (_, index) => {
           const week = weeks[index] ?? null;
@@ -1174,6 +1170,7 @@ export default function PlanViewer({
         <WeekCard
           planId={planId}
           week={activeWeek}
+          initialUiState={initialUiState}
           initialDayIndex={resolvedActiveWeek === initialWeekIndex ? initialDayIndex : -1}
           adjustmentMetadata={adjustmentMetadata}
           readOnly={readOnly}

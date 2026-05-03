@@ -23,6 +23,7 @@ import { composePlanSnapshotFromGeneratedWeeks, countGeneratedWeeks } from "@/li
 import { generatePlanWithAI } from "@/lib/ai-plan-generator";
 import type { PlanInput } from "@/lib/plan-types";
 import { planRequestToLegacyPlanInput, type PlanRequest } from "@/lib/plan-request";
+import { parsePlanUiState, planUiStateKeySchema } from "@/lib/plan-ui-state";
 import { findOwnedPlanById, findOwnedPlanWithLogs, upsertExerciseLogForUser } from "@/lib/plan-access";
 import {
   adjustmentModeSchema,
@@ -1378,6 +1379,43 @@ export async function logout() {
   const session = await getSession();
   session.destroy();
   redirect("/login");
+}
+
+export async function updatePlanUiState(input: {
+  planId: string;
+  key: string;
+  value: boolean;
+}) {
+  const session = await getSession();
+  if (!session.isLoggedIn) return { error: "Not authenticated" };
+
+  const key = planUiStateKeySchema.safeParse(input.key);
+  if (!key.success) return { error: "Invalid UI state key" };
+
+  const plan = await prisma.plan.findFirst({
+    where: {
+      id: input.planId,
+      userId: session.userId,
+    },
+    select: {
+      id: true,
+      uiState: true,
+    },
+  });
+
+  if (!plan) return { error: "Plan not found" };
+
+  await prisma.plan.update({
+    where: { id: plan.id },
+    data: {
+      uiState: toStoredJson({
+        ...parsePlanUiState(plan.uiState),
+        [key.data]: input.value,
+      }),
+    },
+  });
+
+  return { ok: true };
 }
 
 export async function createPlan(formData: FormData) {

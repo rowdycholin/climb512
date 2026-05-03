@@ -8,6 +8,7 @@
     "start": "next start",
     "lint": "next lint",
     "test:unit": "vitest run",
+    "validate:nemo-intake": "tsx --tsconfig tsconfig.json src/scripts/validate-nemo-intake.ts",
     "worker:plan-generation": "tsx --tsconfig tsconfig.json src/worker/plan-generation-worker.ts"
   },
   "dependencies": {

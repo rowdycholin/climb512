@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { findOwnedPlanWithLogs } from "@/lib/plan-access";
 import { getPlanCalendarStatus } from "@/lib/plan-calendar";
 import { countGeneratedWeeks, getPlanGenerationProgress } from "@/lib/plan-generation-state";
+import { parsePlanUiState } from "@/lib/plan-ui-state";
 import { buildPlanView, parsePlanSnapshot, parseProfileSnapshot } from "@/lib/plan-snapshot";
 import AppHeader from "@/components/AppHeader";
 import PlanPageShell from "@/components/PlanPageShell";
@@ -156,6 +157,7 @@ export default async function PlanPage({
           totalWeeks={totalWeeks}
           initialWeekIndex={currentWeekIndex}
           initialDayIndex={currentDayIndex}
+          initialUiState={parsePlanUiState(plan.uiState)}
           summary={{
             currentGrade: profile.currentGrade,
             targetGrade: profile.targetGrade,

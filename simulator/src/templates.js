@@ -8,7 +8,7 @@ const DISCIPLINE_TEMPLATES = {
         exercises: [
           { name: "Warm-up Traverses", sets: "2", duration: "3 min", rest: "1 min", notes: "Easy movement, build blood flow" },
           { name: "Limit Boulder Problems", sets: "5", reps: "1-3 attempts", rest: "3 min", notes: "V4-V5 grade, focus on technique" },
-          { name: "Wall Crimp Holds", sets: "4", duration: "5 sec max", rest: "2 min", notes: "Dead-hang on varied crimps, full recruitment" },
+          { name: "Wall Half-crimp Holds", sets: "4", duration: "5 sec max", rest: "2 min", holdType: "half crimp", notes: "Half crimp only, strict form" },
           { name: "Antagonist Push-ups", sets: "3", reps: "8", rest: "90 sec", notes: "Slow tempo, bodyweight only, injury prevention" }
         ]
       },
@@ -30,7 +30,7 @@ const DISCIPLINE_TEMPLATES = {
         exercises: [
           { name: "Movement Drills", sets: "3", duration: "4 min", rest: "1 min", notes: "Focus footwork, hip positioning, precision" },
           { name: "V3-V4 Repeats", sets: "4", reps: "3 attempts", rest: "2 min", notes: "Dial in technique, consistent execution" },
-          { name: "Crimp Endurance", sets: "3", reps: "8 reps", rest: "2 min", notes: "Wall crimps, moderate intensity, smooth" }
+          { name: "Open-hand Endurance", sets: "3", reps: "8 reps", rest: "2 min", holdType: "open hand", notes: "Open hand grips, smooth" }
         ]
       }
     ]

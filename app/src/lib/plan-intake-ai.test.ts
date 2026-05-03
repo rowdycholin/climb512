@@ -5,6 +5,7 @@ import {
   buildCoachIntakePrompt,
   continuePlanIntakeWithAiContract,
   firstQuestionOnly,
+  getPlanIntakeTransportConfig,
   INTAKE_READY_MESSAGE,
   INTAKE_TRUNCATED_MESSAGE,
   INTAKE_VALIDATION_FALLBACK_MESSAGE,
@@ -14,6 +15,8 @@ import {
   PLAN_INTAKE_SYSTEM_PROMPT,
   validatePlanIntakeAiResponse,
 } from "./plan-intake-ai";
+
+const ORIGINAL_ENV = { ...process.env };
 
 const completeDraft = {
   sport: "climbing",
@@ -46,6 +49,9 @@ const completeDraft = {
 
 afterEach(() => {
   vi.useRealTimers();
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+  process.env = { ...ORIGINAL_ENV };
 });
 
 describe("plan intake AI contract", () => {
@@ -431,6 +437,26 @@ describe("plan intake AI contract", () => {
     expect(response.assistantMessage).not.toMatch(/what sport or discipline/i);
   });
 
+  test("treats a combined first answer as sport plus goal context", async () => {
+    const response = await continuePlanIntakeWithAiContract({
+      draft: createInitialIntakeDraft(),
+      userMessage: "energy systems training for climbing",
+      messages: [
+        {
+          role: "assistant",
+          content:
+            "Hi, I'm Alex, your personal training coach. For now I can build plans for climbing, running, cycling, and strength/conditioning training. Which one would you like to train for?",
+        },
+      ],
+    });
+
+    expect(response.draft.sport).toBe("climbing");
+    expect(response.draft.goalDescription).toBe("energy systems training for climbing");
+    expect(response.draft.trainingFocus).toContain("energy systems");
+    expect(response.draft.planStructureNotes).toContain("energy systems training for climbing");
+    expect(response.assistantMessage).not.toMatch(/what goal do you want/i);
+  });
+
   test("asks about strength training instead of looping on generic constraints when strength is missing", () => {
     const { strengthTraining: _strengthTraining, ...draftWithoutStrength } = completeDraft;
     const response = validatePlanIntakeAiResponse({
@@ -586,6 +612,37 @@ describe("plan intake AI contract", () => {
     ).toBe(
       "Six days a week is solid commitment for a serious project. Before I dial in the workouts, what is your current training level?",
     );
+
+    expect(
+      firstQuestionOnly(
+        "Energy systems for climbing makes sense. What equipment do you have available, and any injuries or pain I should account for?",
+      ),
+    ).toBe("Energy systems for climbing makes sense. What equipment do you have available?");
+
+    expect(
+      firstQuestionOnly(
+        "Good, that gives me the target. Do you have access to a climbing gym, and are there any exercises you want to avoid?",
+      ),
+    ).toBe("Good, that gives me the target. Do you have access to a climbing gym?");
+  });
+
+  test("post-processes model responses to one friendly question", () => {
+    const message = nextNonDuplicateQuestion({
+      status: "needs_more_info",
+      message:
+        "Energy systems for climbing makes sense. What equipment do you have available, and any injuries or pain I should account for?",
+      planRequestDraft: {
+        sport: "climbing",
+        goalDescription: "energy systems training for climbing",
+        goalType: "ongoing",
+        blockLengthWeeks: 8,
+        daysPerWeek: 4,
+        startDate: "2026-05-04",
+        currentLevel: "intermediate",
+      },
+    });
+
+    expect(message).toBe("Energy systems for climbing makes sense. What equipment do you have available?");
   });
 
   test("detects obviously truncated assistant messages", () => {
@@ -654,6 +711,155 @@ describe("plan intake AI contract", () => {
     expect(prompt).toContain("Do not sound like a form");
     expect(prompt).toContain("one or two short coaching sentences");
     expect(prompt).toContain("Never silently increase daysPerWeek");
+  });
+
+  test("routes live intake through NeMo guardrails only when intake guardrails mode is enabled", () => {
+    process.env.ANTHROPIC_BASE_URL = "https://openrouter.ai/api";
+    process.env.ANTHROPIC_MODEL = "test-model";
+    process.env.ANTHROPIC_MAX_TOKENS = "2222";
+    process.env.AI_GUARDRAILS_MODE = "intake";
+    process.env.AI_GUARDRAILS_BASE_URL = "http://guardrails:8000/";
+    delete process.env.ANTHROPIC_API_KEY;
+
+    expect(getPlanIntakeTransportConfig()).toEqual({
+      source: "nemo-guardrails",
+      url: "http://guardrails:8000/v1/chat/completions",
+      model: "test-model",
+      maxTokens: 2222,
+      apiKey: undefined,
+    });
+
+    process.env.AI_GUARDRAILS_MODE = "off";
+    process.env.ANTHROPIC_API_KEY = "direct-key";
+
+    expect(getPlanIntakeTransportConfig()).toMatchObject({
+      source: "direct-ai",
+      url: "https://openrouter.ai/api/v1/chat/completions",
+      apiKey: "direct-key",
+    });
+  });
+
+  test("uses the NeMo endpoint for model-backed intake while keeping app-side validation", async () => {
+    process.env.ANTHROPIC_BASE_URL = "https://openrouter.ai/api";
+    process.env.ANTHROPIC_MODEL = "test-model";
+    process.env.AI_GUARDRAILS_MODE = "intake";
+    process.env.AI_GUARDRAILS_BASE_URL = "http://guardrails:8000";
+    delete process.env.ANTHROPIC_API_KEY;
+
+    const infoSpy = vi.spyOn(console, "info").mockImplementation(() => undefined);
+    const fetchMock = vi.fn<(input: string, init?: RequestInit) => Promise<Response>>(async () => new Response(JSON.stringify({
+      choices: [
+        {
+          message: {
+            content: JSON.stringify({
+              status: "needs_more_info",
+              message: "Nice goal. How many days per week can you train?",
+              planRequestDraft: {
+                sport: "running",
+                goalDescription: "Build toward a first 10k",
+              },
+            }),
+          },
+        },
+      ],
+    }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await continuePlanIntakeWithAiContract({
+      draft: {},
+      userMessage: "I want to run my first 10k.",
+      messages: [],
+      clientToday: "2026-05-02",
+    });
+
+    expect(fetchMock).toHaveBeenCalledOnce();
+    const firstCall = fetchMock.mock.calls[0];
+    expect(firstCall[0]).toBe("http://guardrails:8000/v1/chat/completions");
+    expect(firstCall[1]?.headers).toEqual({
+      "Content-Type": "application/json",
+    });
+    expect(response.draft.sport).toBe("running");
+    expect(response.ready).toBe(false);
+    expect(infoSpy).toHaveBeenCalledWith(expect.stringContaining("source=nemo-guardrails"));
+  });
+
+  test("routes through NeMo when guardrails mode is enabled even if the backend points at the simulator", async () => {
+    process.env.ANTHROPIC_BASE_URL = "http://simulator:8787";
+    process.env.AI_GUARDRAILS_MODE = "intake";
+    process.env.AI_GUARDRAILS_BASE_URL = "http://guardrails:8000";
+    process.env.AI_INTAKE_MODE = "local";
+
+    const fetchMock = vi.fn<(input: string, init?: RequestInit) => Promise<Response>>(async () => new Response(JSON.stringify({
+      choices: [
+        {
+          message: {
+            content: JSON.stringify({
+              status: "needs_more_info",
+              message: "Good starting point. What is your main training goal?",
+              planRequestDraft: {
+                sport: "climbing",
+              },
+            }),
+          },
+        },
+      ],
+    }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await continuePlanIntakeWithAiContract({
+      draft: {},
+      userMessage: "climbing",
+      messages: [],
+      clientToday: "2026-05-02",
+    });
+
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(fetchMock.mock.calls[0][0]).toBe("http://guardrails:8000/v1/chat/completions");
+    expect(response.draft.sport).toBe("climbing");
+  });
+
+  test("lets model-backed intake answer option questions without mutating the draft", async () => {
+    process.env.ANTHROPIC_BASE_URL = "https://openrouter.ai/api";
+    process.env.AI_GUARDRAILS_MODE = "intake";
+    process.env.AI_GUARDRAILS_BASE_URL = "http://guardrails:8000";
+
+    const fetchMock = vi.fn<(input: string, init?: RequestInit) => Promise<Response>>(async () => new Response(JSON.stringify({
+      choices: [
+        {
+          message: {
+            content: JSON.stringify({
+              status: "needs_more_info",
+              message: "Right now I can build plans for climbing, running, cycling, and strength/conditioning training. Which one would you like to train for?",
+              planRequestDraft: {},
+            }),
+          },
+        },
+      ],
+    }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await continuePlanIntakeWithAiContract({
+      draft: createInitialIntakeDraft(),
+      userMessage: "What are my options?",
+      messages: [
+        {
+          role: "assistant",
+          content: "What sport or discipline would you like to train for?",
+        },
+        {
+          role: "user",
+          content: "What are my options?",
+        },
+      ],
+      clientToday: "2026-05-02",
+    });
+
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(response.ready).toBe(false);
+    expect(response.draft.sport).toBeUndefined();
+    expect(response.assistantMessage).toContain("climbing");
+    expect(response.assistantMessage).toContain("cycling");
+    expect(response.assistantMessage).toContain("strength/conditioning");
   });
 
   test("defines narrow plan-generation prompts for live model calls", () => {

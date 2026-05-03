@@ -3,9 +3,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { CheckCircle2, Eye, History, MessageCircle, PencilLine, RotateCcw, WandSparkles } from "lucide-react";
-import { completePlan, reopenPlan, repairPlanGeneration, revertPlanVersion } from "@/app/actions";
+import { completePlan, reopenPlan, repairPlanGeneration, revertPlanVersion, updatePlanUiState } from "@/app/actions";
 import PlanWorkspace from "@/components/PlanWorkspace";
 import { Button } from "@/components/ui/button";
+import type { PlanUiState } from "@/lib/plan-ui-state";
 
 const REPAIR_PROMPTS = [
   "Reduce volume and continue from the prior generated weeks.",
@@ -23,18 +24,6 @@ function DisclosureArrowHead({ open, className = "" }: { open: boolean; classNam
   );
 }
 
-function storedBoolean(key: string, fallback: boolean) {
-  if (typeof window === "undefined") return fallback;
-  const value = window.localStorage.getItem(key);
-  if (value === "true") return true;
-  if (value === "false") return false;
-  return fallback;
-}
-
-function storeBoolean(key: string, value: boolean) {
-  window.localStorage.setItem(key, String(value));
-}
-
 interface PlanPageShellProps {
   planId: string;
   weeks: Parameters<typeof PlanWorkspace>[0]["weeks"];
@@ -42,6 +31,7 @@ interface PlanPageShellProps {
   totalWeeks: number;
   initialWeekIndex: number;
   initialDayIndex: number;
+  initialUiState: PlanUiState;
   summary: {
     currentGrade: string;
     targetGrade: string;
@@ -125,6 +115,7 @@ export default function PlanPageShell({
   totalWeeks,
   initialWeekIndex,
   initialDayIndex,
+  initialUiState,
   summary,
 }: PlanPageShellProps) {
   const router = useRouter();
@@ -133,8 +124,7 @@ export default function PlanPageShell({
   const [coachOpen, setCoachOpen] = useState(false);
   const [completionPanelOpen, setCompletionPanelOpen] = useState(false);
   const [versionHistoryOpen, setVersionHistoryOpen] = useState(false);
-  const planSummaryStorageKey = `climb512.plan.${planId}.plan-summary-open`;
-  const [summaryOpen, setSummaryOpen] = useState(() => storedBoolean(planSummaryStorageKey, true));
+  const [summaryOpen, setSummaryOpen] = useState(() => initialUiState.planSummaryOpen ?? true);
   const [repairNotes, setRepairNotes] = useState(summary.generationJob?.repairNotes ?? "");
   const activeWeek = weeks[activeWeekIndex] ?? null;
   const activeWeekLocked = useMemo(
@@ -163,10 +153,6 @@ export default function PlanPageShell({
     if (!summary.generation.isFailed) return;
     setRepairNotes(summary.generationJob?.repairNotes ?? "");
   }, [summary.generation.isFailed, summary.generationJob?.repairNotes]);
-
-  useEffect(() => {
-    storeBoolean(planSummaryStorageKey, summaryOpen);
-  }, [planSummaryStorageKey, summaryOpen]);
 
   useEffect(() => {
     setActiveWeekIndex(initialWeekIndex);
@@ -198,8 +184,8 @@ export default function PlanPageShell({
   return (
     <>
       <div className="mb-6 overflow-hidden rounded-[1.5rem] border border-white/70 bg-[radial-gradient(circle_at_top_left,_rgba(14,165,233,0.14),_transparent_32%),linear-gradient(145deg,_rgba(255,255,255,0.98),_rgba(240,249,255,0.92)_52%,_rgba(255,251,235,0.86))] p-5 shadow-[0_20px_50px_rgba(15,23,42,0.10)]">
-        <div className="flex items-start justify-between gap-3">
-          <div>
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div className="min-w-0 flex-1">
             <p className="text-xs font-semibold uppercase tracking-[0.16em] text-sky-700/70">Current Block</p>
             <div className="mt-1 flex items-center gap-1.5">
               <button
@@ -210,7 +196,7 @@ export default function PlanPageShell({
                 onClick={() => {
                   setSummaryOpen((value) => {
                     const next = !value;
-                    storeBoolean(planSummaryStorageKey, next);
+                    void updatePlanUiState({ planId, key: "planSummaryOpen", value: next });
                     return next;
                   });
                 }}
@@ -243,7 +229,7 @@ export default function PlanPageShell({
               </div>
             )}
           </div>
-          <div className="flex flex-wrap items-center justify-end gap-2">
+          <div className="flex w-full flex-wrap items-center justify-end gap-2 sm:w-auto sm:flex-nowrap">
             <Button
               type="button"
               variant={versionHistoryOpen ? "default" : "outline"}
@@ -568,9 +554,10 @@ export default function PlanPageShell({
         )}
       </div>
 
-      <PlanWorkspace
-        planId={planId}
-        weeks={weeks}
+        <PlanWorkspace
+          planId={planId}
+          initialUiState={initialUiState}
+          weeks={weeks}
         planGuidance={planGuidance}
         totalWeeks={totalWeeks}
         generation={summary.generation}
