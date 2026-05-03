@@ -39,7 +39,7 @@ export default function AppMenu() {
         size="icon"
         aria-label={open ? "Close menu" : "Open menu"}
         onClick={() => setOpen((value) => !value)}
-        className="border-white/70 bg-white/80 text-slate-700 shadow-sm backdrop-blur hover:bg-white"
+        className="border-slate-200 bg-white text-slate-700 shadow-sm hover:bg-slate-50"
       >
         {open ? <X className="h-4 w-4" /> : <Menu className="h-4 w-4" />}
       </Button>

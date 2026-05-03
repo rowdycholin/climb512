@@ -377,7 +377,7 @@ function applyConversationRecoveryHints(draft: PartialIntakeDraft, input: PlanIn
     draft.goalDescription = goalAnswer;
   }
 
-  if (!draft.currentLevel && levelAnswer) {
+  if (!draft.currentLevel && levelAnswer && !isScheduleOnlyAnswer(levelAnswer)) {
     draft.currentLevel = levelAnswer;
   }
 
@@ -513,22 +513,24 @@ export function looksLikeTruncatedAssistantMessage(message: string) {
 }
 
 function toIntakeResponse(response: PlanIntakeAiResponse): IntakeResponse {
-  if (response.status === "ready" && !response.planRequestDraft.preferredWorkoutDaysAsked) {
+  if (response.planRequestDraft.daysPerWeek && !response.planRequestDraft.preferredWorkoutDaysAsked) {
     return {
       draft: {
         ...response.planRequestDraft,
         preferredWorkoutDaysAsked: true,
+        finalIntakeReviewAsked: false,
       },
       ready: false,
       assistantMessage: PREFERRED_WORKOUT_DAYS_QUESTION,
     };
   }
 
-  if (response.status === "ready" && !response.planRequestDraft.preferredRestDaysAsked) {
+  if (response.planRequestDraft.daysPerWeek && response.planRequestDraft.preferredWorkoutDaysAsked && !response.planRequestDraft.preferredRestDaysAsked) {
     return {
       draft: {
         ...response.planRequestDraft,
         preferredRestDaysAsked: true,
+        finalIntakeReviewAsked: false,
       },
       ready: false,
       assistantMessage: PREFERRED_REST_DAYS_QUESTION,
@@ -566,6 +568,17 @@ function cleanStringArray(value: unknown) {
 
 function cleanString(value: unknown) {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function isScheduleOnlyAnswer(value: string) {
+  const normalized = value.trim().toLowerCase().replace(/[.!?]+$/g, "");
+  return /^(?:i\s+can\s+)?(?:train|run|ride|lift|climb)?\s*(?:[1-7]|one|two|three|four|five|six|seven)\s*(?:x|times?|days?|sessions?)(?:\s*(?:per|a|\/)\s*week| weekly)?$/.test(normalized);
+}
+
+function cleanCurrentLevel(value: unknown) {
+  const text = cleanString(value);
+  if (!text || isScheduleOnlyAnswer(text)) return undefined;
+  return text;
 }
 
 function todayIsoDate(clientToday?: string) {
@@ -763,7 +776,7 @@ function normalizeAiDraft(rawDraft: unknown, clientToday?: string) {
     targetDate: draft.targetDate === null ? null : cleanDate(draft.targetDate, clientToday),
     blockLengthWeeks: cleanPositiveInteger(draft.blockLengthWeeks),
     daysPerWeek: cleanPositiveInteger(draft.daysPerWeek),
-    currentLevel: cleanString(draft.currentLevel),
+    currentLevel: cleanCurrentLevel(draft.currentLevel),
     targetLevel: cleanString(draft.targetLevel),
     startDate: cleanDate(draft.startDate, clientToday),
     equipment: cleanStringArray(draft.equipment),
@@ -913,7 +926,7 @@ function normalizeAiResponse(response: unknown, clientToday?: string) {
   const raw = response as Record<string, unknown>;
   const planRequestDraft = normalizeAiDraft(raw.planRequestDraft, clientToday);
   const message = cleanString(raw.message) ?? nextQuestionForDraft(planRequestDraft);
-  if (isFinalReviewPrompt(message)) {
+  if (isFinalReviewPrompt(message) && planRequestDraft.preferredWorkoutDaysAsked && planRequestDraft.preferredRestDaysAsked) {
     planRequestDraft.finalIntakeReviewAsked = true;
   }
   return {

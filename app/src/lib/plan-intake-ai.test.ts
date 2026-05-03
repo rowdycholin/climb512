@@ -529,6 +529,56 @@ describe("plan intake AI contract", () => {
     expect(response.draft.preferredWorkoutDaysAsked).toBe(true);
   });
 
+  test("asks scheduling preferences immediately after days per week is known", async () => {
+    const response = await continuePlanIntakeWithAiContract({
+      draft: {
+        ...completeDraft,
+        daysPerWeek: undefined,
+        preferredWorkoutDaysAsked: undefined,
+        preferredRestDaysAsked: undefined,
+        finalIntakeReviewAsked: undefined,
+      },
+      userMessage: "5 days",
+      messages: [{ role: "assistant", content: "How many days per week can you train?" }],
+    });
+
+    expect(response.ready).toBe(false);
+    expect(response.draft.daysPerWeek).toBe(5);
+    expect(response.draft.preferredWorkoutDaysAsked).toBe(true);
+    expect(response.draft.finalIntakeReviewAsked).toBe(false);
+    expect(response.assistantMessage).toBe("Good, that gives me the weekly shape. Are there specific days you like to work out?");
+  });
+
+  test("overrides premature final review with scheduling preference checkpoints", () => {
+    const response = validatePlanIntakeAiResponse({
+      status: "needs_more_info",
+      message:
+        "Great, I have the main pieces. Is there anything else I should know about you or your goals before I am ready to generate the plan?",
+      planRequestDraft: {
+        ...completeDraft,
+        preferredWorkoutDaysAsked: undefined,
+        preferredRestDaysAsked: undefined,
+        finalIntakeReviewAsked: undefined,
+      },
+    });
+
+    expect(response.planRequestDraft.finalIntakeReviewAsked).toBeUndefined();
+  });
+
+  test("keeps final review after scheduling preferences are covered", () => {
+    const response = validatePlanIntakeAiResponse({
+      status: "needs_more_info",
+      message:
+        "Great, I have the main pieces. Is there anything else I should know about you or your goals before I am ready to generate the plan?",
+      planRequestDraft: {
+        ...completeDraft,
+        finalIntakeReviewAsked: undefined,
+      },
+    });
+
+    expect(response.planRequestDraft.finalIntakeReviewAsked).toBe(true);
+  });
+
   test("records preferred workout days and then asks preferred rest days", async () => {
     const response = await continuePlanIntakeWithAiContract({
       draft: {

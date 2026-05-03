@@ -399,13 +399,15 @@ function PlanGuidancePanel({
 function DetailedLogFields({ exercise, log }: { exercise: Exercise; log: ExerciseLog | null }) {
   const shape = loggingShape(exercise);
   const setTarget = setTargetField(exercise);
+  const inputClass = "h-10 min-w-0 rounded-lg border border-slate-300 bg-white px-2 text-sm text-slate-800 placeholder:text-slate-400 focus:border-blue-400 focus:outline-none";
+  const checkboxLabelClass = "flex h-10 items-center gap-2 rounded-lg border border-slate-200 bg-white px-2 text-xs font-medium text-slate-600";
 
   if (shape.mode === "sets") {
     return (
       <div className="space-y-2">
         <input type="hidden" name="actualMode" value="sets" />
         <input type="hidden" name="actualRowCount" value={shape.rowCount} />
-        <div className="grid grid-cols-[44px_72px_minmax(76px,1fr)_64px_minmax(92px,1fr)] gap-2 px-1 text-xs font-medium text-slate-500">
+        <div className="hidden grid-cols-[56px_72px_minmax(76px,1fr)_64px_minmax(92px,1fr)] gap-2 px-1 text-xs font-medium text-slate-500 sm:grid">
           <span>Done</span>
           <span>Reps</span>
           <span>{setTarget.label}</span>
@@ -416,15 +418,15 @@ function DetailedLogFields({ exercise, log }: { exercise: Exercise; log: Exercis
           const row = index + 1;
           const entry = actualEntry(log, "sets", index);
           return (
-            <div key={`set-${row}`} className="grid grid-cols-[44px_72px_minmax(76px,1fr)_64px_minmax(92px,1fr)] gap-2">
-              <label className="flex h-8 items-center gap-1 text-xs text-slate-500">
+            <div key={`set-${row}`} className="grid grid-cols-2 gap-2 sm:grid-cols-[56px_72px_minmax(76px,1fr)_64px_minmax(92px,1fr)]">
+              <label className={checkboxLabelClass}>
                 <input name={`set-${row}-completed`} type="checkbox" defaultChecked={booleanActual(entry.completed)} className="h-4 w-4" />
-                {row}
+                Set {row}
               </label>
-              <input name={`set-${row}-reps`} type="text" defaultValue={stringActual(entry.reps)} placeholder={exercise.reps ?? "reps"} className="h-8 rounded-lg border border-slate-300 bg-white px-2 text-sm" />
-              <input name={`set-${row}-target`} type="text" defaultValue={stringActual(entry.target ?? entry.load)} placeholder={setTarget.placeholder} className="h-8 rounded-lg border border-slate-300 bg-white px-2 text-sm" />
-              <input name={`set-${row}-rpe`} type="text" defaultValue={stringActual(entry.rpe)} placeholder="RPE" className="h-8 rounded-lg border border-slate-300 bg-white px-2 text-sm" />
-              <input name={`set-${row}-notes`} type="text" defaultValue={stringActual(entry.notes)} placeholder="notes" className="h-8 rounded-lg border border-slate-300 bg-white px-2 text-sm" />
+              <input name={`set-${row}-reps`} type="text" defaultValue={stringActual(entry.reps)} placeholder={exercise.reps ?? "reps"} className={inputClass} aria-label={`Set ${row} reps`} />
+              <input name={`set-${row}-target`} type="text" defaultValue={stringActual(entry.target ?? entry.load)} placeholder={setTarget.placeholder} className={inputClass} aria-label={`Set ${row} ${setTarget.label}`} />
+              <input name={`set-${row}-rpe`} type="text" defaultValue={stringActual(entry.rpe)} placeholder="RPE" className={inputClass} aria-label={`Set ${row} RPE`} />
+              <input name={`set-${row}-notes`} type="text" defaultValue={stringActual(entry.notes)} placeholder="notes" className={`${inputClass} col-span-2 sm:col-span-1`} aria-label={`Set ${row} notes`} />
             </div>
           );
         })}
@@ -437,7 +439,7 @@ function DetailedLogFields({ exercise, log }: { exercise: Exercise; log: Exercis
       <div className="space-y-2">
         <input type="hidden" name="actualMode" value="intervals" />
         <input type="hidden" name="actualRowCount" value={shape.rowCount} />
-        <div className="grid grid-cols-[44px_minmax(76px,1fr)_minmax(76px,1fr)_64px_minmax(92px,1fr)] gap-2 px-1 text-xs font-medium text-slate-500">
+        <div className="hidden grid-cols-[56px_minmax(76px,1fr)_minmax(76px,1fr)_64px_minmax(92px,1fr)] gap-2 px-1 text-xs font-medium text-slate-500 sm:grid">
           <span>Done</span>
           <span>Work</span>
           <span>Rest</span>
@@ -448,15 +450,15 @@ function DetailedLogFields({ exercise, log }: { exercise: Exercise; log: Exercis
           const row = index + 1;
           const entry = actualEntry(log, "intervals", index);
           return (
-            <div key={`interval-${row}`} className="grid grid-cols-[44px_minmax(76px,1fr)_minmax(76px,1fr)_64px_minmax(92px,1fr)] gap-2">
-              <label className="flex h-8 items-center gap-1 text-xs text-slate-500">
+            <div key={`interval-${row}`} className="grid grid-cols-2 gap-2 sm:grid-cols-[56px_minmax(76px,1fr)_minmax(76px,1fr)_64px_minmax(92px,1fr)]">
+              <label className={checkboxLabelClass}>
                 <input name={`interval-${row}-completed`} type="checkbox" defaultChecked={booleanActual(entry.completed)} className="h-4 w-4" />
-                {row}
+                #{row}
               </label>
-              <input name={`interval-${row}-work`} type="text" defaultValue={stringActual(entry.work)} placeholder={exercise.work ?? exercise.duration ?? "work"} className="h-8 rounded-lg border border-slate-300 bg-white px-2 text-sm" />
-              <input name={`interval-${row}-rest`} type="text" defaultValue={stringActual(entry.rest)} placeholder={exercise.restBetweenReps ?? exercise.restBetweenSets ?? exercise.rest ?? "rest"} className="h-8 rounded-lg border border-slate-300 bg-white px-2 text-sm" />
-              <input name={`interval-${row}-rpe`} type="text" defaultValue={stringActual(entry.rpe)} placeholder="RPE" className="h-8 rounded-lg border border-slate-300 bg-white px-2 text-sm" />
-              <input name={`interval-${row}-notes`} type="text" defaultValue={stringActual(entry.notes)} placeholder="notes" className="h-8 rounded-lg border border-slate-300 bg-white px-2 text-sm" />
+              <input name={`interval-${row}-work`} type="text" defaultValue={stringActual(entry.work)} placeholder={exercise.work ?? exercise.duration ?? "work"} className={inputClass} aria-label={`Interval ${row} work`} />
+              <input name={`interval-${row}-rest`} type="text" defaultValue={stringActual(entry.rest)} placeholder={exercise.restBetweenReps ?? exercise.restBetweenSets ?? exercise.rest ?? "rest"} className={inputClass} aria-label={`Interval ${row} rest`} />
+              <input name={`interval-${row}-rpe`} type="text" defaultValue={stringActual(entry.rpe)} placeholder="RPE" className={inputClass} aria-label={`Interval ${row} RPE`} />
+              <input name={`interval-${row}-notes`} type="text" defaultValue={stringActual(entry.notes)} placeholder="notes" className={`${inputClass} col-span-2 sm:col-span-1`} aria-label={`Interval ${row} notes`} />
             </div>
           );
         })}
@@ -469,7 +471,7 @@ function DetailedLogFields({ exercise, log }: { exercise: Exercise; log: Exercis
       <div className="space-y-2">
         <input type="hidden" name="actualMode" value="attempts" />
         <input type="hidden" name="actualRowCount" value={shape.rowCount} />
-        <div className="grid grid-cols-[52px_minmax(96px,1fr)_minmax(76px,1fr)_64px_minmax(92px,1fr)] gap-2 px-1 text-xs font-medium text-slate-500">
+        <div className="hidden grid-cols-[56px_minmax(96px,1fr)_minmax(76px,1fr)_64px_minmax(92px,1fr)] gap-2 px-1 text-xs font-medium text-slate-500 sm:grid">
           <span>#</span>
           <span>Result</span>
           <span>Duration</span>
@@ -480,18 +482,18 @@ function DetailedLogFields({ exercise, log }: { exercise: Exercise; log: Exercis
           const row = index + 1;
           const entry = actualEntry(log, "attempts", index);
           return (
-            <div key={`attempt-${row}`} className="grid grid-cols-[52px_minmax(96px,1fr)_minmax(76px,1fr)_64px_minmax(92px,1fr)] gap-2">
-              <span className="flex h-8 items-center text-xs text-slate-500">#{row}</span>
-              <select name={`attempt-${row}-result`} defaultValue={stringActual(entry.result)} className="h-8 rounded-lg border border-slate-300 bg-white px-2 text-sm">
+            <div key={`attempt-${row}`} className="grid grid-cols-2 gap-2 sm:grid-cols-[56px_minmax(96px,1fr)_minmax(76px,1fr)_64px_minmax(92px,1fr)]">
+              <span className="flex h-10 items-center rounded-lg border border-slate-200 bg-white px-2 text-xs font-medium text-slate-600">#{row}</span>
+              <select name={`attempt-${row}-result`} defaultValue={stringActual(entry.result)} className={inputClass} aria-label={`Attempt ${row} result`}>
                 <option value="">Result</option>
                 <option value="sent">Sent</option>
                 <option value="fell">Fell</option>
                 <option value="worked moves">Worked moves</option>
                 <option value="skipped">Skipped</option>
               </select>
-              <input name={`attempt-${row}-duration`} type="text" defaultValue={stringActual(entry.duration)} placeholder={exercise.work ?? exercise.duration ?? "time"} className="h-8 rounded-lg border border-slate-300 bg-white px-2 text-sm" />
-              <input name={`attempt-${row}-rpe`} type="text" defaultValue={stringActual(entry.rpe)} placeholder="RPE" className="h-8 rounded-lg border border-slate-300 bg-white px-2 text-sm" />
-              <input name={`attempt-${row}-notes`} type="text" defaultValue={stringActual(entry.notes)} placeholder="notes" className="h-8 rounded-lg border border-slate-300 bg-white px-2 text-sm" />
+              <input name={`attempt-${row}-duration`} type="text" defaultValue={stringActual(entry.duration)} placeholder={exercise.work ?? exercise.duration ?? "time"} className={inputClass} aria-label={`Attempt ${row} duration`} />
+              <input name={`attempt-${row}-rpe`} type="text" defaultValue={stringActual(entry.rpe)} placeholder="RPE" className={inputClass} aria-label={`Attempt ${row} RPE`} />
+              <input name={`attempt-${row}-notes`} type="text" defaultValue={stringActual(entry.notes)} placeholder="notes" className={`${inputClass} col-span-2 sm:col-span-1`} aria-label={`Attempt ${row} notes`} />
             </div>
           );
         })}
@@ -504,9 +506,9 @@ function DetailedLogFields({ exercise, log }: { exercise: Exercise; log: Exercis
     <div className="grid gap-2 sm:grid-cols-[minmax(120px,1fr)_80px_minmax(160px,2fr)]">
       <input type="hidden" name="actualMode" value="summary" />
       <input type="hidden" name="actualRowCount" value={1} />
-      <input name="summary-duration" type="text" defaultValue={stringActual(entry.duration)} placeholder={exercise.duration ?? exercise.work ?? "duration"} className="h-8 rounded-lg border border-slate-300 bg-white px-2 text-sm" />
-      <input name="summary-rpe" type="text" defaultValue={stringActual(entry.rpe)} placeholder="RPE" className="h-8 rounded-lg border border-slate-300 bg-white px-2 text-sm" />
-      <input name="summary-notes" type="text" defaultValue={stringActual(entry.notes)} placeholder="notes" className="h-8 rounded-lg border border-slate-300 bg-white px-2 text-sm" />
+      <input name="summary-duration" type="text" defaultValue={stringActual(entry.duration)} placeholder={exercise.duration ?? exercise.work ?? "duration"} className={inputClass} aria-label="Actual duration" />
+      <input name="summary-rpe" type="text" defaultValue={stringActual(entry.rpe)} placeholder="RPE" className={inputClass} aria-label="Actual RPE" />
+      <input name="summary-notes" type="text" defaultValue={stringActual(entry.notes)} placeholder="notes" className={inputClass} aria-label="Actual notes" />
     </div>
   );
 }
@@ -614,7 +616,7 @@ function ExerciseRow({ planId, exercise, readOnly = false }: { planId: string; e
           <button
             type="button"
             onClick={() => setOpen((value) => !value)}
-            className="shrink-0 rounded-lg border border-slate-300 px-2.5 py-1 text-xs text-slate-500 transition-colors hover:border-slate-400 hover:text-slate-700"
+            className="min-h-9 shrink-0 rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-600 transition-colors hover:border-slate-400 hover:bg-slate-50 hover:text-slate-800"
           >
             {open ? "Close" : log ? "Edit log" : "Log"}
           </button>
@@ -702,11 +704,20 @@ function ExerciseRow({ planId, exercise, readOnly = false }: { planId: string; e
         <form onSubmit={handleSubmit} className="border-t border-slate-100 bg-slate-50 px-3 pb-3 pt-3">
           <input type="hidden" name="planId" value={planId} />
           <input type="hidden" name="exerciseId" value={exercise.id} />
-          <p className="mb-2 text-xs font-medium text-slate-500">Record actual work:</p>
-          <div className="overflow-x-auto pb-1">
-            <div className="min-w-[560px]">
-              <DetailedLogFields exercise={exercise} log={log} />
-            </div>
+          <div className="mb-2 flex items-center justify-between gap-3">
+            <p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">Log Work</p>
+            <label className="flex min-h-9 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-xs font-medium text-slate-600">
+              <input
+                type="checkbox"
+                checked={completed}
+                onChange={(event) => setCompleted(event.target.checked)}
+                className="h-4 w-4"
+              />
+              Complete
+            </label>
+          </div>
+          <div>
+            <DetailedLogFields exercise={exercise} log={log} />
           </div>
           <div className="mt-2">
             <label className="mb-1 block text-xs text-slate-500">Overall notes</label>
@@ -715,16 +726,18 @@ function ExerciseRow({ planId, exercise, readOnly = false }: { planId: string; e
               type="text"
               defaultValue={log?.notes ?? ""}
               placeholder="How did it feel? Anything to remember?"
-              className="h-8 w-full rounded-lg border border-slate-300 bg-white px-2 text-sm text-slate-800 placeholder:text-slate-400 focus:border-blue-400 focus:outline-none"
+              className="h-10 w-full rounded-lg border border-slate-300 bg-white px-2 text-sm text-slate-800 placeholder:text-slate-400 focus:border-blue-400 focus:outline-none"
             />
           </div>
-          <button
-            type="submit"
-            disabled={pending}
-            className="mt-2 rounded-lg bg-blue-600 px-4 py-1.5 text-sm font-medium text-white transition-colors hover:bg-blue-700 disabled:opacity-50"
-          >
-            {pending ? "Saving..." : saved ? "Saved!" : "Save log"}
-          </button>
+          <div className="sticky bottom-0 -mx-3 mt-3 border-t border-slate-200 bg-slate-50/95 px-3 py-2 backdrop-blur sm:static sm:border-0 sm:bg-transparent sm:px-0 sm:py-0 sm:backdrop-blur-none">
+            <button
+              type="submit"
+              disabled={pending}
+              className="min-h-10 w-full rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700 disabled:opacity-50 sm:w-auto"
+            >
+              {pending ? "Saving..." : saved ? "Saved!" : "Save log"}
+            </button>
+          </div>
         </form>
       )}
     </div>
@@ -841,25 +854,33 @@ function DayCard({
         className="scroll-mt-28 px-4 py-3 hover:bg-slate-50 hover:no-underline [&[data-state=open]]:bg-slate-50 [&_[data-slot=accordion-trigger-icon]]:!hidden"
         onClick={() => onSelect(day.id)}
       >
-        <div className="flex w-full items-center gap-2 text-left">
+        <div className="flex w-full items-start gap-2 text-left sm:items-center">
           <DisclosureArrowHead open={false} className="text-slate-700 group-aria-expanded/accordion-trigger:rotate-90" />
-          <div className="w-[72px] shrink-0">
+          <div className="w-[52px] shrink-0 sm:w-[72px]">
             <span className={`text-xs font-semibold ${isHighlighted ? "text-blue-600" : "text-slate-500"}`}>
               {day.dayName}
             </span>
           </div>
           <div className="min-w-0 flex-1">
-            <span className="text-sm font-semibold text-slate-700">{day.focus}</span>
-            {isAdjusted && (
-              <span className="ml-2 rounded-full border border-amber-200 bg-amber-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-700">
-                Adjusted
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className="text-sm font-semibold text-slate-700">{day.focus}</span>
+              {isAdjusted && (
+                <span className="rounded-full border border-amber-200 bg-amber-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-700">
+                  Adjusted
+                </span>
+              )}
+              {hasProgress && !day.isRest && (
+                <span className="text-xs text-green-600">{completedExercises}/{totalExercises} done</span>
+              )}
+            </div>
+            <div className="mt-1 flex flex-wrap items-center gap-1.5 sm:hidden">
+              {!day.isRest && <span className="text-xs text-slate-400">{totalDuration} min</span>}
+              <span className={`rounded-full border px-2 py-0.5 text-xs font-medium ${colorClass}`}>
+                {day.isRest ? "Rest" : "Training"}
               </span>
-            )}
-            {hasProgress && !day.isRest && (
-              <span className="ml-2 text-xs text-green-600">{completedExercises}/{totalExercises} done</span>
-            )}
+            </div>
           </div>
-          <div className="flex shrink-0 items-center gap-2">
+          <div className="hidden shrink-0 items-center gap-2 sm:flex">
             {!day.isRest && <span className="text-xs text-slate-400">{totalDuration} min</span>}
             <span className={`rounded-full border px-2 py-0.5 text-xs font-medium ${colorClass}`}>
               {day.isRest ? "Rest" : "Training"}

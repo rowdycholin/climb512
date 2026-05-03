@@ -8,6 +8,7 @@ import { parsePlanUiState } from "@/lib/plan-ui-state";
 import { buildPlanView, parsePlanSnapshot, parseProfileSnapshot } from "@/lib/plan-snapshot";
 import AppHeader from "@/components/AppHeader";
 import PlanPageShell from "@/components/PlanPageShell";
+import { PageShell } from "@/components/ui/app-shell";
 
 function parseAdjustmentMetadata(raw: unknown) {
   if (!raw || typeof raw !== "object") return null;
@@ -142,14 +143,14 @@ export default async function PlanPage({
     : null;
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-100 to-slate-50">
+    <div className="min-h-screen bg-slate-50">
       <AppHeader
         eyebrow="Plan"
         title="Climb512"
         subtitle={`${profile.currentGrade} to ${profile.targetGrade} | ${profile.weeksDuration} weeks`}
       />
 
-      <main className="mx-auto max-w-3xl p-4 pb-12">
+      <PageShell maxWidth="md" contentClassName="pb-12">
         <PlanPageShell
           planId={plan.id}
           weeks={weeks}
@@ -214,7 +215,7 @@ export default async function PlanPage({
               : null,
           }}
         />
-      </main>
+      </PageShell>
     </div>
   );
 }

@@ -9,6 +9,7 @@ out/
 .env
 .env-simulator
 .env-aibackend
+.env-aibackend-nemo
 .env.local
 .env.*.local
 

@@ -9,6 +9,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { PageIntro, PageShell } from "@/components/ui/app-shell";
 
 const GOALS = [
   { value: "send-project", label: "Send my project grade" },
@@ -25,19 +26,19 @@ export default async function OnboardingPage() {
   const today = new Date().toISOString().slice(0, 10);
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-100 to-slate-50">
+    <div className="min-h-screen bg-slate-50">
       <AppHeader
         eyebrow="Onboarding"
         title="Climb512"
         subtitle="Build a training plan around your goals, grade, and available equipment."
       />
 
-      <main className="mx-auto max-w-2xl p-4 py-8">
-        <div className="mb-8 overflow-hidden rounded-[1.6rem] border border-white/70 bg-[radial-gradient(circle_at_top_left,_rgba(14,165,233,0.16),_transparent_32%),linear-gradient(145deg,_rgba(255,255,255,0.98),_rgba(240,249,255,0.92)_48%,_rgba(255,251,235,0.9))] p-6 text-center shadow-[0_24px_60px_rgba(15,23,42,0.10)]">
-          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-sky-700/70">Plan Setup</p>
-          <h1 className="mt-2 text-3xl font-semibold text-slate-950">Build Your Training Plan</h1>
-          <p className="mt-2 text-sm text-slate-600">Answer a few questions and we&apos;ll create a personalized plan that feels ready to use.</p>
-        </div>
+      <PageShell maxWidth="sm">
+        <PageIntro
+          eyebrow="Plan Setup"
+          title="Build your training plan"
+          description="Answer a few questions and we'll create a personalized plan that feels ready to use."
+        />
 
         <form action={createPlan} className="space-y-6">
           <Card>
@@ -110,7 +111,7 @@ export default async function OnboardingPage() {
 
           <GeneratePlanButton />
         </form>
-      </main>
+      </PageShell>
     </div>
   );
 }

@@ -122,6 +122,11 @@ function isNoAnswer(text: string) {
   return /\b(no|none|nope|nothing|not currently|no injuries)\b/i.test(text);
 }
 
+function isScheduleOnlyAnswer(text: string) {
+  const normalized = text.trim().toLowerCase().replace(/[.!?]+$/g, "");
+  return /^(?:i\s+can\s+)?(?:train|run|ride|lift|climb)?\s*(?:[1-7]|one|two|three|four|five|six|seven)\s*(?:x|times?|days?|sessions?)(?:\s*(?:per|a|\/)\s*week| weekly)?$/.test(normalized);
+}
+
 function normalizeSport(text: string) {
   if (/\bclimb(?:ing)?\b/i.test(text)) return "climbing";
   if (/\bweight|strength|lifting|gym\b/i.test(text)) return "strength training";
@@ -234,7 +239,7 @@ function applyStepAnswer(draft: PartialIntakeDraft, step: IntakeStep, text: stri
     const levels = detectLevels(text);
     if (levels[0]) draft.currentLevel = levels[0];
     if (levels[1]) draft.targetLevel = levels[1];
-    if (!levels[0]) draft.currentLevel = text;
+    if (!levels[0] && !isScheduleOnlyAnswer(text)) draft.currentLevel = text;
     return;
   }
 

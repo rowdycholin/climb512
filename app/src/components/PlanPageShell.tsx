@@ -6,6 +6,7 @@ import { CheckCircle2, Eye, History, MessageCircle, PencilLine, RotateCcw, WandS
 import { completePlan, reopenPlan, repairPlanGeneration, revertPlanVersion, updatePlanUiState } from "@/app/actions";
 import PlanWorkspace from "@/components/PlanWorkspace";
 import { Button } from "@/components/ui/button";
+import { CommandBar, SectionPanel, StatusBanner } from "@/components/ui/app-shell";
 import type { PlanUiState } from "@/lib/plan-ui-state";
 
 const REPAIR_PROMPTS = [
@@ -21,6 +22,15 @@ function DisclosureArrowHead({ open, className = "" }: { open: boolean; classNam
       aria-hidden="true"
       className={`inline-block h-0 w-0 border-y-[4px] border-l-[6px] border-y-transparent border-l-current transition-transform ${open ? "rotate-90" : ""} ${className}`}
     />
+  );
+}
+
+function SummaryMetric({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-lg border border-slate-200 bg-white px-3 py-2">
+      <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-400">{label}</p>
+      <p className="mt-0.5 text-sm font-medium text-slate-800">{value}</p>
+    </div>
   );
 }
 
@@ -138,6 +148,17 @@ export default function PlanPageShell({
   );
   const completionDisabled = !summary.generation.isReady;
   const planActionsDisabled = !summary.generation.isReady || summary.version.isPreview;
+  const planStatusLabel = summary.version.isPreview
+    ? `Preview v${summary.version.versionNum}`
+    : summary.generation.isReady
+      ? `Version ${summary.version.versionNum}`
+      : "Generating";
+  const activeWeekLabel = activeWeek ? `Week ${activeWeek.weekNum}` : `Week ${activeWeekIndex + 1}`;
+  const activeWeekDetail = activeWeek ? activeWeek.theme : "Generating";
+  const calendarProgressLabel = summary.calendar.isBeforeStart
+    ? "Starts soon"
+    : `Day ${summary.calendar.currentPlanDay} of ${summary.calendar.totalPlanDays}`;
+  const actionButtonClass = "gap-2 border-slate-200 bg-white text-slate-700 hover:bg-slate-100";
 
   useEffect(() => {
     if (!summary.generation.isGenerating) return;
@@ -183,53 +204,50 @@ export default function PlanPageShell({
 
   return (
     <>
-      <div className="mb-6 overflow-hidden rounded-[1.5rem] border border-white/70 bg-[radial-gradient(circle_at_top_left,_rgba(14,165,233,0.14),_transparent_32%),linear-gradient(145deg,_rgba(255,255,255,0.98),_rgba(240,249,255,0.92)_52%,_rgba(255,251,235,0.86))] p-5 shadow-[0_20px_50px_rgba(15,23,42,0.10)]">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-          <div className="min-w-0 flex-1">
-            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-sky-700/70">Current Block</p>
-            <div className="mt-1 flex items-center gap-1.5">
-              <button
-                type="button"
-                aria-expanded={summaryOpen}
-                aria-label={summaryOpen ? "Collapse plan summary" : "Expand plan summary"}
-                title={summaryOpen ? "Collapse summary" : "Expand summary"}
-                onClick={() => {
-                  setSummaryOpen((value) => {
-                    const next = !value;
-                    void updatePlanUiState({ planId, key: "planSummaryOpen", value: next });
-                    return next;
-                  });
-                }}
-                className="rounded p-0.5 text-slate-800 transition-colors hover:text-slate-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400"
-              >
-                <DisclosureArrowHead open={summaryOpen} />
-              </button>
-              <h2 className="text-xl font-semibold text-slate-950">Your Plan Summary</h2>
-            </div>
-            <p className="mt-1 text-sm text-slate-600">
-              {summary.currentGrade} to {summary.targetGrade} over {summary.weeksDuration} weeks
-            </p>
-            {summary.calendar.isComplete && (
-              <p className="mt-3 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-800">
-                Congratulations! {summary.completion.isUserCompleted ? "You marked this training plan complete." : "You reached the end of this training plan."}
-              </p>
-            )}
-            {summary.version.isPreview && (
-              <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
-                <p className="font-semibold">Previewing Version {summary.version.versionNum}</p>
-                <p className="mt-1 text-amber-800">
-                  Read-only historical view. Logs, edits, adjustments, completion, and revert actions are disabled.
-                </p>
-                <a
-                  href={`/plan/${planId}`}
-                  className="mt-2 inline-flex rounded-md border border-amber-200 bg-white px-3 py-1.5 text-xs font-semibold text-amber-800 transition hover:bg-amber-100"
-                >
-                  Return to current version
-                </a>
+      <SectionPanel className="mb-6 overflow-hidden border-slate-200 bg-white p-0" padded={false}>
+        <div className="border-l-4 border-sky-600 px-4 py-4 sm:px-5">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+            <div className="min-w-0 flex-1">
+              <div className="flex flex-wrap items-center gap-2">
+                <p className="text-xs font-semibold uppercase tracking-[0.14em] text-sky-700">Current Block</p>
+                <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-xs font-medium text-slate-600">
+                  {planStatusLabel}
+                </span>
+                {summary.calendar.isComplete && (
+                  <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-xs font-semibold text-emerald-700">
+                    Complete
+                  </span>
+                )}
               </div>
-            )}
-          </div>
-          <div className="flex w-full flex-wrap items-center justify-end gap-2 sm:w-auto sm:flex-nowrap">
+              <div className="mt-2 flex items-start gap-3">
+                <button
+                  type="button"
+                  aria-expanded={summaryOpen}
+                  aria-label={summaryOpen ? "Collapse plan summary" : "Expand plan summary"}
+                  title={summaryOpen ? "Collapse summary" : "Expand summary"}
+                  onClick={() => {
+                    setSummaryOpen((value) => {
+                      const next = !value;
+                      void updatePlanUiState({ planId, key: "planSummaryOpen", value: next });
+                      return next;
+                    });
+                  }}
+                  className="mt-1 rounded border border-slate-200 bg-white p-1.5 text-slate-700 transition-colors hover:bg-slate-50 hover:text-slate-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400"
+                >
+                  <DisclosureArrowHead open={summaryOpen} />
+                </button>
+                <div className="min-w-0">
+                  <h2 className="text-2xl font-semibold text-slate-950">Plan Summary</h2>
+                  <p className="mt-1 text-sm text-slate-600">
+                    {summary.currentGrade} to {summary.targetGrade} | {summary.weeksDuration} weeks | {summary.daysPerWeek} days/week
+                  </p>
+                  <p className="mt-1 text-sm font-medium text-slate-800">
+                    {activeWeekLabel}: {activeWeekDetail}
+                  </p>
+                </div>
+              </div>
+            </div>
+            <CommandBar className="w-full rounded-lg border border-slate-200 bg-slate-50 p-1 lg:w-auto lg:flex-nowrap">
             <Button
               type="button"
               variant={versionHistoryOpen ? "default" : "outline"}
@@ -237,7 +255,7 @@ export default function PlanPageShell({
               title="Version history"
               onClick={() => setVersionHistoryOpen((value) => !value)}
               disabled={summary.versions.length === 0}
-              className={`gap-2 ${versionHistoryOpen ? "shadow-sm" : "border-white/80 bg-white/80 backdrop-blur"}`}
+              className={versionHistoryOpen ? "gap-2 shadow-sm" : actionButtonClass}
             >
               <History className="h-4 w-4" />
               <span className="hidden sm:inline">Versions</span>
@@ -249,7 +267,7 @@ export default function PlanPageShell({
               title={activeWeekLocked ? "Add exercises without changing logged work" : "Edit this week"}
               onClick={toggleEditor}
               disabled={!activeWeek || planActionsDisabled}
-              className={`gap-2 ${editorOpen ? "shadow-sm" : "border-white/80 bg-white/80 backdrop-blur"}`}
+              className={editorOpen ? "gap-2 shadow-sm" : actionButtonClass}
             >
               <PencilLine className="h-4 w-4" />
               <span className="hidden sm:inline">Edit Day</span>
@@ -261,7 +279,7 @@ export default function PlanPageShell({
               title="Adjust future plan"
               onClick={toggleCoach}
               disabled={!activeWeek || planActionsDisabled}
-              className={`gap-2 ${coachOpen ? "shadow-sm" : "border-white/80 bg-white/80 backdrop-blur"}`}
+              className={coachOpen ? "gap-2 shadow-sm" : actionButtonClass}
             >
               <MessageCircle className="h-4 w-4" />
               <span className="hidden sm:inline">Adjust Plan</span>
@@ -275,7 +293,7 @@ export default function PlanPageShell({
                   aria-label="Reopen plan"
                   title="Reopen plan"
                   disabled={planActionsDisabled}
-                  className="gap-2 border-white/80 bg-white/80 backdrop-blur"
+                  className={actionButtonClass}
                 >
                   <RotateCcw className="h-4 w-4" />
                   <span className="hidden sm:inline">Reopen</span>
@@ -289,49 +307,134 @@ export default function PlanPageShell({
                 title={completionDisabled ? "Plan generation must finish first" : "Complete plan"}
                 onClick={() => setCompletionPanelOpen((value) => !value)}
                 disabled={completionDisabled || summary.version.isPreview}
-                className={`gap-2 ${completionPanelOpen ? "shadow-sm" : "border-white/80 bg-white/80 backdrop-blur"}`}
+                className={completionPanelOpen ? "gap-2 shadow-sm" : actionButtonClass}
               >
                 <CheckCircle2 className="h-4 w-4" />
                 <span className="hidden sm:inline">Complete</span>
               </Button>
             )}
+            </CommandBar>
           </div>
         </div>
 
+        {(summary.calendar.isComplete || summary.version.isPreview || summary.generation.isGenerating || summary.generation.isFailed || (activeWeek && activeWeekLocked)) && (
+          <div className="space-y-3 border-t border-slate-100 bg-slate-50/70 px-4 py-3 sm:px-5">
+            {summary.calendar.isComplete && (
+              <StatusBanner tone="success" className="font-medium">
+                Congratulations! {summary.completion.isUserCompleted ? "You marked this training plan complete." : "You reached the end of this training plan."}
+              </StatusBanner>
+            )}
+            {summary.version.isPreview && (
+              <StatusBanner tone="warning">
+                <p className="font-semibold">Previewing Version {summary.version.versionNum}</p>
+                <p className="mt-1 text-amber-800">
+                  Read-only historical view. Logs, edits, adjustments, completion, and revert actions are disabled.
+                </p>
+                <a
+                  href={`/plan/${planId}`}
+                  className="mt-2 inline-flex rounded-md border border-amber-200 bg-white px-3 py-1.5 text-xs font-semibold text-amber-800 transition hover:bg-amber-100"
+                >
+                  Return to current version
+                </a>
+              </StatusBanner>
+            )}
+            {(summary.generation.isGenerating || summary.generation.isFailed) && (
+              <StatusBanner tone={summary.generation.isFailed ? "danger" : "info"}>
+                <p className="font-medium">
+                  {summary.generation.isFailed
+                    ? `Week ${summary.generationJob?.failedWeekNum ?? summary.generation.nextWeekNum ?? summary.generation.generatedWeeks + 1} needs repair`
+                    : summary.generationJob?.jobType === "adjustment"
+                      ? `Applying adjustment week ${summary.generationJob.nextWeekNum} of ${summary.generation.totalWeeks}`
+                      : `Generating week ${summary.generation.nextWeekNum ?? summary.generation.generatedWeeks} of ${summary.generation.totalWeeks}`}
+                </p>
+                <p className="mt-1">
+                  {summary.generation.isFailed
+                    ? summary.generationJob?.lastError ?? summary.generation.error ?? "The already generated weeks are still available."
+                    : summary.generationJob?.jobType === "adjustment"
+                      ? `${summary.generation.generatedWeeks} adjusted weeks ready. Current plan stays visible until the adjustment is complete.`
+                      : `${summary.generation.generatedWeeks}/${summary.generation.totalWeeks} weeks ready (${summary.generation.percent}%).`}
+                </p>
+                {summary.generation.isFailed && (
+                  <form action={repairPlanGeneration} className="mt-3 rounded-lg border border-red-200 bg-white/80 p-3 text-slate-800">
+                    <input type="hidden" name="planId" value={planId} />
+                    <label htmlFor="repair-notes" className="mb-1 block text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+                      Repair guidance
+                    </label>
+                    <textarea
+                      id="repair-notes"
+                      name="repairNotes"
+                      rows={3}
+                      maxLength={2000}
+                      required
+                      value={repairNotes}
+                      onChange={(event) => setRepairNotes(event.target.value)}
+                      placeholder="Reduce volume, avoid a movement, simplify the schedule, or continue from prior weeks."
+                      className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 placeholder:text-slate-400 focus:border-red-400 focus:outline-none"
+                    />
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      {REPAIR_PROMPTS.map((prompt) => (
+                        <button
+                          key={prompt}
+                          type="button"
+                          onClick={() => setRepairNotes(prompt)}
+                          className="rounded-full border border-red-100 bg-red-50 px-3 py-1 text-xs text-red-700 transition-colors hover:border-red-200 hover:bg-red-100"
+                        >
+                          {prompt}
+                        </button>
+                      ))}
+                    </div>
+                    <div className="mt-2 flex justify-end">
+                      <Button type="submit" className="gap-2">
+                        <WandSparkles className="h-4 w-4" />
+                        Resume Generation
+                      </Button>
+                    </div>
+                  </form>
+                )}
+              </StatusBanner>
+            )}
+            {activeWeek && activeWeekLocked && (
+              <StatusBanner tone="warning" className="text-amber-800">
+                Week {activeWeek.weekNum} already has workout logs. Existing work is protected, but you can still add extra exercises from Edit Day.
+              </StatusBanner>
+            )}
+          </div>
+        )}
+
         {summaryOpen && (
-          <>
-        <div className="mt-4 flex flex-wrap gap-3 text-sm text-slate-700">
-          <span>
-            {summary.version.isPreview
-              ? `Preview Version ${summary.version.versionNum}`
-              : summary.generation.isReady
-                ? `Version ${summary.version.versionNum}`
-                : "Generating initial plan"}
-          </span>
-          <span>&middot;</span>
-          <span>Goals: {summary.goals.join(", ")}</span>
-          <span>&middot;</span>
-          <span>{summary.daysPerWeek} days/week</span>
-          <span>&middot;</span>
-          <span>Age {summary.age}</span>
-          <span>&middot;</span>
-          <span>{activeWeek ? `Week ${activeWeek.weekNum}: ${activeWeek.theme}` : `Week ${activeWeekIndex + 1}: generating`}</span>
-          <span>&middot;</span>
-          <span>Start {summary.calendar.startDateLabel}</span>
-          <span>&middot;</span>
-          <span>
-            {summary.calendar.isBeforeStart ? "Starts soon" : `Day ${summary.calendar.currentPlanDay} of ${summary.calendar.totalPlanDays}`}
-          </span>
-          {summary.calendar.isComplete && (
-            <>
-              <span>&middot;</span>
-              <span className="font-semibold text-emerald-700">Complete</span>
-            </>
-          )}
-        </div>
+          <div className="border-t border-slate-100 px-4 py-4 sm:px-5">
+            <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+              <SummaryMetric label="Current" value={`${activeWeekLabel}: ${activeWeekDetail}`} />
+              <SummaryMetric label="Version" value={planStatusLabel} />
+              <SummaryMetric label="Start" value={summary.calendar.startDateLabel} />
+              <SummaryMetric label="Progress" value={calendarProgressLabel} />
+            </div>
+            <div className="mt-3 grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(14rem,0.35fr)]">
+              <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-3">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-400">Goals</p>
+                <p className="mt-1 text-sm text-slate-800">{summary.goals.join(", ")}</p>
+              </div>
+              <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-3">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-400">Athlete</p>
+                <p className="mt-1 text-sm text-slate-800">Age {summary.age}</p>
+              </div>
+            </div>
+            <div className="mt-3 flex flex-wrap gap-2">
+              {summary.equipment.map((item) => (
+                <span
+                  key={item}
+                  className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-xs text-slate-700 shadow-sm"
+                >
+                  {item}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
 
         {versionHistoryOpen && (
-          <div className="mt-4 rounded-xl border border-slate-200 bg-white/90 p-4 shadow-sm">
+          <div className="border-t border-slate-100 bg-white px-4 py-4 sm:px-5">
+            <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
             <div className="flex items-start justify-between gap-3">
               <div>
                 <p className="text-sm font-semibold text-slate-800">Version History</p>
@@ -425,78 +528,22 @@ export default function PlanPageShell({
               ))}
             </div>
           </div>
-        )}
-
-        {summary.completion.isUserCompleted && summary.completion.completedAtLabel && (
-          <div className="mt-3 rounded-lg border border-emerald-200 bg-white/80 px-3 py-2 text-sm text-emerald-800">
-            <p className="font-medium">Marked complete {summary.completion.completedAtLabel}</p>
-            {summary.completion.notes && <p className="mt-1 text-emerald-700">{summary.completion.notes}</p>}
           </div>
         )}
 
-        {(summary.generation.isGenerating || summary.generation.isFailed) && (
-          <div className={`mt-3 rounded-lg border px-3 py-2 text-sm ${
-            summary.generation.isFailed
-              ? "border-red-200 bg-red-50 text-red-800"
-              : "border-sky-200 bg-sky-50 text-sky-800"
-          }`}>
-            <p className="font-medium">
-              {summary.generation.isFailed
-                ? `Week ${summary.generationJob?.failedWeekNum ?? summary.generation.nextWeekNum ?? summary.generation.generatedWeeks + 1} needs repair`
-                : summary.generationJob?.jobType === "adjustment"
-                  ? `Applying adjustment week ${summary.generationJob.nextWeekNum} of ${summary.generation.totalWeeks}`
-                  : `Generating week ${summary.generation.nextWeekNum ?? summary.generation.generatedWeeks} of ${summary.generation.totalWeeks}`}
-            </p>
-            <p className="mt-1">
-              {summary.generation.isFailed
-                ? summary.generationJob?.lastError ?? summary.generation.error ?? "The already generated weeks are still available."
-                : summary.generationJob?.jobType === "adjustment"
-                  ? `${summary.generation.generatedWeeks} adjusted weeks ready. Current plan stays visible until the adjustment is complete.`
-                  : `${summary.generation.generatedWeeks}/${summary.generation.totalWeeks} weeks ready (${summary.generation.percent}%).`}
-            </p>
-            {summary.generation.isFailed && (
-              <form action={repairPlanGeneration} className="mt-3 rounded-lg border border-red-200 bg-white/80 p-3 text-slate-800">
-                <input type="hidden" name="planId" value={planId} />
-                <label htmlFor="repair-notes" className="mb-1 block text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
-                  Repair guidance
-                </label>
-                <textarea
-                  id="repair-notes"
-                  name="repairNotes"
-                  rows={3}
-                  maxLength={2000}
-                  required
-                  value={repairNotes}
-                  onChange={(event) => setRepairNotes(event.target.value)}
-                  placeholder="Reduce volume, avoid a movement, simplify the schedule, or continue from prior weeks."
-                  className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 placeholder:text-slate-400 focus:border-red-400 focus:outline-none"
-                />
-                <div className="mt-2 flex flex-wrap gap-2">
-                  {REPAIR_PROMPTS.map((prompt) => (
-                    <button
-                      key={prompt}
-                      type="button"
-                      onClick={() => setRepairNotes(prompt)}
-                      className="rounded-full border border-red-100 bg-red-50 px-3 py-1 text-xs text-red-700 transition-colors hover:border-red-200 hover:bg-red-100"
-                    >
-                      {prompt}
-                    </button>
-                  ))}
-                </div>
-                <div className="mt-2 flex justify-end">
-                  <Button type="submit" className="gap-2">
-                    <WandSparkles className="h-4 w-4" />
-                    Resume Generation
-                  </Button>
-                </div>
-              </form>
-            )}
+        {summary.completion.isUserCompleted && summary.completion.completedAtLabel && (
+          <div className="border-t border-slate-100 bg-slate-50/70 px-4 py-3 sm:px-5">
+            <StatusBanner tone="success" className="bg-white">
+            <p className="font-medium">Marked complete {summary.completion.completedAtLabel}</p>
+            {summary.completion.notes && <p className="mt-1 text-emerald-700">{summary.completion.notes}</p>}
+          </StatusBanner>
           </div>
         )}
 
         {completionPanelOpen && !summary.completion.isUserCompleted && !completionDisabled && (
-          <form action={completePlan} className="mt-4 rounded-xl border border-emerald-200 bg-white/90 p-4 shadow-sm">
+          <form action={completePlan} className="border-t border-emerald-100 bg-emerald-50/50 px-4 py-4 sm:px-5">
             <input type="hidden" name="planId" value={planId} />
+            <div className="rounded-lg border border-emerald-200 bg-white p-4 shadow-sm">
             <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
               <div>
                 <label htmlFor="completion-reason" className="mb-1 block text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
@@ -531,28 +578,10 @@ export default function PlanPageShell({
               placeholder="How did it go? Anything to remember for the next plan?"
               className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 placeholder:text-slate-400 focus:border-emerald-400 focus:outline-none"
             />
+            </div>
           </form>
         )}
-
-        <div className="mt-3 flex flex-wrap gap-2">
-          {summary.equipment.map((item) => (
-            <span
-              key={item}
-              className="rounded-full border border-white/80 bg-white/80 px-2.5 py-1 text-xs text-slate-700 shadow-sm"
-            >
-              {item}
-            </span>
-          ))}
-        </div>
-
-        {activeWeek && activeWeekLocked && (
-          <p className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
-            Week {activeWeek.weekNum} already has workout logs. Existing work is protected, but you can still add extra exercises from Edit Day.
-          </p>
-        )}
-          </>
-        )}
-      </div>
+      </SectionPanel>
 
         <PlanWorkspace
           planId={planId}

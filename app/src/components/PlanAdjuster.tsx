@@ -32,6 +32,27 @@ const INITIAL_ADJUSTMENT_MESSAGES: ChatMessage[] = [
   },
 ];
 
+function PendingAssistantBubble({ longWait }: { longWait: boolean }) {
+  return (
+    <div className="mr-auto max-w-[88%]">
+      <p className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
+        <span className="flex items-center gap-2">
+          <span className="flex gap-1" aria-hidden="true">
+            <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-sky-500" />
+            <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-sky-500 [animation-delay:150ms]" />
+            <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-sky-500 [animation-delay:300ms]" />
+          </span>
+          <span>
+            {longWait
+              ? "Still working. The AI backend is taking longer than usual."
+              : "Building the adjustment proposal..."}
+          </span>
+        </span>
+      </p>
+    </div>
+  );
+}
+
 interface Proposal {
   summary: string;
   changes: string[];
@@ -494,11 +515,15 @@ export default function PlanAdjuster({
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<{ summary: string; effectiveFrom: string } | null>(null);
   const [hydratedPlanId, setHydratedPlanId] = useState<string | null>(null);
+  const [isWaiting, setIsWaiting] = useState(false);
+  const [longWait, setLongWait] = useState(false);
+  const [retryMessages, setRetryMessages] = useState<ChatMessage[] | null>(null);
   const [pending, startTransition] = useTransition();
   const router = useRouter();
 
   const open = isOpen ?? internalOpen;
-  const canSend = draft.trim().length > 0 && !pending;
+  const busy = pending || isWaiting;
+  const canSend = draft.trim().length > 0 && !busy;
   const visibleMessages = useMemo(() => messages.slice(-8), [messages]);
   const starterPrompts = useMemo(() => starterPromptsForSport(sport, disciplines), [sport, disciplines]);
 
@@ -511,6 +536,9 @@ export default function PlanAdjuster({
     setDetailsOpen(false);
     setError(null);
     setResult(null);
+    setIsWaiting(false);
+    setLongWait(false);
+    setRetryMessages(null);
     try {
       const raw = window.sessionStorage.getItem(adjustmentStorageKey(planId));
       if (!raw) {
@@ -546,6 +574,16 @@ export default function PlanAdjuster({
     window.sessionStorage.setItem(adjustmentStorageKey(planId), JSON.stringify(payload));
   }, [detailsOpen, draft, goalChangeConfirmed, hydratedPlanId, messages, planId, proposal]);
 
+  useEffect(() => {
+    if (!isWaiting) {
+      setLongWait(false);
+      return;
+    }
+
+    const timer = window.setTimeout(() => setLongWait(true), 8000);
+    return () => window.clearTimeout(timer);
+  }, [isWaiting]);
+
   function clearPersistedSession() {
     try {
       window.sessionStorage.removeItem(adjustmentStorageKey(planId));
@@ -573,6 +611,9 @@ export default function PlanAdjuster({
     setDetailsOpen(false);
     setError(null);
     setResult(null);
+    setIsWaiting(false);
+    setLongWait(false);
+    setRetryMessages(null);
   }
 
   function addAssistant(content: string, nextMessages: ChatMessage[]) {
@@ -586,37 +627,23 @@ export default function PlanAdjuster({
     ]);
   }
 
-  function handleSend() {
-    const content = draft.trim();
-    if (!content) return;
-
-    const nextMessages = [
-      ...messages,
-      {
-        id: messageId(),
-        role: "user" as const,
-        content,
-      },
-    ];
-
-    setDraft("");
-    setError(null);
-    setResult(null);
-    setProposal(null);
-    setGoalChangeConfirmed(false);
-    setDetailsOpen(false);
-    setMessages(nextMessages);
-
+  function requestAdjustment(nextMessages: ChatMessage[]) {
     const formData = new FormData();
     formData.set("planId", planId);
     formData.set("activeWeekNum", String(week.weekNum));
     formData.set("messages", JSON.stringify(nextMessages.map(({ role, content }) => ({ role, content }))));
+
+    setError(null);
+    setRetryMessages(null);
+    setIsWaiting(true);
+    setLongWait(false);
 
     startTransition(async () => {
       try {
         const response = await continuePlanAdjustmentChat(formData);
         if (response.error) {
           setError(response.error);
+          setRetryMessages(nextMessages);
           return;
         }
 
@@ -643,9 +670,35 @@ export default function PlanAdjuster({
         }
       } catch (requestError) {
         setError((requestError as Error).message || "The adjustment request failed. Please try again.");
+        setRetryMessages(nextMessages);
         setMessages(nextMessages);
+      } finally {
+        setIsWaiting(false);
       }
     });
+  }
+
+  function handleSend() {
+    const content = draft.trim();
+    if (!content || busy) return;
+
+    const nextMessages = [
+      ...messages,
+      {
+        id: messageId(),
+        role: "user" as const,
+        content,
+      },
+    ];
+
+    setDraft("");
+    setError(null);
+    setResult(null);
+    setProposal(null);
+    setGoalChangeConfirmed(false);
+    setDetailsOpen(false);
+    setMessages(nextMessages);
+    requestAdjustment(nextMessages);
   }
 
   function loadPrompt(prompt: string) {
@@ -655,6 +708,7 @@ export default function PlanAdjuster({
     setProposal(null);
     setGoalChangeConfirmed(false);
     setDetailsOpen(false);
+    setRetryMessages(null);
   }
 
   function applyProposal() {
@@ -716,7 +770,7 @@ export default function PlanAdjuster({
     <section className="mb-6 rounded-[1.4rem] border border-white/70 bg-white/90 p-4 shadow-[0_20px_50px_rgba(15,23,42,0.08)]">
       <div className="space-y-4">
         <div className="flex justify-end">
-          <Button type="button" variant="outline" onClick={() => setOpen(false)} disabled={pending}>
+          <Button type="button" variant="outline" onClick={() => setOpen(false)} disabled={busy}>
             Close
           </Button>
         </div>
@@ -739,13 +793,7 @@ export default function PlanAdjuster({
                 </p>
               </div>
             ))}
-            {pending && !proposal && (
-              <div className="mr-auto max-w-[88%]">
-                <p className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
-                  Working on the adjustment proposal...
-                </p>
-              </div>
-            )}
+            {isWaiting && !proposal && <PendingAssistantBubble longWait={longWait} />}
           </div>
 
           <div>
@@ -794,7 +842,7 @@ export default function PlanAdjuster({
           </div>
 
           <div className="flex flex-wrap items-center gap-3">
-            <Button type="button" variant="outline" onClick={resetSession} disabled={pending}>
+            <Button type="button" variant="outline" onClick={resetSession} disabled={busy}>
               Start over
             </Button>
             <p className="text-xs text-slate-500">Current view: Week {week.weekNum}</p>
@@ -893,16 +941,16 @@ export default function PlanAdjuster({
               <Button
                 type="button"
                 onClick={applyProposal}
-                disabled={pending || (proposal.requiresGoalChangeConfirmation && !goalChangeConfirmed)}
+                disabled={busy || (proposal.requiresGoalChangeConfirmation && !goalChangeConfirmed)}
                 className="gap-2"
               >
                 <Check className="h-4 w-4" />
-                {pending ? "Applying..." : "Apply proposal"}
+                {busy ? "Applying..." : "Apply proposal"}
               </Button>
-              <Button type="button" variant="outline" onClick={() => setProposal(null)} disabled={pending}>
+              <Button type="button" variant="outline" onClick={() => setProposal(null)} disabled={busy}>
                 Revise
               </Button>
-              <Button type="button" variant="ghost" onClick={() => setOpen(false)} disabled={pending} className="gap-2">
+              <Button type="button" variant="ghost" onClick={() => setOpen(false)} disabled={busy} className="gap-2">
                 <X className="h-4 w-4" />
                 Cancel
               </Button>
@@ -912,7 +960,16 @@ export default function PlanAdjuster({
 
         {error && (
           <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
-            {error}
+            <p>{error}</p>
+            {retryMessages && (
+              <button
+                type="button"
+                onClick={() => requestAdjustment(retryMessages)}
+                className="mt-2 rounded-md border border-red-200 bg-white px-3 py-1.5 text-xs font-semibold text-red-700 transition-colors hover:bg-red-100"
+              >
+                Try again
+              </button>
+            )}
           </div>
         )}
 

@@ -65,5 +65,27 @@ describe("intake progression", () => {
     expect(draft.strengthTraining?.include).toBe(false);
     expect(draft.intakeStep).toBe("start");
   });
-});
 
+  test("does not treat a schedule-only answer as current level", () => {
+    const response = continueIntakeDraft({
+      draft: {
+        ...createInitialIntakeDraft(),
+        sport: "climbing",
+        goalDescription: "Improve energy systems for climbing",
+        goalType: "ongoing",
+        blockLengthWeeks: 8,
+        equipment: ["hangboard"],
+        strengthTraining: { include: false, focusAreas: [] },
+        startDate: "2026-05-04",
+        daysPerWeek: 5,
+        intakeTemplateId: "climbing_strength",
+        intakeStep: "level",
+      },
+      userMessage: "5 days",
+    });
+
+    expect(response.draft.daysPerWeek).toBe(5);
+    expect(response.draft.currentLevel).toBeUndefined();
+    expect(response.draft.intakeStep).toBe("level");
+  });
+});

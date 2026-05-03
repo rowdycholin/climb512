@@ -1,11 +1,14 @@
 import { redirect } from "next/navigation";
+import Link from "next/link";
 import { getSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
 import { getPlanCalendarStatus } from "@/lib/plan-calendar";
 import { parsePlanSnapshot, parseProfileSnapshot } from "@/lib/plan-snapshot";
 import AppHeader from "@/components/AppHeader";
 import DashboardClient from "@/components/DashboardClient";
+import { buttonVariants } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { PageShell, SectionPanel } from "@/components/ui/app-shell";
 
 const dateFormatter = new Intl.DateTimeFormat("en-US", { timeZone: "UTC" });
 const completionDateFormatter = new Intl.DateTimeFormat("en-US", {
@@ -52,6 +55,23 @@ export default async function DashboardPage() {
         isUserCompleted: Boolean(plan.completedAt),
         completedAtLabel: plan.completedAt ? completionDateFormatter.format(plan.completedAt) : null,
         isBeforeStart: calendar.isBeforeStart,
+        generationStatus: plan.generationStatus,
+        today: (() => {
+          if (!plan.currentVersion || calendar.isBeforeStart || calendar.isComplete || snapshot.weeks.length === 0) return null;
+          const weekIndex = Math.min(snapshot.weeks.length - 1, Math.max(0, Math.floor((calendar.currentPlanDay - 1) / 7)));
+          const week = snapshot.weeks[weekIndex];
+          const dayIndex = Math.min(week.days.length - 1, Math.max(0, (calendar.currentPlanDay - 1) % 7));
+          const day = week.days[dayIndex] ?? week.days.find((candidate) => !candidate.isRest) ?? null;
+          if (!week || !day) return null;
+          return {
+            weekNum: week.weekNum,
+            dayNum: day.dayNum,
+            dayName: day.dayName,
+            focus: day.focus,
+            isRest: day.isRest,
+            sessionCount: day.sessions.length,
+          };
+        })(),
         profile: {
           currentGrade: profile.currentGrade,
           targetGrade: profile.targetGrade,
@@ -60,39 +80,65 @@ export default async function DashboardPage() {
         },
       };
     });
+  const currentPlan =
+    planCards.find((plan) => !plan.isComplete && !plan.isBeforeStart && plan.generationStatus === "ready") ??
+    planCards.find((plan) => !plan.isComplete && plan.generationStatus === "ready") ??
+    planCards.find((plan) => !plan.isComplete) ??
+    null;
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-100 to-slate-50">
+    <div className="min-h-screen bg-slate-50">
       <AppHeader eyebrow="Dashboard" title="Climb512" subtitle={`Welcome back, ${session.displayName || session.loginId}`} />
 
-      <main className="mx-auto max-w-2xl p-4 py-8">
-        <section className="mb-8 overflow-hidden rounded-[1.6rem] border border-white/70 bg-[radial-gradient(circle_at_top_left,_rgba(14,165,233,0.16),_transparent_32%),linear-gradient(145deg,_rgba(255,255,255,0.98),_rgba(240,249,255,0.92)_48%,_rgba(255,251,235,0.92))] p-6 shadow-[0_24px_60px_rgba(15,23,42,0.10)]">
-          <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-sky-700/70">Training Plans</p>
-              <h2 className="mt-1 text-3xl font-semibold text-slate-950">Your climbing workspace</h2>
-              <p className="mt-2 max-w-lg text-sm text-slate-600">
-                Review past cycles, open the current block, or start a fresh training plan.
-              </p>
+      <PageShell maxWidth="lg">
+        <section className="mb-6 grid gap-4 lg:grid-cols-[minmax(0,1.45fr)_minmax(18rem,0.75fr)]">
+          <SectionPanel className="overflow-hidden p-0" padded={false}>
+            <div className="border-l-4 border-sky-600 px-5 py-5">
+              <p className="text-xs font-semibold uppercase tracking-[0.14em] text-sky-700">Home Base</p>
+              <div className="mt-2 flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+                <div className="min-w-0">
+                  <h1 className="text-2xl font-semibold text-slate-950">Training Dashboard</h1>
+                  <p className="mt-1 text-sm leading-relaxed text-slate-600">
+                    Continue your current block, check today&apos;s work, or start a new plan.
+                  </p>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <Link href="/intake" className={buttonVariants()}>
+                    New AI Plan
+                  </Link>
+                  <Link href="/onboarding" className={buttonVariants({ variant: "outline" })}>
+                    Manual Setup
+                  </Link>
+                </div>
+              </div>
             </div>
-            <div className="rounded-2xl border border-sky-100 bg-white/80 px-4 py-3 text-right shadow-sm">
-              <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400">Library</p>
-              <p className="mt-1 text-lg font-semibold text-slate-900">{planCards.length}</p>
-              <p className="text-sm text-slate-500">{planCards.length === 1 ? "saved plan" : "saved plans"}</p>
-            </div>
-          </div>
+          </SectionPanel>
+
+          <SectionPanel>
+            <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">Plan Library</p>
+            <p className="mt-1 text-3xl font-semibold text-slate-950">{planCards.length}</p>
+            <p className="text-sm text-slate-500">{planCards.length === 1 ? "saved plan" : "saved plans"}</p>
+          </SectionPanel>
         </section>
 
-        {planCards.length > 0 && <DashboardClient plans={planCards} />}
+        {planCards.length > 0 && <DashboardClient plans={planCards} currentPlanId={currentPlan?.id ?? null} />}
 
         {planCards.length === 0 && (
           <Card className="border-slate-200 bg-white text-center shadow-sm">
             <CardContent className="py-12">
-              <p className="text-slate-500">No plans yet. Use the menu to start a guided chat or manual setup.</p>
+              <p className="text-slate-500">No plans yet. Start with a guided AI plan or manual setup.</p>
+              <div className="mt-4 flex justify-center gap-2">
+                <Link href="/intake" className={buttonVariants()}>
+                  New AI Plan
+                </Link>
+                <Link href="/onboarding" className={buttonVariants({ variant: "outline" })}>
+                  Manual Setup
+                </Link>
+              </div>
             </CardContent>
           </Card>
         )}
-      </main>
+      </PageShell>
     </div>
   );
 }

@@ -184,6 +184,13 @@ Define:
 
 This does not require a big redesign. It means consolidating the existing good patterns so every screen feels like the same product.
 
+Implementation note:
+
+- Added shared primitives for the app shell, page intro, section panel, command bar, and status banner.
+- Moved dashboard, guided intake, manual onboarding, and the plan-summary surface onto the shared page/surface language.
+- Simplified the signed-in app background and header from decorative gradients to calmer white/slate surfaces.
+- Left deeper workflow changes for later priorities, especially the plan page command-bar redesign, dashboard task model, AI pending states, and mobile logging pass.
+
 ### Priority 2: Redesign The Plan Page Header
 
 The plan page is the core product surface. Give it the most attention.
@@ -198,6 +205,13 @@ Recommended layout:
 
 This will reduce visual noise and make the page feel more professional.
 
+Implementation note:
+
+- Reworked the plan page header into a stronger summary masthead with version/current-week status and a dedicated command bar for `Versions`, `Edit Day`, `Adjust Plan`, and `Complete`.
+- Moved completion, preview, generation, failed-generation, and locked-week messages into full-width status rows that remain visible even when plan details are collapsed.
+- Replaced the mixed metadata line with collapsible summary metrics, goal/athlete metadata, and equipment chips below the primary header.
+- Kept the design restrained, but added a clearer accent edge, status pills, and structured information blocks so the page feels less flat while remaining task-focused.
+
 ### Priority 3: Improve Intake Feedback
 
 Because AI latency varies, the chat must communicate progress.
@@ -211,6 +225,13 @@ Add:
 
 This will make NeMo/direct-AI differences feel less confusing and reduce repeated-answer frustration.
 
+Implementation note:
+
+- Added an immediate assistant pending bubble to guided intake so the user's answer is visibly being processed.
+- Added an 8-second long-running message for intake and adjustment chat when NeMo or the AI backend takes longer than expected.
+- Added retry actions for failed intake and adjustment chat requests so users can resend the same request without retyping.
+- Added a compact `Known so far` summary in guided intake to show collected sport, goal, schedule, level, start date, and equipment as the conversation progresses.
+
 ### Priority 4: Make Dashboard A Real Home Screen
 
 Replace the decorative dashboard intro with:
@@ -221,6 +242,13 @@ Replace the decorative dashboard intro with:
 - `Saved Plans`
 
 This turns the dashboard from a plan list into a useful daily entry point.
+
+Implementation note:
+
+- Replaced the dashboard intro with a compact home-base header and direct `New AI Plan` / `Manual Setup` actions.
+- Added a `Continue Current Plan` panel that highlights the most relevant incomplete plan and links directly to it.
+- Added a `Today's Work` panel that surfaces the current week/day focus when the plan is active, or a clear starts-soon/generating/complete state otherwise.
+- Kept `Saved Plans` below as the library/history area, with clearer status pills and a current-plan marker.
 
 ### Priority 5: Mobile Logging Pass
 
@@ -235,6 +263,13 @@ Focus on:
 - making completed state obvious
 
 This app will likely be used around workouts, where mobile usability matters more than desktop polish.
+
+Implementation note:
+
+- Reworked detailed exercise logging rows so sets, intervals, attempts, and summary logs stack into usable two-column mobile layouts instead of forcing horizontal scrolling.
+- Increased mobile input and action heights for better tap targets.
+- Added an explicit `Complete` checkbox inside the open log panel and a sticky mobile save affordance.
+- Adjusted day accordion headers so duration/status metadata wraps below the focus on small screens instead of crowding the title row.
 
 ## Screen-Specific Notes
 
