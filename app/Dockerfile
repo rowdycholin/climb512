@@ -16,7 +16,10 @@ RUN npm run build
 FROM base AS runner
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
-RUN addgroup --system --gid 1001 nodejs && adduser --system --uid 1001 nextjs
+ARG APP_UID=10001
+ARG APP_GID=10001
+RUN apk add --no-cache su-exec
+RUN addgroup --system --gid ${APP_GID} nodejs && adduser --system --uid ${APP_UID} nextjs
 RUN mkdir -p ./public
 COPY --from=builder /app/public/ ./public/
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
@@ -26,11 +29,10 @@ COPY --from=builder /app/prisma.config.ts ./prisma.config.ts
 COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
 COPY --from=builder /app/node_modules/@prisma ./node_modules/@prisma
 COPY --from=builder /app/node_modules/prisma ./node_modules/prisma
-USER nextjs
 EXPOSE 8080
 ENV PORT=8080
 ENV HOSTNAME="0.0.0.0"
-CMD ["node", "server.js"]
+CMD ["su-exec", "nextjs:nodejs", "node", "server.js"]
 
 FROM builder AS worker
 ENV NODE_ENV=production

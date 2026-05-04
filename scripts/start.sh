@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
 # start.sh — Start Climb512 using Docker Compose
-# Usage: ./scripts/start.sh [--build] [--fresh] [--logs] [--guardrails]
+# Usage: ./scripts/start.sh [--build] [--fresh] [--logs] [--guardrails] [--no-recreate]
 #
 # Flags:
 #   --build       Force rebuild of the web image (use after code changes)
 #   --fresh       Destroy existing data volume and start clean
 #   --logs        Tail logs after starting
 #   --guardrails  Start the optional NeMo guardrails service profile
+#   --no-recreate Start existing containers without recreating them
 
 set -euo pipefail
 
@@ -17,6 +18,7 @@ BUILD_FLAG=""
 FRESH=false
 FOLLOW_LOGS=false
 GUARDRAILS=false
+NO_RECREATE=false
 
 for arg in "$@"; do
   case $arg in
@@ -24,9 +26,15 @@ for arg in "$@"; do
     --fresh) FRESH=true ;;
     --logs)  FOLLOW_LOGS=true ;;
     --guardrails) GUARDRAILS=true ;;
+    --no-recreate) NO_RECREATE=true ;;
     *) echo "Unknown flag: $arg"; exit 1 ;;
   esac
 done
+
+if [ "$BUILD_FLAG" = "--build" ] && [ "$NO_RECREATE" = true ]; then
+  echo "ERROR: --build and --no-recreate cannot be used together."
+  exit 1
+fi
 
 cd "$REPO_ROOT"
 
@@ -70,8 +78,13 @@ if [ "$GUARDRAILS" = true ]; then
 else
   echo "-- NeMo guardrails profile disabled. Set AI_GUARDRAILS_MODE=intake or pass --guardrails to start it."
 fi
+UP_ARGS=()
+if [ "$NO_RECREATE" = true ]; then
+  UP_ARGS+=(--no-recreate)
+  echo "-- Compose will not recreate containers. This is useful in restricted Docker environments."
+fi
 # shellcheck disable=SC2086
-docker compose "${COMPOSE_ARGS[@]}" up $BUILD_FLAG -d
+docker compose "${COMPOSE_ARGS[@]}" up $BUILD_FLAG "${UP_ARGS[@]}" -d
 
 # Wait for web to be healthy
 echo "-- Waiting for web container..."
@@ -93,6 +106,7 @@ echo "    docker compose --profile guardrails logs guardrails -f"
 echo "    ./scripts/stop.sh              # stop"
 echo "    ./scripts/start.sh --build     # rebuild after code changes"
 echo "    ./scripts/start.sh --guardrails --build"
+echo "    ./scripts/start.sh --no-recreate"
 echo ""
 
 if [ "$FOLLOW_LOGS" = true ]; then
