@@ -898,7 +898,7 @@ export function nextNonDuplicateQuestion(response: PlanIntakeAiResponse) {
   const draft = withInferredStrengthTraining(response.planRequestDraft);
   const message = firstQuestionOnly(response.message);
   if (looksLikeTruncatedAssistantMessage(message)) {
-    return INTAKE_TRUNCATED_MESSAGE;
+    return nextQuestionForDraft(draft);
   }
 
   if (

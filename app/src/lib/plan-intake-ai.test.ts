@@ -7,7 +7,6 @@ import {
   firstQuestionOnly,
   getPlanIntakeTransportConfig,
   INTAKE_READY_MESSAGE,
-  INTAKE_TRUNCATED_MESSAGE,
   INTAKE_VALIDATION_FALLBACK_MESSAGE,
   isPlanIntakeMessageAllowed,
   looksLikeTruncatedAssistantMessage,
@@ -709,7 +708,7 @@ describe("plan intake AI contract", () => {
     ).toBe(false);
   });
 
-  test("does not synthesize a hard-coded intake question for truncated provider output", () => {
+  test("advances from structured draft state when provider question looks truncated", () => {
     const message = nextNonDuplicateQuestion({
       status: "needs_more_info",
       message: "Six days a week is solid commitment. Before I dial in the workouts, I need to underst?",
@@ -722,8 +721,20 @@ describe("plan intake AI contract", () => {
       },
     });
 
-    expect(message).toBe(INTAKE_TRUNCATED_MESSAGE);
-    expect(message).not.toMatch(/sport|level|equipment|strength|injur/i);
+    expect(message).toBe("Perfect, letâ€™s anchor this on the calendar. When would you like to start?");
+  });
+
+  test("does not ask for a sport again when a truncated provider message still extracted climbing", () => {
+    const message = nextNonDuplicateQuestion({
+      status: "needs_more_info",
+      message: "Great, climbing it is. Before I build this, I need to underst?",
+      planRequestDraft: {
+        sport: "climbing",
+        disciplines: ["sport"],
+      },
+    });
+
+    expect(message).toBe("Got it. What goal do you want this training plan to support?");
   });
 
   test("blocks general-assistant requests before they reach the intake simulator", () => {
