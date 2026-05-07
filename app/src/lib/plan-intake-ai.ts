@@ -200,6 +200,15 @@ function isLocalSimulatorBackend() {
   return LOCAL_SIMULATOR_BASE_URL_PATTERN.test(anthropicBaseUrl());
 }
 
+function safeLogUrl(value: string) {
+  try {
+    const url = new URL(value);
+    return `${url.origin}${url.pathname}`;
+  } catch {
+    return value.replace(/\/\/[^/@]+@/, "//<redacted>@");
+  }
+}
+
 export function getPlanIntakeTransportConfig(): IntakeTransportConfig {
   const model = process.env.ANTHROPIC_MODEL ?? DEFAULT_MODEL;
   const maxTokens = parseMaxTokens();
@@ -1090,6 +1099,10 @@ function extractJsonObject(text: string) {
 async function callModelBackedIntake(input: PlanIntakeAiInput): Promise<PlanIntakeAiResponse> {
   const transport = getPlanIntakeTransportConfig();
   const startedAt = Date.now();
+  const startedAtIso = new Date(startedAt).toISOString();
+  const requestId = `${startedAt.toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+  const recentMessageCount = input.messages.length;
+  const draftKeys = Object.keys(input.draft).length;
   if (transport.source === "direct-ai" && !transport.apiKey) {
     throw new Error("AI API key is not configured");
   }
@@ -1102,6 +1115,9 @@ async function callModelBackedIntake(input: PlanIntakeAiInput): Promise<PlanInta
   }
 
   let res: Response;
+  console.info(
+    `[ai-intake] request id=${requestId} at=${startedAtIso} source=${transport.source} model=${transport.model} url=${safeLogUrl(transport.url)} maxTokens=${transport.maxTokens} draftKeys=${draftKeys} messages=${recentMessageCount}`,
+  );
   try {
     res = await fetch(transport.url, {
       method: "POST",
@@ -1124,14 +1140,22 @@ async function callModelBackedIntake(input: PlanIntakeAiInput): Promise<PlanInta
     });
   } catch (error) {
     const durationMs = Date.now() - startedAt;
+    const endedAtIso = new Date().toISOString();
     const service = transport.source === "nemo-guardrails" ? "NeMo guardrails service" : "AI intake backend";
+    console.warn(
+      `[ai-intake] response id=${requestId} at=${endedAtIso} source=${transport.source} model=${transport.model} ok=false totalMs=${durationMs} error=unavailable`,
+    );
     throw new Error(`${service} is unavailable after ${durationMs}ms: ${(error as Error).message}`);
   }
 
   if (!res.ok) {
     const durationMs = Date.now() - startedAt;
+    const endedAtIso = new Date().toISOString();
     const body = await res.text();
     const service = transport.source === "nemo-guardrails" ? "NeMo guardrails service" : "AI intake backend";
+    console.warn(
+      `[ai-intake] response id=${requestId} at=${endedAtIso} source=${transport.source} model=${transport.model} ok=false status=${res.status} totalMs=${durationMs} bodyChars=${body.length}`,
+    );
     throw new Error(`${service} returned ${res.status} after ${durationMs}ms: ${body.slice(0, 300)}`);
   }
 
@@ -1147,8 +1171,9 @@ async function callModelBackedIntake(input: PlanIntakeAiInput): Promise<PlanInta
 
   const response = validatePlanIntakeAiResponse(extractJsonObject(content), input.clientToday);
   const durationMs = Date.now() - startedAt;
+  const endedAtIso = new Date().toISOString();
   console.info(
-    `[ai-intake] source=${transport.source} status=${response.status} durationMs=${durationMs} draftKeys=${Object.keys(response.planRequestDraft).length}`,
+    `[ai-intake] response id=${requestId} at=${endedAtIso} source=${transport.source} model=${transport.model} ok=true status=${response.status} totalMs=${durationMs} draftKeys=${Object.keys(response.planRequestDraft).length} responseChars=${content.length}`,
   );
   return response;
 }

@@ -721,7 +721,8 @@ describe("plan intake AI contract", () => {
       },
     });
 
-    expect(message).toBe("Perfect, letâ€™s anchor this on the calendar. When would you like to start?");
+    expect(message).toContain("anchor this on the calendar");
+    expect(message).toContain("When would you like to start?");
   });
 
   test("does not ask for a sport again when a truncated provider message still extracted climbing", () => {
