@@ -611,6 +611,23 @@ describe("plan intake AI contract", () => {
     expect(response.assistantMessage).toBe(INTAKE_READY_MESSAGE);
   });
 
+  test("does not repeat the final review after it has just been asked", async () => {
+    const response = await continuePlanIntakeWithAiContract({
+      draft: { ...completeDraft, finalIntakeReviewAsked: true },
+      userMessage: "I want to be able to run a 10K",
+      messages: [
+        {
+          role: "assistant",
+          content: "Great, I have the main pieces. Is there anything else I should know about you or your goals before I am ready to generate the plan?",
+        },
+      ],
+    });
+
+    expect(response.ready).toBe(true);
+    expect(response.assistantMessage).toBe(INTAKE_READY_MESSAGE);
+    expect(response.draft.planStructureNotes).toContain("I want to be able to run a 10K");
+  });
+
   test("treats generic final constraints prompt as answered by no", async () => {
     const response = await continuePlanIntakeWithAiContract({
       draft: { ...completeDraft, finalIntakeReviewAsked: undefined },
@@ -801,6 +818,25 @@ describe("plan intake AI contract", () => {
     });
   });
 
+  test("logs local simulator intake with the same timing fields", async () => {
+    process.env.AI_GUARDRAILS_MODE = "off";
+    process.env.AI_INTAKE_MODE = "local";
+
+    const infoSpy = vi.spyOn(console, "info").mockImplementation(() => undefined);
+
+    const response = await continuePlanIntakeWithAiContract({
+      draft: createInitialIntakeDraft(),
+      userMessage: "climbing",
+      messages: [],
+      clientToday: "2026-05-02",
+    });
+
+    expect(response.ready).toBe(false);
+    expect(infoSpy).toHaveBeenCalledWith(expect.stringContaining("source=local-simulator"));
+    expect(infoSpy).toHaveBeenCalledWith(expect.stringContaining("ok=true"));
+    expect(infoSpy).toHaveBeenCalledWith(expect.stringContaining("durationMs="));
+  });
+
   test("uses the NeMo endpoint for model-backed intake while keeping app-side validation", async () => {
     process.env.ANTHROPIC_BASE_URL = "https://openrouter.ai/api";
     process.env.ANTHROPIC_MODEL = "test-model";
@@ -837,12 +873,14 @@ describe("plan intake AI contract", () => {
     expect(fetchMock).toHaveBeenCalledOnce();
     const firstCall = fetchMock.mock.calls[0];
     expect(firstCall[0]).toBe("http://guardrails:8000/v1/chat/completions");
-    expect(firstCall[1]?.headers).toEqual({
+    expect(firstCall[1]?.headers).toMatchObject({
       "Content-Type": "application/json",
+      "X-Climb512-Request-Id": expect.any(String),
     });
     expect(response.draft.sport).toBe("running");
     expect(response.ready).toBe(false);
     expect(infoSpy).toHaveBeenCalledWith(expect.stringContaining("source=nemo-guardrails"));
+    expect(infoSpy).toHaveBeenCalledWith(expect.stringContaining("durationMs="));
   });
 
   test("routes through NeMo when guardrails mode is enabled even if the backend points at the simulator", async () => {

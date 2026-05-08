@@ -1109,6 +1109,7 @@ async function callModelBackedIntake(input: PlanIntakeAiInput): Promise<PlanInta
 
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
+    "X-Climb512-Request-Id": requestId,
   };
   if (transport.apiKey) {
     headers.Authorization = `Bearer ${transport.apiKey}`;
@@ -1143,7 +1144,7 @@ async function callModelBackedIntake(input: PlanIntakeAiInput): Promise<PlanInta
     const endedAtIso = new Date().toISOString();
     const service = transport.source === "nemo-guardrails" ? "NeMo guardrails service" : "AI intake backend";
     console.warn(
-      `[ai-intake] response id=${requestId} at=${endedAtIso} source=${transport.source} model=${transport.model} ok=false totalMs=${durationMs} error=unavailable`,
+      `[ai-intake] response id=${requestId} at=${endedAtIso} source=${transport.source} model=${transport.model} ok=false durationMs=${durationMs} errorType=unavailable`,
     );
     throw new Error(`${service} is unavailable after ${durationMs}ms: ${(error as Error).message}`);
   }
@@ -1154,28 +1155,37 @@ async function callModelBackedIntake(input: PlanIntakeAiInput): Promise<PlanInta
     const body = await res.text();
     const service = transport.source === "nemo-guardrails" ? "NeMo guardrails service" : "AI intake backend";
     console.warn(
-      `[ai-intake] response id=${requestId} at=${endedAtIso} source=${transport.source} model=${transport.model} ok=false status=${res.status} totalMs=${durationMs} bodyChars=${body.length}`,
+      `[ai-intake] response id=${requestId} at=${endedAtIso} source=${transport.source} model=${transport.model} ok=false status=${res.status} durationMs=${durationMs} bodyChars=${body.length} errorType=http-status`,
     );
     throw new Error(`${service} returned ${res.status} after ${durationMs}ms: ${body.slice(0, 300)}`);
   }
 
-  const data = await res.json() as {
-    choices?: { message?: { content?: string } }[];
-    error?: { message?: string };
-  };
+  try {
+    const data = await res.json() as {
+      choices?: { message?: { content?: string } }[];
+      error?: { message?: string };
+    };
 
-  if (data.error) throw new Error(`AI intake error: ${data.error.message}`);
+    if (data.error) throw new Error(`AI intake error: ${data.error.message}`);
 
-  const content = data.choices?.[0]?.message?.content?.trim();
-  if (!content) throw new Error("No AI intake response content");
+    const content = data.choices?.[0]?.message?.content?.trim();
+    if (!content) throw new Error("No AI intake response content");
 
-  const response = validatePlanIntakeAiResponse(extractJsonObject(content), input.clientToday);
-  const durationMs = Date.now() - startedAt;
-  const endedAtIso = new Date().toISOString();
-  console.info(
-    `[ai-intake] response id=${requestId} at=${endedAtIso} source=${transport.source} model=${transport.model} ok=true status=${response.status} totalMs=${durationMs} draftKeys=${Object.keys(response.planRequestDraft).length} responseChars=${content.length}`,
-  );
-  return response;
+    const response = validatePlanIntakeAiResponse(extractJsonObject(content), input.clientToday);
+    const durationMs = Date.now() - startedAt;
+    const endedAtIso = new Date().toISOString();
+    console.info(
+      `[ai-intake] response id=${requestId} at=${endedAtIso} source=${transport.source} model=${transport.model} ok=true status=${response.status} durationMs=${durationMs} draftKeys=${Object.keys(response.planRequestDraft).length} responseChars=${content.length}`,
+    );
+    return response;
+  } catch (error) {
+    const durationMs = Date.now() - startedAt;
+    const endedAtIso = new Date().toISOString();
+    console.warn(
+      `[ai-intake] response id=${requestId} at=${endedAtIso} source=${transport.source} model=${transport.model} ok=false durationMs=${durationMs} errorType=parse-or-validation`,
+    );
+    throw error;
+  }
 }
 
 function shouldUseModelBackedIntake() {
@@ -1206,25 +1216,62 @@ export function simulatePlanIntakeAiResponse(input: PlanIntakeAiInput): PlanInta
   }, input.clientToday);
 }
 
+function callLocalSimulatorIntake(input: PlanIntakeAiInput): PlanIntakeAiResponse {
+  const startedAt = Date.now();
+  const startedAtIso = new Date(startedAt).toISOString();
+  const requestId = `${startedAt.toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+  const recentMessageCount = input.messages.length;
+  const draftKeys = Object.keys(input.draft).length;
+
+  console.info(
+    `[ai-intake] request id=${requestId} at=${startedAtIso} source=local-simulator model=local url=local maxTokens=0 draftKeys=${draftKeys} messages=${recentMessageCount}`,
+  );
+
+  try {
+    const response = simulatePlanIntakeAiResponse(input);
+    const durationMs = Date.now() - startedAt;
+    const endedAtIso = new Date().toISOString();
+    console.info(
+      `[ai-intake] response id=${requestId} at=${endedAtIso} source=local-simulator model=local ok=true status=${response.status} durationMs=${durationMs} draftKeys=${Object.keys(response.planRequestDraft).length} responseChars=${response.message.length}`,
+    );
+    return response;
+  } catch (error) {
+    const durationMs = Date.now() - startedAt;
+    const endedAtIso = new Date().toISOString();
+    console.warn(
+      `[ai-intake] response id=${requestId} at=${endedAtIso} source=local-simulator model=local ok=false durationMs=${durationMs} errorType=parse-or-validation`,
+    );
+    throw error;
+  }
+}
+
 export async function continuePlanIntakeWithAiContract(input: PlanIntakeAiInput): Promise<IntakeResponse> {
   if (!isPlanIntakeMessageAllowed(input.userMessage)) {
     return refusalResponse(input.draft);
   }
 
   const hintedInput = withDirectAnswerHints(input);
+  const previousPrompt = latestAssistantMessage(input.messages);
+
+  if (isFinalReviewPrompt(previousPrompt) && planRequestSchema.safeParse(withInferredStrengthTraining(hintedInput.draft)).success) {
+    return toIntakeResponse({
+      status: "ready",
+      message: INTAKE_READY_MESSAGE,
+      planRequestDraft: hintedInput.draft,
+    });
+  }
 
   try {
     const response = shouldUseModelBackedIntake()
       ? await callModelBackedIntake(hintedInput)
-      : simulatePlanIntakeAiResponse(hintedInput);
+      : callLocalSimulatorIntake(hintedInput);
     return toIntakeResponse({
       ...response,
       planRequestDraft: mergeDrafts(hintedInput.draft, response.planRequestDraft),
     });
   } catch (error) {
     const source = shouldUseModelBackedIntake() ? getPlanIntakeTransportConfig().source : "local-simulator";
-    console.warn(`[ai-intake] source=${source} fallback=true reason=${(error as Error).message}`);
-    const previousPrompt = latestAssistantMessage(input.messages);
+    console.warn(`[ai-intake] fallback at=${new Date().toISOString()} source=${source} ok=false fallback=true reason=${(error as Error).message}`);
     const fallbackDraft = isFinalReviewPrompt(previousPrompt)
       ? hintedInput.draft
       : input.draft;
