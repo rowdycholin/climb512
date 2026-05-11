@@ -144,19 +144,25 @@ docker compose logs -f web
 Direct mode should show:
 
 ```text
-[ai-intake] response id=... source=direct-ai ok=true status=... durationMs=...
+[ai-intake] response id=... source=direct-ai surface=intake ok=true status=... durationMs=...
 ```
 
 NeMo mode should show:
 
 ```text
-[ai-intake] response id=... source=nemo-guardrails ok=true status=... durationMs=...
+[ai-intake] response id=... source=nemo-guardrails surface=intake ok=true status=... durationMs=...
 ```
 
-Local simulator mode should show the same shape:
+Simulator-backed intake mode should show:
 
 ```text
-[ai-intake] response id=... source=local-simulator ok=true status=... durationMs=...
+[ai-intake] response id=... source=simulator surface=intake ok=true status=... durationMs=...
+```
+
+The older in-web local intake fallback should show:
+
+```text
+[ai-intake] response id=... source=local-intake ok=true status=... durationMs=...
 ```
 
 For NeMo-specific breakdowns, also inspect:

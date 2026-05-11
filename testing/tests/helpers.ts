@@ -83,23 +83,38 @@ export function readSqlValue(sql: string) {
 }
 
 export function dockerServiceUsesSimulator(service: "web" | "plan-worker") {
+  return dockerServiceEnv(service, "ANTHROPIC_BASE_URL") === "http://simulator:8787";
+}
+
+export function dockerServiceEnv(service: "web" | "plan-worker", name: string) {
   const repoRoot = path.resolve(__dirname, "..", "..");
 
   try {
-    const baseUrl = execFileSync(
+    return execFileSync(
       "docker",
-      ["compose", "exec", "-T", service, "printenv", "ANTHROPIC_BASE_URL"],
+      ["compose", "exec", "-T", service, "printenv", name],
       {
         cwd: repoRoot,
         encoding: "utf8",
         stdio: ["ignore", "pipe", "pipe"],
       },
     ).trim();
-
-    return baseUrl === "http://simulator:8787";
   } catch {
-    return false;
+    return "";
   }
+}
+
+export function webIntakeRouteForCurrentDockerStack() {
+  const baseUrl = dockerServiceEnv("web", "ANTHROPIC_BASE_URL");
+  const intakeMode = dockerServiceEnv("web", "AI_INTAKE_MODE");
+  const guardrailsMode = dockerServiceEnv("web", "AI_GUARDRAILS_MODE");
+
+  if (guardrailsMode === "intake") {
+    return baseUrl === "http://simulator:8787" ? "nemo-guardrails-simulator" : "nemo-guardrails-live";
+  }
+  if (baseUrl === "http://simulator:8787" && intakeMode === "simulator") return "simulator";
+  if (intakeMode === "live") return "direct-ai";
+  return "other";
 }
 
 export function skipIfWebIsNotSimulator(test: { skip: (condition: boolean, description: string) => void }) {

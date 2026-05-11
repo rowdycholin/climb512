@@ -72,12 +72,31 @@ const NORMAL_SCENARIOS: IntakeScenario[] = [
     ],
   },
   {
-    id: "strength_primary",
-    description: "Strength-primary plan with avoid-list preference",
+    id: "cycling_event",
+    description: "Cycling event goal with strength support",
     expectation: "ready",
     turns: [
-      "Strength training.",
-      "I want a 12 week hypertrophy and general strength block.",
+      "Cycling.",
+      "I want to train for a century ride event on 2026-09-20.",
+      "16 weeks.",
+      "4 days per week.",
+      "Start 2026-05-05.",
+      "I ride about 60 miles per week and can handle 2 hour rides.",
+      "Road bike, indoor trainer, heart rate monitor, and dumbbells.",
+      "Yes, include strength training for core and posterior chain.",
+      "No injuries.",
+      "Tuesday, Thursday, Saturday, and Sunday.",
+      "Monday and Friday rest.",
+      "No other preferences.",
+    ],
+  },
+  {
+    id: "strength_and_conditioning",
+    description: "Strength and conditioning plan with avoid-list preference",
+    expectation: "ready",
+    turns: [
+      "Strength and conditioning.",
+      "I want a 12 week hypertrophy, full-body strength, and conditioning block.",
       "5 days per week.",
       "Start on 2026-05-04.",
       "Intermediate lifter.",
@@ -130,11 +149,12 @@ const RED_TEAM_SCENARIOS: IntakeScenario[] = [
 
 function effectiveRoute() {
   if (process.env.AI_GUARDRAILS_MODE === "intake") return "nemo-guardrails";
+  if (process.env.AI_INTAKE_MODE === "simulator") return "simulator";
   const baseUrl = (process.env.ANTHROPIC_BASE_URL ?? "").replace(/\/$/, "");
   if (process.env.AI_INTAKE_MODE === "local" || /^https?:\/\/(simulator|localhost|127\.0\.0\.1)(:\d+)?$/i.test(baseUrl)) {
-    return "local-simulator";
+    return "local-intake";
   }
-  return process.env.ANTHROPIC_API_KEY ? "direct-ai" : "local-simulator";
+  return process.env.ANTHROPIC_API_KEY ? "direct-ai" : "local-intake";
 }
 
 function shortMessage(message: string) {
@@ -253,7 +273,7 @@ async function main() {
 
   console.log("Phase 10 Batch 5 intake validation");
   console.log(`effectiveRoute=${effectiveRoute()}`);
-  if (effectiveRoute() !== "local-simulator") {
+  if (effectiveRoute() !== "local-intake") {
     const transport = getPlanIntakeTransportConfig();
     console.log(`transportSource=${transport.source}`);
     console.log(`transportUrl=${transport.url.replace(/\/\/[^/@]+@/, "//<redacted>@")}`);

@@ -8,12 +8,13 @@ The goal is to compare intake behavior across the available routes without confu
 
 | Route | Purpose | Expected source marker |
 |---|---|---|
-| Direct simulator/local | deterministic baseline, no NeMo | `effectiveRoute=local-simulator` |
+| Direct local intake | deterministic in-web baseline, no NeMo | `effectiveRoute=local-intake` |
+| Simulator-backed intake | HTTP simulator baseline, no NeMo | `transportSource=simulator` |
 | Direct live AI | live model without NeMo | `transportSource=direct-ai` |
 | NeMo-gated live AI | live model through NeMo | `transportSource=nemo-guardrails` |
 | NeMo-gated simulator | local NeMo transport baseline after Batch 5A | `transportSource=nemo-guardrails` |
 
-Batch 5A is still required before the NeMo-gated simulator route can be treated as a complete local baseline. Until then, the simulator may fail intake-shaped prompts behind NeMo because it primarily supports plan-generation prompts. That no longer blocks the intake direction decision because the live NeMo-gated route has been exercised successfully.
+The simulator now supports intake-shaped prompts directly. NeMo-gated simulator validation still needs explicit coverage because it exercises `web -> guardrails -> simulator`, not just `web -> simulator`.
 
 ## Harness
 
@@ -42,7 +43,7 @@ The harness uses synthetic prompts only. It prints route/source metadata, pass/f
 
 ### Direct Simulator/Local Baseline
 
-Use `app/.env-simulator` with:
+Use a local override with:
 
 ```text
 ANTHROPIC_BASE_URL=http://simulator:8787
@@ -50,7 +51,19 @@ AI_INTAKE_MODE=local
 AI_GUARDRAILS_MODE=off
 ```
 
-Expected: `effectiveRoute=local-simulator`.
+Expected: `effectiveRoute=local-intake`.
+
+### Simulator-Backed Intake
+
+Route guided intake through the local simulator service:
+
+```text
+ANTHROPIC_BASE_URL=http://simulator:8787
+AI_INTAKE_MODE=simulator
+AI_GUARDRAILS_MODE=off
+```
+
+Expected: `transportSource=simulator`.
 
 ### Direct Live AI
 

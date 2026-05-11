@@ -252,8 +252,8 @@ describe("adjustment chat contract", () => {
     expect(userPrompt).toContain("ADJUSTMENT_CONTEXT_JSON");
     expect(userPrompt).toContain("MESSAGE_HISTORY_JSON");
     expect(userPrompt).toContain("FOLLOW_UP SHAPE");
-    expect(userPrompt).toContain("PROPOSAL SHAPE");
-    expect(userPrompt).toContain("structured exercise prescriptions");
+    expect(userPrompt).toContain("INTENT SHAPE");
+    expect(userPrompt).toContain("prescriptionChanges");
   });
 
   test("summarizes rich guidance, coaching, and prescription changes for previews", () => {

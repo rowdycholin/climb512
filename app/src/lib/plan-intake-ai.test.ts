@@ -818,6 +818,77 @@ describe("plan intake AI contract", () => {
     });
   });
 
+  test("routes simulator intake over the OpenAI-compatible simulator transport", async () => {
+    process.env.ANTHROPIC_BASE_URL = "http://simulator:8787";
+    process.env.ANTHROPIC_MODEL = "simulator";
+    process.env.ANTHROPIC_API_KEY = "simulator-local-key";
+    process.env.AI_GUARDRAILS_MODE = "off";
+    process.env.AI_INTAKE_MODE = "simulator";
+
+    expect(getPlanIntakeTransportConfig()).toMatchObject({
+      source: "simulator",
+      url: "http://simulator:8787/v1/chat/completions",
+      model: "simulator",
+      apiKey: "simulator-local-key",
+    });
+
+    const infoSpy = vi.spyOn(console, "info").mockImplementation(() => undefined);
+    const fetchMock = vi.fn<(input: string, init?: RequestInit) => Promise<Response>>(async () => new Response(JSON.stringify({
+      choices: [
+        {
+          message: {
+            content: JSON.stringify({
+              status: "needs_more_info",
+              message: "Got it. What goal do you want this training plan to support?",
+              planRequestDraft: {
+                sport: "running",
+              },
+            }),
+          },
+        },
+      ],
+    }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await continuePlanIntakeWithAiContract({
+      draft: createInitialIntakeDraft(),
+      userMessage: "running",
+      messages: [],
+      clientToday: "2026-05-08",
+    });
+
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(fetchMock.mock.calls[0][0]).toBe("http://simulator:8787/v1/chat/completions");
+    expect(response.draft.sport).toBe("running");
+    expect(infoSpy).toHaveBeenCalledWith(expect.stringContaining("source=simulator surface=intake"));
+    expect(infoSpy).toHaveBeenCalledWith(expect.stringContaining("durationMs="));
+  });
+
+  test("falls back cleanly when simulator-backed intake returns an error", async () => {
+    process.env.ANTHROPIC_BASE_URL = "http://simulator:8787";
+    process.env.ANTHROPIC_MODEL = "simulator";
+    process.env.ANTHROPIC_API_KEY = "simulator-local-key";
+    process.env.AI_GUARDRAILS_MODE = "off";
+    process.env.AI_INTAKE_MODE = "simulator";
+
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    vi.stubGlobal("fetch", vi.fn<(input: string, init?: RequestInit) => Promise<Response>>(async () => new Response(JSON.stringify({
+      error: { message: "Simulated AI failure" },
+    }), { status: 500 })));
+
+    const response = await continuePlanIntakeWithAiContract({
+      draft: createInitialIntakeDraft(),
+      userMessage: "running",
+      messages: [{ role: "assistant", content: "What sport or discipline would you like to train for?" }],
+      clientToday: "2026-05-08",
+    });
+
+    expect(response.ready).toBe(false);
+    expect(response.assistantMessage).toContain(INTAKE_VALIDATION_FALLBACK_MESSAGE);
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("source=simulator"));
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("fallback=true"));
+  });
+
   test("logs local simulator intake with the same timing fields", async () => {
     process.env.AI_GUARDRAILS_MODE = "off";
     process.env.AI_INTAKE_MODE = "local";
@@ -832,7 +903,7 @@ describe("plan intake AI contract", () => {
     });
 
     expect(response.ready).toBe(false);
-    expect(infoSpy).toHaveBeenCalledWith(expect.stringContaining("source=local-simulator"));
+    expect(infoSpy).toHaveBeenCalledWith(expect.stringContaining("source=local-intake"));
     expect(infoSpy).toHaveBeenCalledWith(expect.stringContaining("ok=true"));
     expect(infoSpy).toHaveBeenCalledWith(expect.stringContaining("durationMs="));
   });

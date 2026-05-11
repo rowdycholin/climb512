@@ -14,6 +14,7 @@ case "$OPENAI_BASE_URL" in
 esac
 
 export OPENAI_API_KEY="${ANTHROPIC_API_KEY:-${OPENAI_API_KEY:-}}"
+export MAIN_MODEL_ENGINE="${MAIN_MODEL_ENGINE:-openai}"
 
 mkdir -p "${CONFIG_ROOT}/${CONFIG_ID}/rails"
 
@@ -32,4 +33,5 @@ exec nemoguardrails server \
   --config "${CONFIG_ROOT}" \
   --default-config-id "${CONFIG_ID}" \
   --port "${PORT}" \
-  --disable-chat-ui
+  --disable-chat-ui \
+  --no-verbose

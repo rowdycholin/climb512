@@ -110,7 +110,7 @@ const GENERAL_FINAL_REVIEW_PATTERN = /\b(any other|anything else).*\b(constraint
 
 const TEST_INVALID_AI_OUTPUT_MESSAGE = "__test_invalid_ai_output__";
 
-type IntakeTransportSource = "direct-ai" | "nemo-guardrails";
+type IntakeTransportSource = "direct-ai" | "nemo-guardrails" | "simulator";
 
 interface IntakeTransportConfig {
   source: IntakeTransportSource;
@@ -196,6 +196,10 @@ function forceLocalIntake() {
   return process.env.AI_INTAKE_MODE === "local";
 }
 
+function forceSimulatorIntake() {
+  return process.env.AI_INTAKE_MODE === "simulator";
+}
+
 function isLocalSimulatorBackend() {
   return LOCAL_SIMULATOR_BASE_URL_PATTERN.test(anthropicBaseUrl());
 }
@@ -220,6 +224,16 @@ export function getPlanIntakeTransportConfig(): IntakeTransportConfig {
       model,
       maxTokens,
       apiKey: process.env.AI_GUARDRAILS_API_KEY ?? process.env.ANTHROPIC_API_KEY,
+    };
+  }
+
+  if (forceSimulatorIntake()) {
+    return {
+      source: "simulator",
+      url: `${anthropicBaseUrl()}/v1/chat/completions`,
+      model,
+      maxTokens,
+      apiKey: process.env.ANTHROPIC_API_KEY,
     };
   }
 
@@ -1117,7 +1131,7 @@ async function callModelBackedIntake(input: PlanIntakeAiInput): Promise<PlanInta
 
   let res: Response;
   console.info(
-    `[ai-intake] request id=${requestId} at=${startedAtIso} source=${transport.source} model=${transport.model} url=${safeLogUrl(transport.url)} maxTokens=${transport.maxTokens} draftKeys=${draftKeys} messages=${recentMessageCount}`,
+    `[ai-intake] request id=${requestId} at=${startedAtIso} source=${transport.source} surface=intake model=${transport.model} url=${safeLogUrl(transport.url)} maxTokens=${transport.maxTokens} draftKeys=${draftKeys} messages=${recentMessageCount}`,
   );
   try {
     res = await fetch(transport.url, {
@@ -1144,7 +1158,7 @@ async function callModelBackedIntake(input: PlanIntakeAiInput): Promise<PlanInta
     const endedAtIso = new Date().toISOString();
     const service = transport.source === "nemo-guardrails" ? "NeMo guardrails service" : "AI intake backend";
     console.warn(
-      `[ai-intake] response id=${requestId} at=${endedAtIso} source=${transport.source} model=${transport.model} ok=false durationMs=${durationMs} errorType=unavailable`,
+      `[ai-intake] response id=${requestId} at=${endedAtIso} source=${transport.source} surface=intake model=${transport.model} ok=false durationMs=${durationMs} errorType=unavailable`,
     );
     throw new Error(`${service} is unavailable after ${durationMs}ms: ${(error as Error).message}`);
   }
@@ -1155,7 +1169,7 @@ async function callModelBackedIntake(input: PlanIntakeAiInput): Promise<PlanInta
     const body = await res.text();
     const service = transport.source === "nemo-guardrails" ? "NeMo guardrails service" : "AI intake backend";
     console.warn(
-      `[ai-intake] response id=${requestId} at=${endedAtIso} source=${transport.source} model=${transport.model} ok=false status=${res.status} durationMs=${durationMs} bodyChars=${body.length} errorType=http-status`,
+      `[ai-intake] response id=${requestId} at=${endedAtIso} source=${transport.source} surface=intake model=${transport.model} ok=false status=${res.status} durationMs=${durationMs} bodyChars=${body.length} errorType=http-status`,
     );
     throw new Error(`${service} returned ${res.status} after ${durationMs}ms: ${body.slice(0, 300)}`);
   }
@@ -1175,14 +1189,14 @@ async function callModelBackedIntake(input: PlanIntakeAiInput): Promise<PlanInta
     const durationMs = Date.now() - startedAt;
     const endedAtIso = new Date().toISOString();
     console.info(
-      `[ai-intake] response id=${requestId} at=${endedAtIso} source=${transport.source} model=${transport.model} ok=true status=${response.status} durationMs=${durationMs} draftKeys=${Object.keys(response.planRequestDraft).length} responseChars=${content.length}`,
+      `[ai-intake] response id=${requestId} at=${endedAtIso} source=${transport.source} surface=intake model=${transport.model} ok=true status=${response.status} durationMs=${durationMs} draftKeys=${Object.keys(response.planRequestDraft).length} responseChars=${content.length}`,
     );
     return response;
   } catch (error) {
     const durationMs = Date.now() - startedAt;
     const endedAtIso = new Date().toISOString();
     console.warn(
-      `[ai-intake] response id=${requestId} at=${endedAtIso} source=${transport.source} model=${transport.model} ok=false durationMs=${durationMs} errorType=parse-or-validation`,
+      `[ai-intake] response id=${requestId} at=${endedAtIso} source=${transport.source} surface=intake model=${transport.model} ok=false durationMs=${durationMs} errorType=parse-or-validation`,
     );
     throw error;
   }
@@ -1190,6 +1204,7 @@ async function callModelBackedIntake(input: PlanIntakeAiInput): Promise<PlanInta
 
 function shouldUseModelBackedIntake() {
   if (guardrailsMode() === "intake") return true;
+  if (forceSimulatorIntake()) return true;
   if (forceLocalIntake() || isLocalSimulatorBackend()) return false;
   return Boolean(process.env.ANTHROPIC_API_KEY);
 }
@@ -1224,7 +1239,7 @@ function callLocalSimulatorIntake(input: PlanIntakeAiInput): PlanIntakeAiRespons
   const draftKeys = Object.keys(input.draft).length;
 
   console.info(
-    `[ai-intake] request id=${requestId} at=${startedAtIso} source=local-simulator model=local url=local maxTokens=0 draftKeys=${draftKeys} messages=${recentMessageCount}`,
+    `[ai-intake] request id=${requestId} at=${startedAtIso} source=local-intake model=local url=local maxTokens=0 draftKeys=${draftKeys} messages=${recentMessageCount}`,
   );
 
   try {
@@ -1232,14 +1247,14 @@ function callLocalSimulatorIntake(input: PlanIntakeAiInput): PlanIntakeAiRespons
     const durationMs = Date.now() - startedAt;
     const endedAtIso = new Date().toISOString();
     console.info(
-      `[ai-intake] response id=${requestId} at=${endedAtIso} source=local-simulator model=local ok=true status=${response.status} durationMs=${durationMs} draftKeys=${Object.keys(response.planRequestDraft).length} responseChars=${response.message.length}`,
+      `[ai-intake] response id=${requestId} at=${endedAtIso} source=local-intake model=local ok=true status=${response.status} durationMs=${durationMs} draftKeys=${Object.keys(response.planRequestDraft).length} responseChars=${response.message.length}`,
     );
     return response;
   } catch (error) {
     const durationMs = Date.now() - startedAt;
     const endedAtIso = new Date().toISOString();
     console.warn(
-      `[ai-intake] response id=${requestId} at=${endedAtIso} source=local-simulator model=local ok=false durationMs=${durationMs} errorType=parse-or-validation`,
+      `[ai-intake] response id=${requestId} at=${endedAtIso} source=local-intake model=local ok=false durationMs=${durationMs} errorType=parse-or-validation`,
     );
     throw error;
   }
@@ -1270,7 +1285,7 @@ export async function continuePlanIntakeWithAiContract(input: PlanIntakeAiInput)
       planRequestDraft: mergeDrafts(hintedInput.draft, response.planRequestDraft),
     });
   } catch (error) {
-    const source = shouldUseModelBackedIntake() ? getPlanIntakeTransportConfig().source : "local-simulator";
+    const source = shouldUseModelBackedIntake() ? getPlanIntakeTransportConfig().source : "local-intake";
     console.warn(`[ai-intake] fallback at=${new Date().toISOString()} source=${source} ok=false fallback=true reason=${(error as Error).message}`);
     const fallbackDraft = isFinalReviewPrompt(previousPrompt)
       ? hintedInput.draft

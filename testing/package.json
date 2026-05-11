@@ -6,6 +6,7 @@
   "scripts": {
     "test": "playwright test",
     "test:ci": "playwright test",
+    "test:intake-timing": "playwright test tests/intake-route-timing.spec.ts",
     "test:onboarding": "playwright test tests/onboarding.spec.ts --grep \"generates a plan end-to-end\"",
     "test:security": "playwright test tests/security.spec.ts"
   },

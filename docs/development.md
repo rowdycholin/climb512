@@ -90,7 +90,7 @@ cd app
 npm run dev
 ```
 
-Note: if you run the app outside Docker and keep `app/.env` unchanged, intake and plan generation may go to the live provider, not the simulator. Set `AI_INTAKE_MODE=local` if you want deterministic intake while leaving generation on the configured backend.
+Note: if you run the app outside Docker and keep `app/.env` unchanged, intake and plan generation may go to the live provider, not the simulator. Set `AI_INTAKE_MODE=simulator` with `ANTHROPIC_BASE_URL=http://localhost:8787` to route intake through the simulator service, or set `AI_INTAKE_MODE=local` if you want the older deterministic in-web intake fallback while leaving generation on the configured backend.
 
 ## Migrations
 

@@ -220,14 +220,15 @@ npx playwright test tests/plan-viewer-progress.spec.ts
 - manual onboarding still uses legacy `PlanInput`; guided intake uses the `PlanRequest` worker generation path
 - sequential plan-week worker logic lives in `app/src/lib/plan-generation-worker.ts`
 - worker progress display composes `PlanGenerationWeek` rows through `app/src/lib/plan-access.ts`
+- simulator guided intake returns deterministic `PlanIntakeAiResponse` payloads over the OpenAI-compatible chat-completions endpoint
 - simulator plan generation uses `PlanRequest` fields for sport selection, event vs ongoing themes, strength support, and injury/avoid-exercise substitutions
-- the simulator implements a local OpenAI-compatible backend for plan generation only
+- the simulator implements a local OpenAI-compatible backend for guided intake and plan generation
 - `docker-compose.dev.yml` overlays the base compose file for bind-mounted development
 
 ## AI Notes
 
 - the app uses plain `fetch` to an OpenAI-compatible `/v1/chat/completions` endpoint
-- `/intake` is a guided intake chat; live-provider mode uses the model-backed `PlanIntakeAiResponse` contract, while simulator/local mode can use deterministic extraction
+- `/intake` is a guided intake chat; live-provider mode uses the model-backed `PlanIntakeAiResponse` contract, simulator mode routes over HTTP to the simulator, and local mode keeps a deterministic in-web fallback
 - AI intake responses are validated in `app/src/lib/plan-intake-ai.ts` before the UI receives draft changes
 - in Docker, `web` and `plan-worker` receive `ANTHROPIC_*` values from `app/.env` at container startup
 - the simulator logging header uses the session login ID and is only sent to simulator-like local base URLs
@@ -256,7 +257,7 @@ npx playwright test tests/plan-viewer-progress.spec.ts
 ## Current Cautions
 
 - `npm run lint` is not yet the most reliable automation check
-- the simulator is only for plan generation today
+- the simulator supports guided intake and plan generation; adjustment chat still uses app-side deterministic fixtures in simulator/local testing
 - Playwright uses global setup/teardown cleanup to remove test users (`@example.test` / `Playwright User`) before and after test runs
 - Playwright tests that can trigger AI-backed intake/generation must be simulator-gated with `skipIfWebIsNotSimulator(test)` or `skipIfWorkerStackIsNotSimulator(test)`
 - `docker-compose.dev.yml` is for local development; it overlays bind mounts and dev commands for `web` and `plan-worker` while base `docker-compose.yml` remains the production/integration-style stack

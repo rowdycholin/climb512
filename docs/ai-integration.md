@@ -118,7 +118,8 @@ There are currently two primary backend modes, plus an opt-in guardrails gateway
 ### Simulator/local
 
 - `ANTHROPIC_BASE_URL=http://simulator:8787`
-- intake uses deterministic local extraction via `AI_INTAKE_MODE=local`
+- guided intake goes to the local simulator service via `AI_INTAKE_MODE=simulator`
+- `AI_INTAKE_MODE=local` remains available as an in-web deterministic fallback for helper-level testing or debugging
 - generation goes to the local simulator service from both `web` and `plan-worker`
 - adjustment uses deterministic app-side fixtures
 
@@ -146,7 +147,7 @@ The NeMo service is behind an explicit Docker Compose profile and is not started
 docker compose --profile guardrails up -d --build guardrails
 ```
 
-When `AI_GUARDRAILS_MODE=intake`, the web app sends guided-intake model requests to `AI_GUARDRAILS_BASE_URL` even if `ANTHROPIC_BASE_URL` points at the simulator or `AI_INTAKE_MODE=local` is still set. This is intentional: guarded mode should fail visibly if NeMo is misconfigured instead of silently using the deterministic intake fallback. The plan worker, plan generation, and adjustment chat still use `ANTHROPIC_BASE_URL` directly.
+When `AI_GUARDRAILS_MODE=intake`, the web app sends guided-intake model requests to `AI_GUARDRAILS_BASE_URL` even if `ANTHROPIC_BASE_URL` points at the simulator or `AI_INTAKE_MODE=local|simulator` is set. This is intentional: guarded mode should fail visibly if NeMo is misconfigured instead of silently using a deterministic intake fallback. The plan worker, plan generation, and adjustment chat still use `ANTHROPIC_BASE_URL` directly.
 
 ## Environment variables
 
@@ -158,7 +159,8 @@ When `AI_GUARDRAILS_MODE=intake`, the web app sends guided-intake model requests
 | `ANTHROPIC_MAX_TOKENS` | output token cap |
 | `ANTHROPIC_INTAKE_MAX_TOKENS` | intake response token cap |
 | `ANTHROPIC_ADJUSTMENT_MAX_TOKENS` | adjustment response token cap |
-| `AI_INTAKE_MODE=local` | force deterministic local intake fallback |
+| `AI_INTAKE_MODE=simulator` | route guided intake to the OpenAI-compatible simulator service |
+| `AI_INTAKE_MODE=local` | force deterministic in-web intake fallback |
 | `AI_GUARDRAILS_MODE=off\|intake` | opt-in mode for the NeMo intake gateway |
 | `AI_GUARDRAILS_BASE_URL` | OpenAI-compatible NeMo Guardrails server base URL |
 
