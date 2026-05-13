@@ -1,5 +1,9 @@
-# Output rails are configured through the built-in `self check output` flow.
-#
-# The actual policy prompt lives in `guardrails/intake/prompts.yml`.
-# Keep these checks generic and avoid hard-coded sports, projects, races, or
-# exact question wording.
+define flow check intake output contract
+  $allowed = execute check_intake_output_contract
+
+  if not $allowed
+    if $config.enable_rails_exceptions
+      create event OutputRailException(message="Output not allowed. The deterministic intake output contract rail blocked the response.")
+    else
+      bot refuse to respond
+    stop

@@ -51,8 +51,8 @@ ROLE:
 - Run a flexible coach-led interview, not a rigid form.
 - Sound like a real coach with a calm, personable voice.
 - Include a brief coaching reaction, encouragement, or light joke before the question when it fits.
-- If the user asks what sports, disciplines, or options are available, answer directly and say the currently supported choices are climbing, running, cycling, and strength/conditioning training. Then ask them to choose one of those.
-- If the user's goal is unusually ambitious, acknowledge that with specific coaching awareness before asking the next question.
+- If the user asks what sports, disciplines, or options are available, answer directly and say the currently supported choices are climbing, running, cycling, and strength and conditioning training. Then ask them to choose one of those.
+- If the user's goal is specific, ambitious, or meaningful, react like a real coach before asking the next question. Use the actual goal in the acknowledgement instead of generic filler. For example: "That's a strong target", "That is a serious base to build from", "V7 is a real objective", or "A century ride gives us a clear target."
 - When the user's answer reveals something important, reflect it back briefly so they know you understood.
 - Keep personality concise: no speeches or hype monologues, but do not sound like a questionnaire.
 - Ask one primary question when more information is needed.
@@ -101,11 +101,11 @@ export const INTAKE_READY_MESSAGE =
   "I have enough information to build your plan. Click the magic wand button to generate it.";
 
 export const FINAL_INTAKE_REVIEW_QUESTION =
-  "Great, I have the main pieces. Is there anything else I should know about you or your goals before I am ready to generate the plan?";
+  "I have the main pieces for the plan. Anything else I should account for before I build it?";
 export const PREFERRED_WORKOUT_DAYS_QUESTION =
-  "Good, that gives me the weekly shape. Are there specific days you like to work out?";
+  "That gives me the weekly rhythm. Are there days you prefer for training?";
 export const PREFERRED_REST_DAYS_QUESTION =
-  "Got it. Are there specific days you would prefer as rest days?";
+  "Good to know. Any days you prefer to keep easier or fully off?";
 const GENERAL_FINAL_REVIEW_PATTERN = /\b(any other|anything else).*\b(constraints?|preferences?|account for|know)\b/i;
 
 const TEST_INVALID_AI_OUTPUT_MESSAGE = "__test_invalid_ai_output__";
@@ -330,19 +330,45 @@ function isOptionsOrClarificationQuestion(message: string) {
 function normalizeRecoveredSport(answer: string) {
   const cleaned = answer.trim();
   if (!cleaned) return undefined;
-  if (/\b(?:climb(?:ing)?|boulder(?:ing)?)\b/i.test(cleaned)) return "climbing";
-  if (/\b(?:run(?:ning)?|runner|5k|10k|marathon|half marathon)\b/i.test(cleaned)) return "running";
-  if (/\b(?:cycl(?:e|ing|ist)|bike|biking|road riding|mountain biking)\b/i.test(cleaned)) return "cycling";
-  if (/\b(?:strength(?:\/conditioning)?|conditioning|weight training|weightlifting|weight lifting|lifting|barbell)\b/i.test(cleaned)) return "strength training";
-  return cleaned.toLowerCase();
+  return inferActivityFamily(cleaned);
 }
 
 function hasSupportedSport(answer: string) {
-  return /\b(?:climb(?:ing)?|boulder(?:ing)?|run(?:ning)?|runner|5k|10k|marathon|cycl(?:e|ing|ist)|bike|biking|strength(?:\/conditioning)?|conditioning|weight training|weightlifting|weight lifting|lifting|barbell)\b/i.test(answer);
+  return Boolean(inferActivityFamily(answer));
 }
 
 function hasTrainingGoalLanguage(answer: string) {
-  return /\b(?:training|goal|build|develop|improve|increase|prepare|work on|energy systems?|endurance|capacity|power endurance|aerobic|anaerobic|strength|conditioning|fitness|performance)\b/i.test(answer);
+  return /\b(?:training|goal|build|develop|improve|increase|prepare|work on|energy systems?|endurance|capacity|power endurance|aerobic|anaerobic|strength|conditioning|fitness|performance|climb|send|redpoint|race|event|ride|route|ascent)\b/i.test(answer);
+}
+
+function inferActivityFamily(text: string | undefined) {
+  const value = text?.trim() ?? "";
+  if (!value) return undefined;
+  if (/\b(?:climb(?:ing)?|boulder(?:ing)?|route|crag|big\s*wall|multi[-\s]?pitch|ascent|send|redpoint|V(?:[0-9]|1[0-7])|5\.(?:[0-9]|1[0-5])(?:[abcd])?|WI[2-7][+-]?)\b/i.test(value)) return "climbing";
+  if (/\b(?:run(?:ning)?|runner|5k|10k|marathon|half marathon|mile|miles|jog|trail race|road race)\b/i.test(value)) return "running";
+  if (/\b(?:cycl(?:e|ing|ist)|bike|biking|ride|riding|century|gran fondo|criterium|road riding|mountain biking)\b/i.test(value)) return "cycling";
+  if (/\b(?:strength(?: and conditioning|\/conditioning)?|conditioning|weight training|weightlifting|weight lifting|lifting|barbell|squat|deadlift|bench press|press|pull-up|hypertrophy)\b/i.test(value)) return "strength training";
+  return undefined;
+}
+
+function sportGoalConflict(currentSport: string | undefined, goalText: string | undefined) {
+  const currentFamily = inferActivityFamily(currentSport);
+  const goalFamily = inferActivityFamily(goalText);
+  if (!currentFamily || !goalFamily || currentFamily === goalFamily) return undefined;
+  return { currentFamily, goalFamily };
+}
+
+function sportGoalConflictQuestion(currentSport: string, goalSport: string) {
+  return `That sounds like a ${goalSport} goal, but we started with ${currentSport}. Should I switch the plan to ${goalSport}, or keep ${currentSport} as support for that goal?`;
+}
+
+function parseSportGoalConflictQuestion(message: string) {
+  const match = message.match(/sounds like a ([a-z ]+) goal, but we started with ([a-z ]+)\. Should I switch the plan to ([a-z ]+), or keep ([a-z ]+) as support/i);
+  if (!match) return undefined;
+  return {
+    goalSport: match[1].trim(),
+    currentSport: match[2].trim(),
+  };
 }
 
 function applySportAndGoalAnswerHints(draft: PartialIntakeDraft, answer: string | undefined) {
@@ -377,12 +403,27 @@ function applyConversationRecoveryHints(draft: PartialIntakeDraft, input: PlanIn
   const conversation = allUserText(input.messages, input.userMessage);
   const latest = input.userMessage.trim();
   const previousPrompt = latestAssistantMessage(input.messages);
+  const sportClarification = parseSportGoalConflictQuestion(previousPrompt);
   const sportAnswer = answerAfterAssistantPrompt(
     input.messages,
     /\b(?:sport|discipline|plan type|which one would you like to train for|climbing, running, cycling|strength\/conditioning)\b/i,
   );
   const goalAnswer = answerAfterAssistantPrompt(input.messages, /\b(?:main goal|goal right now|goal|training for|hoping to accomplish)\b/i);
   const levelAnswer = answerAfterAssistantPrompt(input.messages, /\b(?:current.*level|training level|fitness level|experience level|how would you describe your level)\b/i);
+
+  if (sportClarification) {
+    const previousGoal = [...input.messages].reverse().find((message) => message.role === "user")?.content.trim();
+    const switches = /\b(?:switch|change|use|make it|yes)\b/i.test(latest) && new RegExp(`\\b${sportClarification.goalSport}\\b`, "i").test(latest);
+    const keeps = /\b(?:keep|support|cross[-\s]?train|for support|stay with)\b/i.test(latest) || new RegExp(`\\b${sportClarification.currentSport}\\b`, "i").test(latest);
+    if (switches) {
+      draft.sport = sportClarification.goalSport;
+      if (previousGoal && !draft.goalDescription) draft.goalDescription = previousGoal;
+    } else if (keeps) {
+      draft.sport = sportClarification.currentSport;
+      if (previousGoal && !draft.goalDescription) draft.goalDescription = previousGoal;
+      if (previousGoal) appendPlanStructureNote(draft, `${sportClarification.currentSport} should support this goal: ${previousGoal}`);
+    }
+  }
 
   applySportAndGoalAnswerHints(draft, sportAnswer);
 
@@ -400,6 +441,17 @@ function applyConversationRecoveryHints(draft: PartialIntakeDraft, input: PlanIn
     draft.goalDescription = goalAnswer;
   }
 
+  if (
+    draft.goalType === "event" &&
+    draft.goalDescription &&
+    eventGoalNeedsDetails(draft) &&
+    /\b(?:what race distance|what running event|what ride|what route|what strength|what event|what target)\b/i.test(previousPrompt)
+  ) {
+    draft.goalDescription = latest;
+    const targetLevel = latest.match(/\b(?:5k|10k|half marathon|marathon|\d+(?:\.\d+)?\s*(?:miles?|km|kilometers?))\b/i);
+    if (targetLevel && !draft.targetLevel) draft.targetLevel = targetLevel[0];
+  }
+
   if (!draft.currentLevel && levelAnswer && !isScheduleOnlyAnswer(levelAnswer)) {
     draft.currentLevel = levelAnswer;
   }
@@ -407,6 +459,16 @@ function applyConversationRecoveryHints(draft: PartialIntakeDraft, input: PlanIn
   if (!draft.daysPerWeek) {
     const days = conversation.match(/\b([1-7])\s*(?:day|days)(?:\s*(?:per|\/)\s*week)?\b/i);
     if (days) draft.daysPerWeek = parseInt(days[1], 10);
+  }
+
+  if (!draft.targetDate && /\b(?:when is|target date|what date|date for|do you have a target date)\b/i.test(previousPrompt)) {
+    const targetDate = cleanDate(latest, input.clientToday);
+    if (targetDate) {
+      draft.goalType = "event";
+      draft.targetDate = targetDate;
+      const distance = latest.match(/\b(\d+(?:\.\d+)?)\s*(miles?|km|kilometers?)\b/i);
+      if (distance && !draft.targetLevel) draft.targetLevel = `${distance[1]} ${distance[2]}`;
+    }
   }
 
   const explicitWeeks = latest.match(/\b(\d{1,2})\s*(?:week|weeks)\b/i);
@@ -417,6 +479,9 @@ function applyConversationRecoveryHints(draft: PartialIntakeDraft, input: PlanIn
     if (confirmedWeeks && /\b(?:confirm|correct|instead|you want|just to confirm)\b/i.test(previousPrompt)) {
       draft.blockLengthWeeks = parseInt(confirmedWeeks[1], 10);
     }
+  } else if (/\b(?:how many weeks|block|runway|training block)\b/i.test(previousPrompt)) {
+    const bareWeeks = latest.match(/^\s*(\d{1,2})\s*\.?$/);
+    if (bareWeeks) draft.blockLengthWeeks = parseInt(bareWeeks[1], 10);
   }
 
   if (!draft.constraints && asksAboutConstraints(previousPrompt) && /\b(?:no|none|nope|nothing|no injuries|no pain)\b/i.test(latest)) {
@@ -536,7 +601,9 @@ export function looksLikeTruncatedAssistantMessage(message: string) {
 }
 
 function toIntakeResponse(response: PlanIntakeAiResponse): IntakeResponse {
-  if (response.planRequestDraft.daysPerWeek && !response.planRequestDraft.preferredWorkoutDaysAsked) {
+  const requiredFieldsComplete = requiredFieldStatus(response.planRequestDraft).length === 0;
+
+  if (requiredFieldsComplete && response.planRequestDraft.daysPerWeek && !response.planRequestDraft.preferredWorkoutDaysAsked) {
     return {
       draft: {
         ...response.planRequestDraft,
@@ -548,7 +615,7 @@ function toIntakeResponse(response: PlanIntakeAiResponse): IntakeResponse {
     };
   }
 
-  if (response.planRequestDraft.daysPerWeek && response.planRequestDraft.preferredWorkoutDaysAsked && !response.planRequestDraft.preferredRestDaysAsked) {
+  if (requiredFieldsComplete && response.planRequestDraft.daysPerWeek && response.planRequestDraft.preferredWorkoutDaysAsked && !response.planRequestDraft.preferredRestDaysAsked) {
     return {
       draft: {
         ...response.planRequestDraft,
@@ -600,8 +667,12 @@ function isScheduleOnlyAnswer(value: string) {
 
 function cleanCurrentLevel(value: unknown) {
   const text = cleanString(value);
-  if (!text || isScheduleOnlyAnswer(text)) return undefined;
+  if (!text || isScheduleOnlyAnswer(text) || isSportOnlyAnswer(text)) return undefined;
   return text;
+}
+
+function isSportOnlyAnswer(value: string) {
+  return /^(?:climbing|running|cycling|strength(?:\s+and\s+conditioning|\s+training)?|strength\/conditioning)$/i.test(value.trim());
 }
 
 function todayIsoDate(clientToday?: string) {
@@ -708,12 +779,13 @@ function nextWeekdayDate(value: string, clientToday?: string) {
 function cleanDate(value: unknown, clientToday?: string) {
   const text = cleanString(value);
   if (!text) return undefined;
-  if (/^\d{4}-\d{2}-\d{2}$/.test(text)) return rollForwardIfPast(text, clientToday);
+  const iso = text.match(/\b(\d{4}-\d{2}-\d{2})\b/);
+  if (iso) return rollForwardIfPast(iso[1], clientToday);
   if (/^(today|now|asap|as soon as possible)$/i.test(text)) return todayIsoDate(clientToday);
   const weekdayDate = nextWeekdayDate(text, clientToday);
   if (weekdayDate) return weekdayDate;
 
-  const slash = text.match(/^(\d{1,2})\/(\d{1,2})(?:\/(\d{2}|\d{4}))?$/);
+  const slash = text.match(/\b(\d{1,2})\/(\d{1,2})(?:\/(\d{2}|\d{4}))?\b/);
   if (slash) {
     const month = parseInt(slash[1], 10);
     const day = parseInt(slash[2], 10);
@@ -899,6 +971,106 @@ function strengthTrainingAnswered(draft: PartialIntakeDraft) {
   return typeof draft.strengthTraining?.include === "boolean";
 }
 
+function eventGoalNeedsDetails(draft: PartialIntakeDraft) {
+  if (draft.goalType !== "event") return false;
+  const goal = draft.goalDescription?.trim() ?? "";
+  const vagueGoal = !goal || /^(?:training\s+for\s+)?(?:an?\s+)?(?:race|event|competition|deadline|trip|ride|route|objective|meet|test|testing date)\.?$/i.test(goal);
+  return vagueGoal || !draft.targetDate;
+}
+
+function eventGoalDetailsQuestion(draft: PartialIntakeDraft) {
+  const sport = draft.sport?.toLowerCase() ?? "";
+  const goal = draft.goalDescription?.trim() ?? "";
+  const vagueGoal = !goal || /^(?:training\s+for\s+)?(?:an?\s+)?(?:race|event|competition|deadline|trip|ride|route|objective|meet|test|testing date)\.?$/i.test(goal);
+
+  if (vagueGoal) {
+    if (/\brun/.test(sport)) return "A race gives us a real target to build around. What race distance or running event are you training for?";
+    if (/\bcycl/.test(sport) || /\bbik/.test(sport)) return "A ride or race gives us a real target to build around. What ride or race are you training for?";
+    if (/\bclimb/.test(sport)) return "That objective is worth planning around carefully. What route, grade, trip, or competition are you training for?";
+    if (/\b(strength|weight training|lifting|powerlifting|conditioning)\b/.test(sport)) return "That target is worth programming carefully. What strength, conditioning, or testing target are you training for?";
+    return "That gives us a real target to build around. What event or target are you training for?";
+  }
+
+  if (/\brun/.test(sport)) return "When is the race?";
+  if (/\bcycl/.test(sport) || /\bbik/.test(sport)) return "When is the ride or race?";
+  if (/\bclimb/.test(sport)) return "Do you have a target date for that objective?";
+  if (/\b(strength|weight training|lifting|powerlifting|conditioning)\b/.test(sport)) return "Do you have a target date or testing date?";
+  return "Do you have a target date?";
+}
+
+function asksForLowerPriorityEventDetail(message: string) {
+  return /\b(current level|current training level|how many days|days per week|training block|how many weeks|block length|equipment|injur|limitations)\b/i.test(message);
+}
+
+function sportFamily(draft: PartialIntakeDraft | Record<string, unknown>) {
+  const sport = typeof draft.sport === "string" ? draft.sport.toLowerCase() : "";
+  const goal = typeof draft.goalDescription === "string" ? draft.goalDescription.toLowerCase() : "";
+  const inferred = inferActivityFamily(sport) ?? inferActivityFamily(goal);
+  if (inferred === "strength training") return "strength";
+  if (inferred) return inferred;
+  return "general";
+}
+
+function activityAwareQuestion(draft: PartialIntakeDraft | Record<string, unknown>, next: string) {
+  const family = sportFamily(draft);
+
+  if (next === "sport") {
+    return "Let's point the plan at the right thing first. Are we training for climbing, running, cycling, or strength and conditioning?";
+  }
+
+  if (next === "goalDescription") {
+    if (family === "climbing") return "Climbing it is. What climbing goal should this plan move you toward: a route or boulder, a trip or competition, a grade, a skill, or general climbing fitness?";
+    if (family === "running") return "Running it is. What running goal should this plan build toward: a race or distance, faster times, more weekly mileage, consistency, or general fitness?";
+    if (family === "cycling") return "Cycling it is. What cycling goal should this plan support: a ride or race, longer distance, more power, consistency, or general fitness?";
+    if (family === "strength") return "Strength and conditioning it is. What goal should this plan build toward: strength, muscle, conditioning, movement quality, testing numbers, or sport support?";
+    return "Good, let's give the plan a clear goal. Are you training for an event, building general fitness, improving a skill, or working toward a specific target?";
+  }
+
+  if (next === "goalType") {
+    return "That gives me the target. Is it tied to a specific event or date, or is this an ongoing training goal?";
+  }
+
+  if (next === "blockLengthWeeks") {
+    if (eventGoalNeedsDetails(draft as PartialIntakeDraft)) return eventGoalDetailsQuestion(draft as PartialIntakeDraft);
+    return "Let's choose a useful runway. How many weeks should this block run?";
+  }
+
+  if (next === "daysPerWeek") {
+    return "Good, now let's make it fit real life. How many days per week can you train and still recover well?";
+  }
+
+  if (next === "startDate") {
+    return "Let's anchor the first week. When would you like to start?";
+  }
+
+  if (next === "currentLevel") {
+    if (family === "climbing") return "To pitch the sessions correctly, what is your current climbing level?";
+    if (family === "running") return "To set the right load, what is your current running level or weekly mileage?";
+    if (family === "cycling") return "To set the right volume, what is your current cycling level or weekly riding time?";
+    if (family === "strength") return "To load this appropriately, what is your current strength and conditioning experience?";
+    return "To set the right starting point, what is your current training level?";
+  }
+
+  if (next === "equipment") {
+    if (family === "climbing") return "Now I can match the sessions to your setup. What climbing and training equipment do you have access to?";
+    if (family === "running") return "Now I can match the plan to your setup. What running equipment or training tools do you have?";
+    if (family === "cycling") return "Now I can match the plan to your setup. What bike, trainer, gym, or other tools do you have?";
+    if (family === "strength") return "Now I can match the work to your setup. What strength and conditioning equipment do you have access to?";
+    return "Now I can match the work to your setup. What equipment do you have available?";
+  }
+
+  if (next === "constraints") {
+    return "Before I load this up, I want to keep it safe. Any injuries, pain, or movements I should account for?";
+  }
+
+  if (next === "strengthTraining") {
+    if (family === "strength") return "Should this be a dedicated strength and conditioning plan, or should strength just support another activity?";
+    return "Do you want strength and conditioning included, or should this stay focused on the main sport?";
+  }
+
+  return FINAL_INTAKE_REVIEW_QUESTION;
+}
+
 function asksAboutCompletedField(message: string, draft: PartialIntakeDraft) {
   const normalized = message.toLowerCase();
   const checks: Array<[boolean, RegExp]> = [
@@ -920,6 +1092,15 @@ function asksAboutCompletedField(message: string, draft: PartialIntakeDraft) {
 export function nextNonDuplicateQuestion(response: PlanIntakeAiResponse) {
   const draft = withInferredStrengthTraining(response.planRequestDraft);
   const message = firstQuestionOnly(response.message);
+  const conflict = sportGoalConflict(draft.sport, draft.goalDescription);
+  if (conflict) {
+    return sportGoalConflictQuestion(conflict.currentFamily, conflict.goalFamily);
+  }
+
+  if (!message.trim()) {
+    return nextQuestionForDraft(draft);
+  }
+
   if (looksLikeTruncatedAssistantMessage(message)) {
     return nextQuestionForDraft(draft);
   }
@@ -930,6 +1111,10 @@ export function nextNonDuplicateQuestion(response: PlanIntakeAiResponse) {
     message === FINAL_INTAKE_REVIEW_QUESTION
   ) {
     return message;
+  }
+
+  if (eventGoalNeedsDetails(draft) && asksForLowerPriorityEventDetail(message)) {
+    return eventGoalDetailsQuestion(draft);
   }
 
   if (asksAboutCompletedField(message, draft)) {
@@ -986,17 +1171,7 @@ function requiredFieldStatus(draft: PartialIntakeDraft) {
 function nextQuestionForDraft(draft: PartialIntakeDraft | Record<string, unknown>) {
   const missing = requiredFieldStatus(draft as PartialIntakeDraft);
   const next = missing[0];
-  if (next === "sport") return "Let’s build this around the right target. What sport or discipline would you like to train for?";
-  if (next === "goalDescription") return "Got it. What goal do you want this training plan to support?";
-  if (next === "goalType") return "That helps. Is this for a specific event or an ongoing training goal?";
-  if (next === "blockLengthWeeks") return "Good, now we need the size of the block. How many weeks should this training block be?";
-  if (next === "daysPerWeek") return "Nice, that gives me the direction. How many days per week can you train?";
-  if (next === "startDate") return "Perfect, let’s anchor this on the calendar. When would you like to start?";
-  if (next === "currentLevel") return "Good context. What is your current training level?";
-  if (next === "equipment") return "Great, now I can match the work to what you actually have. What equipment do you have available?";
-  if (next === "constraints") return "Before I load this up, I want to keep it sane. Do you have any injuries or pain I should account for?";
-  if (next === "strengthTraining") return "One more programming choice. Do you want strength training included in this plan?";
-  return FINAL_INTAKE_REVIEW_QUESTION;
+  return activityAwareQuestion(draft, next);
 }
 
 export function buildCoachIntakePrompt(input: PlanIntakeAiInput) {
@@ -1039,9 +1214,11 @@ COACHING INSTRUCTIONS:
 - You are ${coachName}, the user's personal training coach.
 - Keep the tone personal, practical, and conversational.
 - Do not sound like a form. Default to a short coach-style reply before the question.
-- If the user asks what their options are for sport or plan type, list only these supported choices: climbing, running, cycling, and strength/conditioning training. Do not mutate the draft unless the user chooses one.
-- If the user chooses a sport outside climbing, running, cycling, or strength/conditioning training, say it is not supported yet and ask them to choose one of the supported options.
-- If the user names a difficult objective, acknowledge the ambition or specificity in plain language before continuing the intake.
+- If the user asks what their options are for sport or plan type, list only these supported choices: climbing, running, cycling, and strength and conditioning training. Do not mutate the draft unless the user chooses one.
+- If the user chooses a sport outside climbing, running, cycling, or strength and conditioning training, say it is not supported yet and ask them to choose one of the supported options.
+- If the user names a specific, ambitious, or meaningful objective, acknowledge it in plain language before continuing the intake. Make the acknowledgement specific to their goal, level, or training history. Do not use empty filler like "Great" or "Good call" by itself.
+- Good acknowledgements sound like: "A 10K gives us a clear target", "Fifty miles a week is a serious base", "V7 is a real objective", "A century ride is a big aerobic day", or "A strength test gives us something concrete to peak for."
+- After acknowledging the goal, ask the single most useful next question.
 - It is okay to show a little humor, warmth, or coaching confidence, but keep it grounded and training-focused.
 - A good message has this shape: one or two short coaching sentences, then one clear next question.
 - Ask only one question total. Acknowledge the previous answer in a friendly way, then ask one clear question about one topic.
@@ -1050,6 +1227,7 @@ COACHING INSTRUCTIONS:
 - If CURRENT_PLAN_REQUEST_DRAFT_JSON already has sport, goalDescription, schedule, level, startDate, equipment, constraints, or strengthTraining, do not ask for that same field again unless the user explicitly says they want to change it.
 - If the user gives a combined first answer with a supported sport and training focus, such as "energy systems training for climbing", set sport to the supported sport, preserve the full answer as goalDescription, add the specific focus to trainingFocus when possible, and do not ask the generic goal question again.
 - If the user gives a nuanced goal that differs from the initial discipline, reconcile it instead of resetting the interview. For example, bouldering as training for a big wall climb should stay sport "climbing" and preserve the big wall goal/details in goalDescription and planStructureNotes.
+- If the latest goal clearly belongs to a different supported activity family than the selected sport, pause and ask whether to switch the plan to that activity or keep the selected sport as support. Do not continue collecting block length, schedule, equipment, or level until that is clarified.
 - Preserve specific day-by-day requests, preferred session order, workout details, and "do X on Monday" style instructions in planStructureNotes.
 - If planStructureNotes already exists, append or update it with new relevant preferences instead of replacing useful details.
 - If the user's named-day preferences appear to conflict with daysPerWeek, acknowledge the conflict and ask one clarifying question about priority before continuing.
@@ -1058,6 +1236,12 @@ COACHING INSTRUCTIONS:
 - Treat MISSING_REQUIRED_FIELDS as background state, not as a script or mandatory next-question order.
 - Ask one natural follow-up question that would most improve the plan given the latest answer and current draft.
 - Do not ask a stack of intake questions. If several fields are missing, choose the one that best fits the conversation.
+- Avoid checklist transitions like "Great", "That helps", "One more thing", or "Now we need" unless the words are tied to the user's actual answer.
+- The next question should say why it matters in coach terms: load, recovery, equipment fit, event target, weekly rhythm, or safety.
+- Prefer activity-aware wording: routes/projects for climbing, distance/mileage for running, rides/volume for cycling, and strength and conditioning experience for strength plans.
+- For race or event goals, do not move on to level, weekly schedule, equipment, or block length until you know the race/event/objective and the target date or that there is no date.
+- If the user says they are training for "a race" or "an event" without details, ask what race/event and date before asking about current level.
+- If the user asks why you have not asked what race/event they are training for, acknowledge that and ask for the race/event and date.
 - Infer reasonable structured values from natural answers instead of asking a generic checklist question when the answer already provides enough detail.
 - Before marking ready, make sure the user has had a clear chance to mention injuries, pain, movements to avoid, exercises they like, and exercises they dislike.
 - Do not invent empty constraints. Only set constraints to empty arrays after the user answers that they have no injuries, limitations, pain, or exercises to avoid.

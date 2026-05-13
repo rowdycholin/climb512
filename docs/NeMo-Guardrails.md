@@ -534,6 +534,38 @@ custom deterministic input rail
 
 This keeps NeMo as the centralized guardrail gateway, moves more guardrail policy out of the web server, and should reduce the extra live NeMo latency without weakening the app's final schema and readiness guarantees.
 
+### 2026-05-11 Implementation Result
+
+Recommendations 1 and 2 are now implemented for guided intake.
+
+Implemented changes:
+
+- `guardrails/intake/actions.py` now contains deterministic input and output actions.
+- `check_intake_input` extracts `LATEST_USER_MESSAGE` from the app's dynamic prompt before applying policy checks, so NeMo evaluates the athlete's answer instead of the whole app prompt.
+- The input rail now returns `allow`, `block`, or `needs_review`.
+- Normal intake answers fast-path through NeMo without an input LLM self-check.
+- Obvious unsafe or unrelated requests are blocked before the main model call.
+- Ambiguous policy/configuration wording can still escalate to NeMo's built-in LLM `self_check_input`.
+- `check_intake_output_contract` validates the response contract deterministically instead of calling the output LLM self-check.
+- The output rail validates both raw JSON and a single markdown-fenced JSON object, because the live OpenRouter/Anthropic route can wrap otherwise valid JSON in a code fence. The TypeScript app still performs the final parse and schema validation.
+- `guardrails/intake/config.template.yml` now uses `check intake input` and `check intake output contract` instead of always-on `self check input` and `self check output`.
+- Focused Python unit tests live in `guardrails/intake/actions_test.py`.
+
+Validation run:
+
+```bash
+python -m unittest guardrails/intake/actions_test.py
+docker compose exec guardrails sh -lc "cd /configs-src/intake && python -m unittest discover -p '*_test.py'"
+cd testing && npm run test:intake-timing
+```
+
+Result:
+
+- Python action tests: 10 passed.
+- Playwright guided-intake timing spec: 4 passed across climbing, cycling, running, and strength-and-conditioning.
+- Successful guarded intake turns now show one backend model call in NeMo logs instead of the previous input self-check + main response + output self-check pattern.
+- Deterministic input/output action timings are currently 0-1ms in the guardrails logs.
+
 ## What NeMo Provides
 
 NeMo Guardrails is an open-source Python package for adding programmable guardrails to LLM applications. NVIDIA documents it as a development-time library and also as a production microservice configuration format using YAML and Colang. Configurations are portable between the library and microservice.

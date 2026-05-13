@@ -33,7 +33,10 @@ function PendingAssistantBubble({ longWait }: { longWait: boolean }) {
 }
 
 function draftFacts(draft: PartialIntakeDraft) {
-  const currentLevel = draft.currentLevel && !isScheduleOnlyText(draft.currentLevel) ? draft.currentLevel : null;
+  const currentLevel =
+    draft.currentLevel && !isScheduleOnlyText(draft.currentLevel) && !isSportOnlyText(draft.currentLevel)
+      ? draft.currentLevel
+      : null;
   return [
     draft.sport ? `Sport: ${draft.sport}` : null,
     draft.goalDescription ? `Goal: ${draft.goalDescription}` : null,
@@ -49,6 +52,10 @@ function draftFacts(draft: PartialIntakeDraft) {
 function isScheduleOnlyText(value: string) {
   const normalized = value.trim().toLowerCase().replace(/[.!?]+$/g, "");
   return /^(?:i\s+can\s+)?(?:train|run|ride|lift|climb)?\s*(?:[1-7]|one|two|three|four|five|six|seven)\s*(?:x|times?|days?|sessions?)(?:\s*(?:per|a|\/)\s*week| weekly)?$/.test(normalized);
+}
+
+function isSportOnlyText(value: string) {
+  return /^(?:climbing|running|cycling|strength(?:\s+and\s+conditioning|\s+training)?|strength\/conditioning)$/i.test(value.trim());
 }
 
 function localIsoDate() {

@@ -95,7 +95,7 @@ function parseList(text: string) {
 }
 
 function detectDiscipline(text: string) {
-  if (/\b(?:nose|el cap|big wall|big-wall|multi pitch|multipitch)\b/i.test(text)) return "trad";
+  if (/\b(?:big wall|big-wall|multi pitch|multipitch|multi[-\s]?pitch|free climb|long route)\b/i.test(text)) return "trad";
   if (/\bboulder/i.test(text)) return "bouldering";
   return CLIMBING_DISCIPLINES.find((discipline) => new RegExp(`\\b${discipline}\\b`, "i").test(text));
 }
@@ -129,6 +129,8 @@ function isScheduleOnlyAnswer(text: string) {
 
 function normalizeSport(text: string) {
   if (/\bclimb(?:ing)?\b/i.test(text)) return "climbing";
+  if (/\brun(?:ning)?\b/i.test(text)) return "running";
+  if (/\b(?:cycl(?:e|ing|ist)|bike|biking|ride)\b/i.test(text)) return "cycling";
   if (/\bweight|strength|lifting|gym\b/i.test(text)) return "strength training";
   return text.trim().toLowerCase();
 }
@@ -169,7 +171,9 @@ function applyGenericExtraction(draft: PartialIntakeDraft, text: string) {
   const levels = detectLevels(text);
   if (levels[0]) draft.currentLevel = levels[0];
   if (levels[1]) draft.targetLevel = levels[1];
-  if (!draft.targetLevel && /\b(?:nose|el cap)\b/i.test(text)) draft.targetLevel = "5.9 C2";
+  if (!draft.targetLevel && /\b(?:big wall|big-wall|multi pitch|multipitch|multi[-\s]?pitch|free climb|long route)\b/i.test(text)) {
+    draft.targetLevel = "big wall objective";
+  }
 
   const days = text.match(/\b(\d)\s*(?:day|days)(?:\s*(?:per|\/)\s*week)?\b/i);
   if (days) draft.daysPerWeek = clampNumber(parseInt(days[1], 10), 1, 7);
@@ -191,7 +195,7 @@ function applyStepAnswer(draft: PartialIntakeDraft, step: IntakeStep, text: stri
 
   if (step === "goal") {
     draft.goalDescription = text;
-    if (/\b(?:trip|route|race|event|deadline|goal route|nose|el cap)\b/i.test(text)) draft.goalType = "event";
+    if (/\b(?:trip|route|race|event|deadline|goal route|big wall|big-wall|multi pitch|multipitch|multi[-\s]?pitch|free climb|long route)\b/i.test(text)) draft.goalType = "event";
     if (/\b(?:ongoing|stay in shape|maintain|get better|general)\b/i.test(text)) draft.goalType = "ongoing";
     if (/\b(?:strength|stronger|weights|lifting)\b/i.test(text)) draft.goalType = "strength";
     return;

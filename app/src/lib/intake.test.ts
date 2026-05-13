@@ -13,7 +13,7 @@ describe("intake progression", () => {
     });
 
     expect(response.draft.intakeTemplateId).toBe("climbing_strength");
-    expect(response.assistantMessage).toBe("What climbing goal do you want to train for?");
+    expect(response.assistantMessage).toBe("Climbing it is. What climbing goal should this plan move you toward: a route or boulder, a trip or competition, a grade, a skill, or general climbing fitness?");
   });
 
   test("uses the running template after a running sport answer", () => {
@@ -23,7 +23,7 @@ describe("intake progression", () => {
     });
 
     expect(response.draft.intakeTemplateId).toBe("running");
-    expect(response.assistantMessage).toBe("What running goal do you want to train for?");
+    expect(response.assistantMessage).toBe("Running it is. What running goal should this plan build toward: a race or distance, faster times, more weekly mileage, consistency, or general fitness?");
   });
 
   test("uses the strength template after a strength sport answer", () => {
@@ -33,7 +33,7 @@ describe("intake progression", () => {
     });
 
     expect(response.draft.intakeTemplateId).toBe("strength_training");
-    expect(response.assistantMessage).toBe("What strength goal do you want to train for?");
+    expect(response.assistantMessage).toBe("Strength and conditioning it is. What goal should this plan build toward: strength, muscle, conditioning, movement quality, testing numbers, or sport support?");
   });
 
   test("falls back to generic progression for unknown sports", () => {
@@ -43,7 +43,7 @@ describe("intake progression", () => {
     });
 
     expect(response.draft.intakeTemplateId).toBe("generic_training");
-    expect(response.assistantMessage).toBe("What is the main goal for this training plan?");
+    expect(response.assistantMessage).toBe("Good, let's give the plan a clear goal. Are you training for an event, building general fitness, improving a skill, or working toward a specific target?");
   });
 
   test("progresses through required running fields without calling external services", () => {

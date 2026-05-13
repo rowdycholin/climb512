@@ -1,2 +1,21 @@
 define bot refuse to respond
   "I can't help with that request. Let's keep this focused on building your training plan: please answer the current training-plan question."
+
+define flow check intake input
+  $decision = execute check_intake_input
+
+  if $decision == "block"
+    if $config.enable_rails_exceptions
+      create event InputRailException(message="Input not allowed. The deterministic intake input rail blocked the message.")
+    else
+      bot refuse to respond
+    stop
+
+  if $decision == "needs_review"
+    $allowed = execute self_check_input
+    if not $allowed
+      if $config.enable_rails_exceptions
+        create event InputRailException(message="Input not allowed. The LLM intake input rail blocked the message.")
+      else
+        bot refuse to respond
+      stop

@@ -4,6 +4,7 @@ models:
     model: __MAIN_MODEL__
     parameters:
       openai_api_base: __OPENAI_BASE_URL__
+      temperature: 0
 
 instructions:
   - type: general
@@ -17,7 +18,7 @@ instructions:
 rails:
   input:
     flows:
-      - self check input
+      - check intake input
   output:
     flows:
-      - self check output
+      - check intake output contract

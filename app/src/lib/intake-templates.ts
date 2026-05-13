@@ -20,52 +20,52 @@ export interface IntakeTemplate {
 const sharedQuestions: IntakeQuestion[] = [
   {
     step: "sport",
-    prompt: "For what sport or discipline would you like to create a training plan?",
+    prompt: "Let's point the plan at the right thing first. Are we training for climbing, running, cycling, or strength and conditioning?",
     isComplete: (draft) => Boolean(draft.sport),
   },
   {
     step: "goal",
-    prompt: "What is the main goal for this training plan?",
+    prompt: "Good, let's give the plan a clear goal. Are you training for an event, building general fitness, improving a skill, or working toward a specific target?",
     isComplete: (draft) => Boolean(draft.goalDescription),
   },
   {
     step: "timeline",
-    prompt: "Is there a specific date or deadline?",
+    prompt: "Is this tied to a specific event or date, or is it an ongoing training goal?",
     isComplete: (draft) => draft.goalType === "ongoing" || Boolean(draft.targetDate),
   },
   {
     step: "blockLength",
-    prompt: "How long should this training block be? 4, 8, 12, or 16 weeks is a good starting point.",
+    prompt: "Let's choose a useful runway. How many weeks should this block run?",
     isComplete: (draft) => Boolean(draft.blockLengthWeeks),
   },
   {
     step: "equipment",
-    prompt: "What equipment do you have access to?",
+    prompt: "Now I can match the work to your setup. What equipment do you have available?",
     isComplete: (draft) => (draft.equipment?.length ?? 0) > 0,
   },
   {
     step: "strength",
-    prompt: "Do you want weight training included?",
+    prompt: "Do you want strength and conditioning included, or should this stay focused on the main sport?",
     isComplete: (draft) => draft.strengthTraining?.include !== undefined,
   },
   {
     step: "start",
-    prompt: "Ok, I can work with that. When would you like to start?",
+    prompt: "Let's anchor the first week. When would you like to start?",
     isComplete: (draft) => Boolean(draft.startDate),
   },
   {
     step: "level",
-    prompt: "What is your current comfortable level?",
+    prompt: "To set the right starting point, what is your current training level?",
     isComplete: (draft) => Boolean(draft.currentLevel),
   },
   {
     step: "schedule",
-    prompt: "How many days per week can you realistically train?",
+    prompt: "Good, now let's make it fit real life. How many days per week can you train and still recover well?",
     isComplete: (draft) => Boolean(draft.daysPerWeek),
   },
   {
     step: "injuries",
-    prompt: "Do you have any injuries or limitations?",
+    prompt: "Before I load this up, I want to keep it safe. Any injuries, pain, or movements I should account for?",
     isComplete: (draft) => Boolean(draft.constraints),
   },
   {
@@ -79,21 +79,21 @@ const climbingStrengthQuestions: IntakeQuestion[] = sharedQuestions.map((questio
   if (question.step === "goal") {
     return {
       ...question,
-      prompt: "What climbing goal do you want to train for?",
+      prompt: "Climbing it is. What climbing goal should this plan move you toward: a route or boulder, a trip or competition, a grade, a skill, or general climbing fitness?",
     };
   }
 
   if (question.step === "strength") {
     return {
       ...question,
-      prompt: "Do you want weight training included with the climbing plan?",
+      prompt: "Do you want strength and conditioning included, or should this stay focused on climbing?",
     };
   }
 
   if (question.step === "level") {
     return {
       ...question,
-      prompt: "What is your current comfortable climbing level?",
+      prompt: "To pitch the sessions correctly, what is your current climbing level?",
     };
   }
 
@@ -131,49 +131,102 @@ const runningQuestions: IntakeQuestion[] = sharedQuestions.map((question) => {
   if (question.step === "goal") {
     return {
       ...question,
-      prompt: "What running goal do you want to train for?",
+      prompt: "Running it is. What running goal should this plan build toward: a race or distance, faster times, more weekly mileage, consistency, or general fitness?",
     };
   }
 
   if (question.step === "timeline") {
     return {
       ...question,
-      prompt: "Do you have a race date or deadline?",
+      prompt: "Is there a race date or deadline, or is this an ongoing running block?",
     };
   }
 
   if (question.step === "equipment") {
     return {
       ...question,
-      prompt: "What running equipment or training tools do you have?",
+      prompt: "Now I can match the plan to your setup. What running equipment or training tools do you have?",
     };
   }
 
   if (question.step === "strength") {
     return {
       ...question,
-      prompt: "Do you want strength training included with the running plan?",
+      prompt: "Do you want strength and conditioning included, or should this stay focused on running?",
     };
   }
 
   if (question.step === "level") {
     return {
       ...question,
-      prompt: "What is your current weekly running volume?",
+      prompt: "To set the right load, what is your current running level or weekly mileage?",
     };
   }
 
   if (question.step === "schedule") {
     return {
       ...question,
-      prompt: "How many days per week can you run or train?",
+      prompt: "Good, now let's make it fit real life. How many days per week can you run or train and still recover well?",
     };
   }
 
   if (question.step === "injuries") {
     return {
       ...question,
-      prompt: "Do you have any running injuries or limitations?",
+      prompt: "Before I load this up, I want to keep it safe. Any running injuries, pain, or movements I should account for?",
+    };
+  }
+
+  return question;
+});
+
+const cyclingQuestions: IntakeQuestion[] = sharedQuestions.map((question) => {
+  if (question.step === "goal") {
+    return {
+      ...question,
+      prompt: "Cycling it is. What cycling goal should this plan support: a ride or race, longer distance, more power, consistency, or general fitness?",
+    };
+  }
+
+  if (question.step === "timeline") {
+    return {
+      ...question,
+      prompt: "Is there a ride, race date, or deadline, or is this an ongoing cycling block?",
+    };
+  }
+
+  if (question.step === "equipment") {
+    return {
+      ...question,
+      prompt: "Now I can match the plan to your setup. What bike, trainer, gym, or other tools do you have?",
+    };
+  }
+
+  if (question.step === "strength") {
+    return {
+      ...question,
+      prompt: "Do you want strength and conditioning included, or should this stay focused on cycling?",
+    };
+  }
+
+  if (question.step === "level") {
+    return {
+      ...question,
+      prompt: "To set the right volume, what is your current cycling level or weekly riding time?",
+    };
+  }
+
+  if (question.step === "schedule") {
+    return {
+      ...question,
+      prompt: "Good, now let's make it fit real life. How many days per week can you ride or train and still recover well?",
+    };
+  }
+
+  if (question.step === "injuries") {
+    return {
+      ...question,
+      prompt: "Before I load this up, I want to keep it safe. Any cycling injuries, pain, or movements I should account for?",
     };
   }
 
@@ -184,49 +237,49 @@ const strengthTrainingQuestions: IntakeQuestion[] = sharedQuestions.map((questio
   if (question.step === "goal") {
     return {
       ...question,
-      prompt: "What strength goal do you want to train for?",
+      prompt: "Strength and conditioning it is. What goal should this plan build toward: strength, muscle, conditioning, movement quality, testing numbers, or sport support?",
     };
   }
 
   if (question.step === "timeline") {
     return {
       ...question,
-      prompt: "Do you have a target date or testing date?",
+      prompt: "Is there a target date or testing date, or is this an ongoing strength block?",
     };
   }
 
   if (question.step === "equipment") {
     return {
       ...question,
-      prompt: "What strength training equipment do you have access to?",
+      prompt: "Now I can match the work to your setup. What strength and conditioning equipment do you have access to?",
     };
   }
 
   if (question.step === "strength") {
     return {
       ...question,
-      prompt: "Should this be a dedicated strength plan?",
+      prompt: "Should this be a dedicated strength and conditioning plan, or should strength just support another activity?",
     };
   }
 
   if (question.step === "level") {
     return {
       ...question,
-      prompt: "What is your current lifting experience level?",
+      prompt: "To load this appropriately, what is your current strength and conditioning experience?",
     };
   }
 
   if (question.step === "schedule") {
     return {
       ...question,
-      prompt: "How many days per week can you lift?",
+      prompt: "Good, now let's make it fit real life. How many days per week can you train and still recover well?",
     };
   }
 
   if (question.step === "injuries") {
     return {
       ...question,
-      prompt: "Do you have any lifting injuries or movement limitations?",
+      prompt: "Before I load this up, I want to keep it safe. Any injuries, pain, or movements I should account for?",
     };
   }
 
@@ -247,6 +300,23 @@ export const runningTemplate: IntakeTemplate = {
   generationHints: [
     "Progress weekly volume conservatively and include recovery days.",
     "For race goals, build toward the event distance and taper before the target date.",
+  ],
+};
+
+export const cyclingTemplate: IntakeTemplate = {
+  id: "cycling",
+  label: "Cycling",
+  sportProfileId: "cycling",
+  questions: cyclingQuestions,
+  requiredFields: climbingStrengthTemplate.requiredFields,
+  optionalFollowUpFields: climbingStrengthTemplate.optionalFollowUpFields,
+  validationHints: [
+    "Capture cycling volume as weekly riding time, distance, or current comfortable ride duration.",
+    "Ask about cycling injuries, bike fit issues, and limitations before marking the draft ready.",
+  ],
+  generationHints: [
+    "Progress riding volume conservatively and include recovery days.",
+    "For event goals, build toward the ride or race demands and taper before the target date.",
   ],
 };
 
@@ -287,6 +357,7 @@ export const genericTrainingTemplate: IntakeTemplate = {
 export const intakeTemplates = [
   climbingStrengthTemplate,
   runningTemplate,
+  cyclingTemplate,
   strengthTrainingTemplate,
   genericTrainingTemplate,
 ] as const;
@@ -298,6 +369,7 @@ export function getIntakeTemplate(templateId?: string) {
 export function selectIntakeTemplate(sport?: string) {
   if (sport && /\bclimb(?:ing)?\b/i.test(sport)) return climbingStrengthTemplate;
   if (sport && /\brun(?:ning)?\b/i.test(sport)) return runningTemplate;
+  if (sport && /\b(?:cycl(?:e|ing|ist)|bike|biking|ride)\b/i.test(sport)) return cyclingTemplate;
   if (sport && /\b(?:strength|weight training|weights|lifting|powerlifting|bodybuilding)\b/i.test(sport)) {
     return strengthTrainingTemplate;
   }

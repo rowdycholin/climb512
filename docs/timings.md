@@ -1,6 +1,6 @@
 # Timings
 
-Date sampled: 2026-05-09
+Latest date sampled: 2026-05-11
 
 This document compares the current simulator-backed guided-intake route with the NeMo-gated simulator route.
 
@@ -21,6 +21,101 @@ For simulator-backed routes, the first sport-selection message in each scenario 
 | total | 33 | 29 |
 
 For live AI backend routes, the timing spec uses a slightly longer scripted profile because the live model asks more schedule/current-level/safety checkpoints than the deterministic simulator. Live routes stop once the Generate button unlocks, so the measured response count can differ between direct AI and NeMo even when both use the same max script.
+
+## Current Simulator Timing Refresh
+
+Sampled on 2026-05-11 after moving the NeMo intake checks to deterministic input/output actions. The NeMo run was primed with one climbing intake transaction before the measured log window, and that priming transaction is excluded from these numbers.
+
+Both runs used the fixed timing benchmark:
+
+```powershell
+npm --prefix testing run test:intake-timing
+```
+
+The benchmark passed all four activity paths in both configurations:
+
+| Configuration | Playwright Result | Route |
+|---|---|---|
+| NeMo on, simulator backend | passed 4 / 4 | `browser -> web -> guardrails -> simulator` |
+| NeMo off, simulator backend | passed 4 / 4 | `browser -> web -> simulator` |
+
+### NeMo On To Simulator
+
+Configuration:
+
+```text
+ANTHROPIC_BASE_URL=http://simulator:8787
+AI_INTAKE_MODE=simulator
+AI_GUARDRAILS_MODE=intake
+AI_GUARDRAILS_BASE_URL=http://guardrails:8000
+ANTHROPIC_MODEL=simulator
+```
+
+Measured window started at `2026-05-11T18:32:04Z`, after the priming transaction.
+
+Guided-intake timing from `web` logs:
+
+| Source | OK | Count | Min | Median | Average | Max |
+|---|---:|---:|---:|---:|---:|---:|
+| nemo-guardrails | true | 29 | 80ms | 107ms | 112.4ms | 189ms |
+
+Simulator-side intake generation timing for the same window:
+
+| Count | Min | Median | Average | Max |
+|---:|---:|---:|---:|---:|
+| 29 | 0ms | 1ms | 0.7ms | 3ms |
+
+Guardrails observations for the same measured window:
+
+| Observation | Count / Timing |
+|---|---:|
+| deterministic input checks | 29, median 0ms, average 0ms |
+| deterministic output checks | 29, median 0ms, average 0ms |
+| self-check / LLM prompt / LLM completion log lines | 0 |
+| error / traceback / exception lines | 0 |
+
+Interpretation: the normal simulator timing path is no longer paying for NeMo self-check LLM calls. The remaining NeMo overhead is primarily the service hop and NeMo request processing around the deterministic checks.
+
+### NeMo Off To Simulator
+
+Configuration:
+
+```text
+ANTHROPIC_BASE_URL=http://simulator:8787
+AI_INTAKE_MODE=simulator
+AI_GUARDRAILS_MODE=off
+ANTHROPIC_MODEL=simulator
+```
+
+Measured window started at `2026-05-11T18:33:18Z`.
+
+Guided-intake timing from `web` logs:
+
+| Source | OK | Count | Min | Median | Average | Max |
+|---|---:|---:|---:|---:|---:|---:|
+| simulator | true | 29 | 3ms | 5ms | 6.6ms | 37ms |
+
+Simulator-side intake generation timing for the same window:
+
+| Count | Min | Median | Average | Max |
+|---:|---:|---:|---:|---:|
+| 29 | 0ms | 0ms | 0.6ms | 6ms |
+
+Direct simulator log observations:
+
+| Observation | Count |
+|---|---:|
+| web intake errors | 0 |
+| simulator errors | 0 |
+
+Current simulator comparison:
+
+| Route | Successful Intake Calls | Failed Intake Calls | Median Web Duration | Average Web Duration | Max Web Duration |
+|---|---:|---:|---:|---:|---:|
+| `web -> simulator`, fixed timing spec, 2026-05-11 | 29 | 0 | 5ms | 6.6ms | 37ms |
+| `web -> guardrails -> simulator`, deterministic rails, primed, 2026-05-11 | 29 | 0 | 107ms | 112.4ms | 189ms |
+
+Current takeaway: with deterministic NeMo input/output checks, the guarded simulator path is functionally healthy and does not show guardrail LLM self-check calls on normal intake turns. The direct simulator remains single-digit milliseconds, while the NeMo-gated simulator route is currently about 100ms median per timed intake response.
 
 ## Non-NeMo Simulator Run
 
@@ -334,6 +429,8 @@ Real-backend interpretation:
 
 | Route | Successful Intake Calls | Failed Intake Calls | Median Web Duration | Average Web Duration | Max Web Duration |
 |---|---:|---:|---:|---:|---:|
+| `web -> simulator`, fixed timing spec, 2026-05-11 | 29 | 0 | 5ms | 6.6ms | 37ms |
+| `web -> guardrails -> simulator`, deterministic rails, primed, 2026-05-11 | 29 | 0 | 107ms | 112.4ms | 189ms |
 | `web -> simulator`, original parity/full-suite window | 35 | 0 | 8ms | 12.8ms | 77ms |
 | `web -> simulator`, fixed timing spec | 29 | 0 | 5ms | 7.1ms | 38ms |
 | `web -> guardrails -> simulator`, before self-check fix | 0 | 51 | 201ms | 347.7ms | 2924ms |
@@ -366,5 +463,10 @@ docker compose logs simulator --no-color --timestamps --since 2026-05-09T03:20:5
 docker compose logs web --no-color --timestamps --since 2026-05-09T12:21:30Z
 docker compose logs web --no-color --timestamps --since 2026-05-09T12:25:52Z
 docker compose logs guardrails --no-color --timestamps --since 2026-05-09T12:25:52Z
+docker compose logs web --no-color --timestamps --since 2026-05-11T18:32:04Z
+docker compose logs simulator --no-color --timestamps --since 2026-05-11T18:32:04Z
+docker compose logs guardrails --no-color --timestamps --since 2026-05-11T18:32:04Z
+docker compose logs web --no-color --timestamps --since 2026-05-11T18:33:18Z
+docker compose logs simulator --no-color --timestamps --since 2026-05-11T18:33:18Z
 npm --prefix testing run test:intake-timing
 ```

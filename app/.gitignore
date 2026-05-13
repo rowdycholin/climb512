@@ -6,12 +6,7 @@ node_modules/
 out/
 
 # env files
-.env
-.env-simulator
-.env-aibackend
-.env-aibackend-nemo
-.env.local
-.env.*.local
+
 
 # build output
 build/
