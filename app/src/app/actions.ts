@@ -1,6 +1,7 @@
 "use server";
 
 import bcrypt from "bcryptjs";
+import type { Prisma } from "@prisma/client";
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { getPostLoginPath } from "@/lib/post-login-route";
@@ -182,7 +183,7 @@ async function createGeneratedPlanFromRequest(params: {
   const profileSnapshot = createProfileSnapshot(legacyInput, params.request);
   const title = `${params.request.sport}: ${params.request.goalDescription}`.slice(0, 120);
 
-  const planId = await prisma.$transaction(async (tx) => {
+  const planId = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
     const plan = await tx.plan.create({
       data: {
         userId: params.userId,
@@ -1716,7 +1717,7 @@ export async function repairPlanGeneration(formData: FormData) {
   );
   const retainedGeneratedWeeks = generatedRows.filter((row) => row.weekNum < resumeWeek).length;
 
-  await prisma.$transaction(async (tx) => {
+  await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
     await tx.planGenerationWeek.deleteMany({
       where: {
         jobId: job.id,
@@ -2117,7 +2118,7 @@ async function saveConfirmedAiAdjustmentProposal(input: {
     summary: day.summary,
   }));
 
-  await prisma.$transaction(async (tx) => {
+  await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
     await tx.planGenerationJob.create({
       data: {
         planId: input.planId,
@@ -2236,7 +2237,7 @@ async function saveConfirmedAiAdjustmentIntent(input: {
     summary: day.summary,
   }));
 
-  await prisma.$transaction(async (tx) => {
+  await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
     await tx.planGenerationJob.create({
       data: {
         planId: input.planId,
