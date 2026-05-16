@@ -151,6 +151,7 @@ Stores what the user actually did for one exercise in one plan.
 | weightUsed | TEXT? | e.g. `10kg`, `bodyweight` |
 | durationActual | TEXT? | e.g. `7s`, `20 min` |
 | notes | TEXT? | User-entered notes |
+| actuals | JSONB? | Structured set, interval, attempt, or summary rows from the log form |
 | completed | BOOLEAN | Marked complete in the UI |
 | loggedAt | TIMESTAMPTZ | Updated on each save |
 
@@ -229,12 +230,27 @@ Full plan content for one accepted version:
 }
 ```
 
-Planned rich coaching detail:
+Rich coaching detail:
 
-- The current snapshot shape is intentionally compact and trackable.
-- Future optional fields may include `week.summary`, `week.progressionNote`, `day.coachNotes`, `session.objective`, `session.intensity`, `session.warmup`, `session.cooldown`, and `exercise.modifications`.
-- These fields should remain optional so old snapshots continue to parse.
-- Rich coaching text should stay separate from trackable logging fields such as sets, reps, duration, rest, and exercise keys.
+- The snapshot shape keeps compact trackable fields plus optional rich coaching fields.
+- Current optional fields include plan overview/context fields, `week.summary`, `week.progressionNote`, `week.coachRationale`, `week.keyAdaptations`, `week.watchouts`, `day.coachNotes`, `day.readinessGuidance`, `day.fallbackOption`, `session.objective`, `session.intensity`, `session.warmup`, `session.cooldown`, `session.coachingFocus`, `session.modificationGuidance`, `exercise.purpose`, `exercise.cues`, and `exercise.modifications`.
+- These fields remain optional so old snapshots continue to parse.
+- Rich coaching text stays separate from trackable logging fields such as sets, reps, duration, rest, and exercise keys.
+
+### `WorkoutLog.actuals`
+
+Detailed log rows are stored as a small JSON object:
+
+```json
+{
+  "mode": "sets",
+  "entries": [
+    { "set": 1, "completed": true, "reps": "5", "target": "bodyweight", "rpe": "7", "notes": "smooth" }
+  ]
+}
+```
+
+Supported modes are `sets`, `intervals`, `attempts`, and `summary`. The UI can add extra rows when a user performs additional sets, intervals, or attempts beyond the prescription. Older summary columns such as `setsCompleted`, `repsCompleted`, `weightUsed`, and `durationActual` remain for compatibility and quick summaries.
 
 ## Calendar Position
 

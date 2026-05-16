@@ -1247,24 +1247,24 @@ Batch 5 implementation notes:
 - Decision: keep NeMo for initial guided intake. The observed live NeMo-gated route is much improved and should remain the active direction for intake validation.
 - NeMo remains a gateway, not the owner of intake state. The app still recovers and merges answers into required fields, prevents repeated completed-field questions, enforces one user-facing question per turn, and validates the final `PlanRequest`.
 - Recent validation-driven app fixes include preserving combined first answers such as `energy systems training for climbing`, preventing array-field merge loss for `trainingFocus`, allowing supported options questions through to the AI, and trimming multi-question model responses while preserving a friendly acknowledgement.
-- Initial latency log mining shows guarded intake can be noticeably variable. Recent NeMo logs included completed turns around 11s and 41s, plus a slower partial sample around 53s. The slow samples were dominated by NeMo's internal LLM calls for input self-check, main intake generation, and output self-check, so the delay appears mostly backend/self-check related rather than UI processing.
+- Initial latency log mining showed guarded intake could be noticeably variable when NeMo used LLM input and output self-checks on every turn. The current deterministic input/output rails avoid those extra LLM calls on normal simulator-backed intake turns; use `docs/timings.md` for current timing notes.
 - `app/src/lib/plan-intake-ai.ts` now logs `durationMs` on `[ai-intake]` success and failure lines so future direct-AI vs NeMo comparisons can use app-observed total route latency.
-- Batch 5A is still useful for a fully local NeMo-gated simulator baseline, but it is no longer a blocker for the intake direction decision because the live NeMo-gated route has been exercised successfully.
+- Batch 5A is complete: the simulator can back NeMo intake locally, and the current guarded simulator route is `web -> guardrails -> simulator`.
 
 **Batch 5A: Simulator-Backed NeMo Intake Path**
 
 Purpose: close the local testing blind spot where simulator-backed development can look healthy without exercising NeMo. Guarded simulator mode should run the same app -> NeMo -> OpenAI-compatible backend shape as live guarded mode, while keeping outputs deterministic enough for regression tests.
 
-- [ ] Add intake-compatible chat-completions support to the simulator for `PlanIntakeAiResponse` prompts.
-- [ ] Detect intake prompts in the simulator separately from plan-generation prompts, without weakening the existing plan-generation simulator path.
-- [ ] Return deterministic `PlanIntakeAiResponse` JSON from the simulator for common guided-intake turns, including sport, goal, schedule, start date, level, equipment, constraints, strength preferences, preferred days/rest days, and final review answers.
-- [ ] Preserve the existing simulator plan-generation behavior for `plan-worker` and direct generation calls.
-- [ ] Ensure NeMo can call the simulator as its backing OpenAI-compatible model when `ANTHROPIC_BASE_URL=http://simulator:8787` inside the `guardrails` service.
-- [ ] Add a guarded-simulator env/documentation recipe, such as simulator backend plus `AI_GUARDRAILS_MODE=intake`, so developers can intentionally test `web -> guardrails -> simulator`.
-- [ ] Add unit coverage for simulator intake prompt detection and deterministic intake responses.
-- [ ] Add a simulator-gated integration or Playwright smoke test that proves guarded intake reaches NeMo instead of the app's local intake fallback.
-- [ ] Add logging or test assertions that distinguish all three paths: direct simulator/local fallback, direct live AI, and NeMo-gated simulator/live AI.
-- [ ] Document known limitations, especially any differences between deterministic simulator intake and live model behavior behind NeMo.
+- [x] Add intake-compatible chat-completions support to the simulator for `PlanIntakeAiResponse` prompts.
+- [x] Detect intake prompts in the simulator separately from plan-generation prompts, without weakening the existing plan-generation simulator path.
+- [x] Return deterministic `PlanIntakeAiResponse` JSON from the simulator for common guided-intake turns, including sport, goal, schedule, start date, level, equipment, constraints, strength preferences, preferred days/rest days, and final review answers.
+- [x] Preserve the existing simulator plan-generation behavior for `plan-worker` and direct generation calls.
+- [x] Ensure NeMo can call the simulator as its backing OpenAI-compatible model when `ANTHROPIC_BASE_URL=http://simulator:8787` inside the `guardrails` service.
+- [x] Add a guarded-simulator env/documentation recipe, such as simulator backend plus `AI_GUARDRAILS_MODE=intake`, so developers can intentionally test `web -> guardrails -> simulator`.
+- [x] Add unit coverage for simulator intake prompt detection and deterministic intake responses.
+- [x] Add a simulator-gated integration or Playwright smoke test that proves guarded intake reaches NeMo instead of the app's local intake fallback.
+- [x] Add logging or test assertions that distinguish all three paths: direct simulator/local fallback, direct live AI, and NeMo-gated simulator/live AI.
+- [x] Document known limitations, especially any differences between deterministic simulator intake and live model behavior behind NeMo.
 
 Batch 5A notes:
 

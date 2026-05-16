@@ -1,8 +1,8 @@
 # Guardrails
 
-This directory contains the opt-in NeMo Guardrails proof-of-concept scaffold for Phase 10.
+This directory contains the opt-in NeMo Guardrails intake gateway.
 
-The initial target is intake only. NeMo should act as a safety/style gateway around live AI intake calls, while the TypeScript app remains responsible for structured state, JSON parsing, schema validation, readiness checks, plan validation, workout-log protection, and versioning.
+The target is intake only. NeMo acts as a safety/style gateway around guided-intake model calls, while the TypeScript app remains responsible for structured state, JSON parsing, schema validation, readiness checks, plan validation, workout-log protection, and versioning.
 
 ## Modes
 
@@ -12,14 +12,14 @@ Default application behavior does not use this service:
 AI_GUARDRAILS_MODE=off
 ```
 
-Future intake-gated behavior will use:
+Guarded intake uses:
 
 ```text
 AI_GUARDRAILS_MODE=intake
 AI_GUARDRAILS_BASE_URL=http://guardrails:8000
 ```
 
-Batch 1 only adds the service and configuration skeleton. App routing to this service is intentionally deferred to the integration batch.
+When this mode is enabled, guided-intake calls route through `web -> guardrails -> configured backend`. The configured backend can be the local simulator or a live OpenAI-compatible provider.
 
 ## Local Docker
 
@@ -37,6 +37,16 @@ docker compose --profile guardrails up -d --build guardrails
 
 The guardrails container maps the existing `ANTHROPIC_*` environment variables to the OpenAI-compatible variables expected by NeMo's OpenAI engine.
 
+For NeMo simulator mode, `app/.env` should include:
+
+```text
+ANTHROPIC_BASE_URL=http://simulator:8787
+ANTHROPIC_MODEL=simulator
+AI_INTAKE_MODE=simulator
+AI_GUARDRAILS_MODE=intake
+AI_GUARDRAILS_BASE_URL=http://guardrails:8000
+```
+
 ## Files
 
 ```text
@@ -52,4 +62,4 @@ guardrails/
       output.co
 ```
 
-The rails are intentionally light placeholders in Batch 1. Security rails, output-shape checks, and conversational style rails should be added in later batches.
+The current rails use deterministic Python actions for common input policy checks and output JSON-envelope checks. Ambiguous input can still fall back to NeMo's LLM `self_check_input`; TypeScript remains the final authority after NeMo returns.

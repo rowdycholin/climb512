@@ -1,6 +1,6 @@
 # NeMo Intake Validation Runbook
 
-This runbook is for Phase 10 Batch 5: validation, red-team scenarios, and ongoing regression checks for the selected intake direction.
+This runbook covers validation, red-team scenarios, and ongoing regression checks for the selected NeMo-guided intake direction.
 
 The goal is to compare intake behavior across the available routes without confusing deterministic simulator success with NeMo success. The current direction is to keep NeMo for initial guided intake, while the TypeScript app remains authoritative for draft state, schema validation, answer recovery, duplicate-question prevention, and readiness.
 
@@ -12,7 +12,7 @@ The goal is to compare intake behavior across the available routes without confu
 | Simulator-backed intake | HTTP simulator baseline, no NeMo | `transportSource=simulator` |
 | Direct live AI | live model without NeMo | `transportSource=direct-ai` |
 | NeMo-gated live AI | live model through NeMo | `transportSource=nemo-guardrails` |
-| NeMo-gated simulator | local NeMo transport baseline after Batch 5A | `transportSource=nemo-guardrails` |
+| NeMo-gated simulator | local NeMo transport baseline | `transportSource=nemo-guardrails` |
 
 The simulator now supports intake-shaped prompts directly. NeMo-gated simulator validation still needs explicit coverage because it exercises `web -> guardrails -> simulator`, not just `web -> simulator`.
 
@@ -98,7 +98,7 @@ Expected: `transportSource=nemo-guardrails`.
 
 ### NeMo-Gated Simulator
 
-This is the Batch 5A target route:
+This is the local guarded route:
 
 ```text
 AI_GUARDRAILS_MODE=intake
@@ -107,7 +107,7 @@ ANTHROPIC_BASE_URL=http://simulator:8787
 ANTHROPIC_API_KEY=simulator-local-key
 ```
 
-Expected after Batch 5A: `transportSource=nemo-guardrails` and deterministic valid intake responses.
+Expected: `transportSource=nemo-guardrails` and deterministic valid intake responses.
 
 ## Scenarios
 
@@ -153,4 +153,4 @@ Record each run with:
 
 Current recommendation status: keep NeMo for initial guided intake. Do not expand NeMo to AI Adjust or plan generation until intake has had additional red-team coverage and transcript regressions are captured as automated tests.
 
-Initial latency note: recent live NeMo-gated logs showed meaningful variance. Completed guarded turns included roughly 11s and 41s, with another slower sample around 53s. NeMo's per-call log split showed the slow turns were dominated by the three upstream LLM calls used for input self-check, main intake generation, and output self-check. The app now logs `[ai-intake] ... durationMs=<n>` so future runs can compare direct AI total route time against NeMo-gated total route time.
+Latency note: the original live NeMo setup could call the backend three times per turn: input self-check, main intake generation, and output self-check. The current rails use deterministic input/output actions for normal turns and reserve LLM input self-check for ambiguous messages, so NeMo simulator timing should mostly reflect service-hop overhead plus one backend call. The app logs `[ai-intake] ... durationMs=<n>` so runs can compare direct AI total route time against NeMo-gated total route time.

@@ -1,6 +1,8 @@
 # Timings
 
-Latest date sampled: 2026-05-11
+Latest full timing benchmark sampled: 2026-05-11
+
+Current operational note: the active NeMo simulator stack uses `web -> guardrails -> simulator` with deterministic input/output rails and `ANTHROPIC_MODEL=simulator`. A local `validate:nemo-intake` smoke run on the current stack confirmed routing through `nemo-guardrails`; one scripted cycling readiness expectation did not reach `ready` in that harness, so use the fixed Playwright timing spec for apples-to-apples timing numbers.
 
 This document compares the current simulator-backed guided-intake route with the NeMo-gated simulator route.
 
@@ -346,7 +348,7 @@ Sampled since `2026-05-09T03:15:06Z`, the fixed timing spec produced:
 
 ## Real AI Backend Runs
 
-These runs used the OpenRouter-backed Anthropic model configured in `app/.env-aibackend` and `app/.env-aibackend-nemo`.
+These runs used the OpenRouter-backed model configured in `app/.env-aibackend` and `app/.env-aibackend-nemo`.
 
 ### Direct Real AI Backend
 
@@ -361,7 +363,7 @@ ANTHROPIC_MODEL=openai/gpt-5.5
 Route:
 
 ```text
-browser -> web -> OpenRouter/Anthropic
+browser -> web -> OpenRouter
 ```
 
 Focused validation result:
@@ -391,7 +393,7 @@ ANTHROPIC_MODEL=openai/gpt-5.5
 Route:
 
 ```text
-browser -> web -> guardrails -> OpenRouter/Anthropic
+browser -> web -> guardrails -> OpenRouter
 ```
 
 Before the measured window, one climbing intake pass was run as a NeMo priming transaction and excluded from these stats.
@@ -436,8 +438,8 @@ Real-backend interpretation:
 | `web -> guardrails -> simulator`, before self-check fix | 0 | 51 | 201ms | 347.7ms | 2924ms |
 | `web -> guardrails -> simulator`, after self-check fix | 29 | 0 | 313ms | 360.5ms | 733ms |
 | `web -> guardrails -> simulator`, after quiet/usage fix | 29 | 0 | 79ms | 83.5ms | 130ms |
-| `web -> OpenRouter/Anthropic`, direct live backend | 40 | 0 | 2792ms | 2879.5ms | 5082ms |
-| `web -> guardrails -> OpenRouter/Anthropic`, primed NeMo live backend | 37 | 0 | 4842ms | 4887.1ms | 6319ms |
+| `web -> OpenRouter`, direct live backend | 40 | 0 | 2792ms | 2879.5ms | 5082ms |
+| `web -> guardrails -> OpenRouter`, primed NeMo live backend | 37 | 0 | 4842ms | 4887.1ms | 6319ms |
 
 Interpretation:
 

@@ -9,7 +9,8 @@ The simulator is implemented as a separate top-level service in:
 It currently supports:
 
 - guided-intake responses for the app's `PlanIntakeAiResponse` prompt contract
-- plan-generation responses, including the sequential worker's next-week prompts
+- plan-generation responses, including the sequential worker's strategy and next-week prompts
+- rich coaching fields used by the current plan viewer
 
 Interactive plan-adjustment testing uses deterministic app-side helpers in `app/src/lib/plan-adjustment-chat.ts` and `app/src/app/actions.ts`; it is not handled by this Docker simulator service.
 
@@ -81,7 +82,7 @@ In Docker, the `web` and `plan-worker` services point `ANTHROPIC_BASE_URL` at:
 http://simulator:8787
 ```
 
-With `AI_INTAKE_MODE=simulator`, guided intake also sends its OpenAI-compatible chat-completions request to the simulator service. `web` still validates and merges the response before the UI sees it.
+With `AI_INTAKE_MODE=simulator`, guided intake also sends its OpenAI-compatible chat-completions request to the simulator service. If `AI_GUARDRAILS_MODE=intake` is enabled, guided intake routes through `web -> guardrails -> simulator` instead. `web` still validates and merges the response before the UI sees it.
 
 For plan generation, `web` creates the generation job, and `plan-worker` sends the sequential week prompts to the simulator.
 
@@ -171,6 +172,8 @@ The simulator uses a rule-based generator:
 - strength-training requests add support sessions/exercises
 - injuries, limitations, and exercises to avoid can substitute safer exercise variants
 - equipment can swap in specific exercise variants
+- lead/sport/trad/top-rope/bouldering phrasing is treated as climbing discipline context during intake
+- generated weeks include optional rich coaching fields such as week rationale, adaptations, watchouts, day readiness guidance, fallback options, session coaching focus, modification guidance, exercise purpose, and cues
 - grade, age, and goals are included in the generated plan shape but are still used lightly
 - seeded randomness adds controlled variation
 

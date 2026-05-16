@@ -12,7 +12,7 @@ Recommendation: keep NeMo for initial guided intake only. Do not move the whole 
 
 This review compares the current climb512 NeMo setup with NVIDIA's current configuration guidance and common production guardrail patterns.
 
-Current conclusion: the NeMo integration is directionally sound, but it is too LLM-heavy for the checks it is currently performing. The fastest improvement is to replace most of the input/output self-check work with deterministic NeMo custom actions, then reserve LLM guardrail checks for ambiguous or high-risk cases.
+Current conclusion: the NeMo integration is directionally sound. The initial LLM-heavy self-check setup has been improved: normal input/output checks now run through deterministic NeMo custom actions, with LLM input self-check reserved for ambiguous messages.
 
 ### Current Runtime Shape
 
@@ -27,10 +27,10 @@ The `guardrails` container is configured by:
 - `docker-compose.yml`: loads `./app/.env` into the guardrails service.
 - `guardrails/entrypoint.sh`: maps app env vars into NeMo/OpenAI-compatible env vars.
 - `guardrails/intake/config.template.yml`: declares one NeMo `main` model using `engine: openai`.
-- `guardrails/intake/prompts.yml`: defines the LLM judge prompts for `self_check_input` and `self_check_output`.
-- `guardrails/intake/rails/input.co`: defines the refusal response.
-- `guardrails/intake/rails/output.co`: currently only documents that built-in output self-check is used.
-- `guardrails/intake/actions.py`: currently a placeholder.
+- `guardrails/intake/prompts.yml`: defines the LLM judge prompt used only when deterministic input checks return `needs_review`.
+- `guardrails/intake/rails/input.co`: runs deterministic input checks, blocks clearly unsafe messages, and falls back to LLM self-check for ambiguous/high-risk messages.
+- `guardrails/intake/rails/output.co`: runs deterministic output-envelope checks.
+- `guardrails/intake/actions.py`: implements deterministic input policy checks and `PlanIntakeAiResponse` JSON envelope checks.
 
 Only one model is active per container run. `entrypoint.sh` chooses it with fallback syntax:
 
@@ -58,22 +58,22 @@ The `engine: openai` value means NeMo should use an OpenAI-compatible API shape.
 
 ### What Is Currently Calling The LLM
 
-For a normal guarded intake turn, NeMo can call the configured backend up to three times:
+For a normal guarded intake turn, NeMo usually calls the configured backend once:
 
 ```text
-1. self_check_input  -> LLM judge asks whether the user message should be blocked
-2. main response     -> LLM generates PlanIntakeAiResponse JSON
-3. self_check_output -> LLM judge asks whether the generated response should be blocked
+1. deterministic input action
+2. main response -> backend generates PlanIntakeAiResponse JSON
+3. deterministic output action
 ```
 
-The current config uses the same `main` model for all three operations. That is simple and matches the minimum NeMo setup, but it is not cost- or latency-optimal.
+If the deterministic input action returns `needs_review`, NeMo also runs the LLM `self_check_input` prompt before the main response. Output self-check is deterministic in the current config.
 
 Recent real-backend timing in `docs/timings.md` showed:
 
 | Route | Successful calls | Median | Average | Max |
 |---|---:|---:|---:|---:|
-| `web -> OpenRouter/Anthropic` | 40 | 2792ms | 2879.5ms | 5082ms |
-| `web -> guardrails -> OpenRouter/Anthropic` | 37 | 4842ms | 4887.1ms | 6319ms |
+| `web -> OpenRouter` | 40 | 2792ms | 2879.5ms | 5082ms |
+| `web -> guardrails -> OpenRouter` | 37 | 4842ms | 4887.1ms | 6319ms |
 
 The NeMo route added roughly 2 seconds per guided-intake response in that sample. That overhead is consistent with extra guardrail LLM calls.
 
@@ -110,13 +110,13 @@ For climb512, "best in class" should mean layered, cheap-first, and deterministi
 deterministic precheck -> optional LLM guardrail only for ambiguous/high-risk input -> main model -> deterministic output contract check -> TypeScript authoritative validation
 ```
 
-The current setup is closer to:
+The current setup is now closer to:
 
 ```text
-web regex precheck -> LLM input self-check -> main model -> LLM output self-check -> TypeScript validation
+web regex precheck -> deterministic NeMo input check -> optional LLM input self-check -> main model -> deterministic output contract check -> TypeScript validation
 ```
 
-That works, but it spends LLM latency on checks that are mostly mechanical.
+That keeps normal intake turns cheap while preserving a path for ambiguous input review.
 
 The TypeScript app should remain authoritative for product invariants:
 
@@ -137,26 +137,13 @@ NeMo is a good home for guardrail policy and reusable AI-boundary behavior:
 - Refusal wording.
 - Optional shared style and safety guidance.
 
-### Recommendation 1: Replace Output LLM Self-Check With Deterministic Output Actions
+### Recommendation 1: Keep Output Checks Deterministic
 
-Priority: highest.
+Status: implemented.
 
-Current output rail asks an LLM whether the assistant response should be blocked. For this app, the output contract is already very concrete: the app expects one JSON object with `status`, `message`, and `planRequestDraft`.
+The output rail now uses `check_intake_output_contract` in `guardrails/intake/actions.py`. It verifies the basic JSON envelope, required top-level fields, allowed status values, and obvious secret/system-prompt leakage before the response reaches the TypeScript validator.
 
-Recommended change:
-
-- Add Python actions in `guardrails/intake/actions.py` for:
-  - response starts with `{` and ends with `}`
-  - no markdown fences
-  - no prose outside the JSON object
-  - JSON parses successfully
-  - top-level fields include `status`, `message`, `planRequestDraft`
-  - `message` does not contain obvious secrets/system-prompt disclosure text
-  - output does not look truncated
-- Replace `self check output` in `config.template.yml` with a custom Colang flow such as `check intake output contract`.
-- Keep TypeScript validation after NeMo as the final authority.
-
-Implementation steps:
+Implemented shape:
 
 1. Add one or more `@action(is_system_action=True)` functions to `guardrails/intake/actions.py`.
 2. Implement JSON-envelope checks with Python's `json` module, not regex-only parsing.
@@ -169,7 +156,7 @@ Implementation steps:
    - truncated JSON
    - JSON missing required top-level fields
    - JSON containing hidden-prompt/secrets wording
-6. Re-run direct live, NeMo live, simulator, and NeMo simulator timing specs.
+6. Re-run direct live, NeMo live, simulator, and NeMo simulator timing specs when changing rail behavior.
 
 Pros:
 
@@ -189,25 +176,13 @@ Recommended scope:
 - Validate only the response envelope and obvious security leaks in NeMo.
 - Do not port the whole `PlanRequest` schema into Python.
 
-### Recommendation 2: Replace Most Input LLM Self-Check With Deterministic Input Actions
+### Recommendation 2: Keep Normal Input Checks Deterministic
 
-Priority: high.
+Status: implemented with fallback review.
 
-The app already has deterministic input checks in `isPlanIntakeMessageAllowed`. NeMo currently repeats the same idea with an LLM self-check. That is useful for semantic attacks, but it is expensive for normal answers like "No", "5 days", or "Monday, Wednesday, Friday".
+The input rail now uses `check_intake_input` in `guardrails/intake/actions.py`. Clear unsafe/off-topic requests are blocked deterministically, normal intake answers are allowed deterministically, and ambiguous/high-risk messages return `needs_review` so NeMo can run `self_check_input`.
 
-Recommended change:
-
-- Move the obvious input policy into a NeMo custom input action:
-  - empty message
-  - too long
-  - prompt/system/developer instruction extraction
-  - API key/token/secret/password/environment variable requests
-  - hacking/malware/phishing/credential theft/exfiltration
-  - obvious unrelated requests like code, jokes, essays, finance/weather
-- Allow short normal intake answers deterministically.
-- Use LLM input self-check only for ambiguous/high-risk messages, or remove it initially and rely on deterministic checks plus app-side validation.
-
-Implementation steps:
+Implemented shape:
 
 1. Port the current TypeScript unsafe/unrelated patterns into `guardrails/intake/actions.py`.
 2. Add an allow-fast-path for ordinary intake answers:
@@ -221,7 +196,7 @@ Implementation steps:
 3. Add a custom flow in `input.co`:
    - execute deterministic input action
    - refuse immediately if blocked
-   - optionally execute LLM `self check input` only if the action returns `needs_llm_review`
+   - optionally execute LLM `self check input` only if the action returns `needs_review`
 4. Decide whether direct non-NeMo mode should keep the TypeScript precheck. Recommendation: keep it for direct mode so direct live AI is not less protected than guarded mode.
 5. Add red-team and terse-answer tests at both NeMo smoke level and app route level.
 
@@ -245,7 +220,7 @@ Recommended scope:
 
 ### Recommendation 3: Use Conditional LLM Guardrails Instead Of Always-On LLM Guardrails
 
-Priority: high.
+Status: implemented for guided intake.
 
 The best speed/safety balance is not "never use LLM guardrails"; it is "use them only when deterministic checks are uncertain."
 
@@ -547,7 +522,7 @@ Implemented changes:
 - Obvious unsafe or unrelated requests are blocked before the main model call.
 - Ambiguous policy/configuration wording can still escalate to NeMo's built-in LLM `self_check_input`.
 - `check_intake_output_contract` validates the response contract deterministically instead of calling the output LLM self-check.
-- The output rail validates both raw JSON and a single markdown-fenced JSON object, because the live OpenRouter/Anthropic route can wrap otherwise valid JSON in a code fence. The TypeScript app still performs the final parse and schema validation.
+- The output rail validates both raw JSON and a single markdown-fenced JSON object, because the live OpenRouter route can wrap otherwise valid JSON in a code fence. The TypeScript app still performs the final parse and schema validation.
 - `guardrails/intake/config.template.yml` now uses `check intake input` and `check intake output contract` instead of always-on `self check input` and `self check output`.
 - Focused Python unit tests live in `guardrails/intake/actions_test.py`.
 
@@ -911,4 +886,3 @@ Known follow-ups:
 - Capture real transcript regressions as unit tests.
 - Keep Batch 5A as the path to a fully local `web -> guardrails -> simulator` baseline.
 - Defer NeMo for AI Adjust and plan generation until guided intake remains stable under additional testing.
-

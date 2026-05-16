@@ -7,16 +7,18 @@ Date: 2026-04-24
 Since this proposal was written, the app has already moved partway in this direction:
 
 - direct editing is the primary week-adjustment path
-- the pencil icon opens `Edit This Week`
+- the pencil icon opens `Edit Day`
 - the editor has icon-based add / duplicate / delete controls
-- the detailed edit section includes rest days, and adding an exercise converts that day to training
+- the detailed edit section targets the highlighted/most recently selected day, and adding an exercise converts that day to training
+- exercises can be moved within the selected day with Up/Down controls
+- workout logging supports extra set, interval, or attempt rows when the user does more than prescribed
 - logged weeks protect existing work but allow additive custom exercises
 - the chat icon opens `Adjust Plan` for conversational scoped changes to one day, one week, a date range, or future days from a point
 
 What is still not finished:
 
-- the editor is still split between `Day order` and detailed cards
-- exercise reordering within a day is not yet fully gesture-driven
+- day reordering is no longer exposed in the direct editor
+- exercise reordering within a day is implemented with buttons, not gesture-driven drag handles
 - the UI still relies on inline fields more than bottom sheets
 
 ## Goal
@@ -46,9 +48,9 @@ The original AI-first adjuster is no longer the main problem. The larger remaini
 
 Current pain points:
 
-- day reordering and exercise editing still live in two separate zones
+- day reordering is absent from the current direct editor
 - mobile interaction still leans heavily on inline form fields
-- exercise reordering is not as direct as it should be
+- exercise reordering is available but uses Up/Down buttons rather than drag handles
 - some interactions still require too much scrolling
 
 ## Recommended direction

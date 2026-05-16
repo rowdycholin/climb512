@@ -22,7 +22,7 @@ This file tracks known cleanup, risk, and follow-up items that are not blocking 
 
 - [x] Add code-level AI intake fencing before enabling real model-backed intake.
   - Added a local relevance guard so unrelated or unsafe messages are refused before the intake simulator/provider boundary.
-  - Added prompt-level task boundaries for future model-backed intake and live plan generation.
+  - Added prompt-level task boundaries for model-backed intake and live plan generation.
   - Kept the AI response limited to the existing `PlanIntakeAiResponse` schema and invalid `ready` output is discarded.
   - Unknown fields are stripped before the app sees validated response data.
   - Added unit coverage for valid responses, invalid responses, unknown fields, unsafe prompts, unrelated prompts, and short valid intake answers.
@@ -40,7 +40,8 @@ This file tracks known cleanup, risk, and follow-up items that are not blocking 
 - [x] Define the first `PlanAdjustmentRequest` contract and day-level locked-history helpers.
 - [x] Keep manual day editing available for additive extra exercises on logged days.
 - [x] Add the future plan adjustment flow that preserves logged workouts and adjusts from the next current unlogged day forward.
-- [ ] Replace the deterministic future-plan adjustment rules with the real AI provider once the provider contract is ready.
+- [x] Route live future-plan adjustment through the configured AI provider while preserving deterministic simulator/local fixtures.
+- [ ] Continue expanding live-provider adjustment regression coverage and transcript fixtures.
 
 ## Plan Lifecycle
 

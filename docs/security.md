@@ -34,7 +34,7 @@ AI-facing plan generation prompts include an explicit task boundary:
 - avoid diagnosis, medical treatment, nutrition prescriptions, supplement advice, and unrelated coaching
 - output only the required JSON object
 
-The intake contract also defines a matching system prompt for future model-backed intake. The live intake path still uses code-level fencing before the simulator/provider boundary and validates responses with `PlanIntakeAiResponse`.
+The intake contract also defines the model-backed intake boundary. Intake uses code-level fencing before the simulator/provider/guardrails boundary and validates responses with `PlanIntakeAiResponse`.
 
 ## Snapshot-model implications
 

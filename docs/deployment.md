@@ -7,6 +7,7 @@
 | `postgres` | PostgreSQL 16 database |
 | `migrate` | one-shot SQL migration runner |
 | `simulator` | local AI backend simulator for plan generation |
+| `guardrails` | optional NeMo Guardrails intake gateway, started with the `guardrails` profile |
 | `web` | Next.js standalone app |
 | `plan-worker` | background worker for sequential plan-week generation |
 
@@ -21,8 +22,9 @@ Startup order:
 1. `postgres`
 2. `migrate`
 3. `simulator`
-4. `web`
-5. `plan-worker`
+4. optional `guardrails`
+5. `web`
+6. `plan-worker`
 
 `web` and `plan-worker` will not start until `migrate` exits successfully.
 
@@ -61,6 +63,7 @@ The current application schema depends on:
 docker compose logs web --tail=20
 docker compose logs plan-worker --tail=50
 docker compose logs simulator --tail=50
+docker compose --profile guardrails logs guardrails --tail=50
 docker compose logs migrate --tail=50
 docker compose logs postgres --tail=50
 ```
@@ -100,9 +103,10 @@ curl -I http://localhost:8080/login
 | `ANTHROPIC_ADJUSTMENT_MAX_TOKENS` | adjustment-chat output cap |
 | `AI_GUARDRAILS_MODE` | optional NeMo guardrails mode, defaults to `off` |
 | `AI_GUARDRAILS_BASE_URL` | optional NeMo Guardrails server URL for guarded intake |
+| `AI_INTAKE_MODE` | guided-intake route hint: `simulator`, `local`, or `live` |
 | `PLAN_WORKER_STEP_DELAY_MS` | optional pause between sequential week generations so partial progress is visible |
 
-In Docker, the `web` and `plan-worker` services read backend AI settings from `app/.env`. Copy `app/.env-simulator` or `app/.env-aibackend` to `app/.env`, then recreate `web` and `plan-worker` to switch modes. Do not print or commit real provider API keys.
+In Docker, the `web`, `plan-worker`, and optional `guardrails` services read backend AI settings from `app/.env`. Copy `app/.env-simulator`, `app/.env-aibackend`, or `app/.env-aibackend-nemo` to `app/.env`, then recreate the affected containers to switch modes. Do not print or commit real provider API keys.
 
 The NeMo guardrails service is opt-in and uses the `guardrails` Compose profile:
 
@@ -110,7 +114,7 @@ The NeMo guardrails service is opt-in and uses the `guardrails` Compose profile:
 docker compose --profile guardrails up -d --build guardrails
 ```
 
-The app should still run normally without this service when `AI_GUARDRAILS_MODE=off`.
+The app should still run normally without this service when `AI_GUARDRAILS_MODE=off`. For NeMo simulator mode, use `ANTHROPIC_BASE_URL=http://simulator:8787`, `ANTHROPIC_MODEL=simulator`, and `AI_GUARDRAILS_MODE=intake`, then start/recreate `guardrails` and `web`.
 
 ### Simulator service
 

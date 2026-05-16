@@ -6,15 +6,20 @@ Date: 2026-04-25
 
 Parts of this proposal are still future-facing, but the current editor has already changed since it was written:
 
-- the detailed editor section includes rest days, and adding an exercise converts that day to training
+- the direct editor now targets one day, chosen from the highlighted/most recently selected day in the week view
+- the detailed editor section includes that day even when it is a rest day, and adding an exercise converts it to training
+- same-day exercise movement is available through Up/Down controls
 - add / duplicate / delete are icon actions
-- the old `move to another training day` dropdown has been removed
+- the old `move to another training day` dropdown and later swipe-to-adjacent-day behavior have been removed from the current editor
+- the compact `Day order` section has been removed from the current editor
 - logged weeks now allow additive custom exercises while preserving existing logged work
+- logging now allows extra set/interval/attempt rows for performed work beyond the prescription
 - broader plan changes now live in `Adjust Plan`, which creates a new `PlanVersion` after a scoped proposal is approved
 
 The main unresolved proposal in this document is still valid:
 
-- collapse the two editing zones into one unified editable day list
+- replace button-based exercise movement with a more polished mobile-friendly interaction if needed
+- decide whether day reordering should return as an explicit, low-risk action
 
 ## Goal
 
@@ -24,11 +29,11 @@ Unify plan editing so the user stays in one edit surface:
 - when a day is expanded, they can edit and reorder exercises inside that day
 - they should not feel like they are switching between two different editing tools
 
-This matches the current product direction better than having a separate `Day order` section plus a separate detailed exercise section.
+This historical proposal explains the previous direction away from a separate `Day order` section. The current product has removed day-order editing entirely and narrowed `Edit Day` to the selected day.
 
 ## Current problem
 
-The current editor in [app/src/components/PlanEditor.tsx](/abs/path/c:/Users/beatt/projects/cursor/climb512/app/src/components/PlanEditor.tsx) works, but it splits editing into two mental models:
+At the time this proposal was written, the editor in `app/src/components/PlanEditor.tsx` split editing into two mental models:
 
 - a compact `Day order` list for moving days
 - a full day detail area for editing exercises
@@ -205,7 +210,7 @@ That part is already aligned with the current architecture.
 
 ## Component changes
 
-### [app/src/components/PlanEditor.tsx](/abs/path/c:/Users/beatt/projects/cursor/climb512/app/src/components/PlanEditor.tsx)
+### `app/src/components/PlanEditor.tsx`
 
 This is the main file that would need restructuring.
 
@@ -243,14 +248,14 @@ To keep `PlanEditor.tsx` from growing further, split it into:
 
 This is not strictly required, but I do recommend it. The current editor is already large enough that the unified version will be easier to maintain if it is decomposed.
 
-### [app/src/components/PlanPageShell.tsx](/abs/path/c:/Users/beatt/projects/cursor/climb512/app/src/components/PlanPageShell.tsx)
+### `app/src/components/PlanPageShell.tsx`
 
 Minor updates only:
 
 - add one line of helper copy when editor is open
 - optionally show whether the week is in `reorder days` or `edit day` mode based on expansion state
 
-### [app/src/components/PlanWorkspace.tsx](/abs/path/c:/Users/beatt/projects/cursor/climb512/app/src/components/PlanWorkspace.tsx)
+### `app/src/components/PlanWorkspace.tsx`
 
 Likely unchanged aside from passing any extra editor state if needed.
 

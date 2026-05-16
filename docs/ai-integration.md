@@ -145,7 +145,7 @@ Provider response bodies are truncated and obvious bearer/API-key patterns are r
 
 The app uses an OpenAI-compatible `chat/completions` transport via plain `fetch`.
 
-There are currently two primary backend modes, plus an opt-in guardrails gateway mode for live guided intake:
+There are currently two primary backend modes, plus an opt-in guardrails gateway mode for guided intake:
 
 ### Simulator/local
 
@@ -160,18 +160,20 @@ There are currently two primary backend modes, plus an opt-in guardrails gateway
 - `ANTHROPIC_BASE_URL=https://openrouter.ai/api`
 - intake, generation, and adjustment go to the configured remote provider
 
-### NeMo-gated intake POC
+### NeMo-gated intake
 
 - `AI_GUARDRAILS_MODE=intake`
 - `AI_GUARDRAILS_BASE_URL=http://guardrails:8000`
 - scope: guided-intake calls only
 - guarded mode takes precedence over simulator/local intake so NeMo is not silently bypassed during testing
-- generation and adjustment remain on the direct AI backend during the first NeMo pass
+- generation and adjustment remain on the configured direct backend
 - app-side validation remains authoritative after NeMo returns a response
+- common local route: `web -> guardrails -> simulator`
+- common live route: `web -> guardrails -> OpenRouter`
 
 The app appends `/v1/chat/completions` itself.
 
-In Docker, `web` and `plan-worker` read backend settings from `app/.env`. Copy `app/.env-simulator` or `app/.env-aibackend` to `app/.env`, then recreate those containers to switch modes. Editing `app/.env` alone does not change the already-running container process environment.
+In Docker, `web`, `plan-worker`, and optional `guardrails` read backend settings from `app/.env`. Copy `app/.env-simulator`, `app/.env-aibackend`, or `app/.env-aibackend-nemo` to `app/.env`, then recreate the affected containers to switch modes. Editing `app/.env` alone does not change the already-running container process environment.
 
 The NeMo service is behind an explicit Docker Compose profile and is not started by default:
 
@@ -180,6 +182,8 @@ docker compose --profile guardrails up -d --build guardrails
 ```
 
 When `AI_GUARDRAILS_MODE=intake`, the web app sends guided-intake model requests to `AI_GUARDRAILS_BASE_URL` even if `ANTHROPIC_BASE_URL` points at the simulator or `AI_INTAKE_MODE=local|simulator` is set. This is intentional: guarded mode should fail visibly if NeMo is misconfigured instead of silently using a deterministic intake fallback. The plan worker, plan generation, and adjustment chat still use `ANTHROPIC_BASE_URL` directly.
+
+For the NeMo simulator setup, the guardrails container maps `ANTHROPIC_MODEL=simulator` and `ANTHROPIC_BASE_URL=http://simulator:8787` into NeMo's OpenAI-compatible engine. The guardrails startup log should show `model=simulator baseUrl=http://simulator:8787/v1`.
 
 ## Environment variables
 
