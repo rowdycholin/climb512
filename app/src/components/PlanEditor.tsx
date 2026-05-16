@@ -1,8 +1,8 @@
 "use client";
 
-import { type PointerEvent as ReactPointerEvent, type ReactNode, useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { CirclePlus, Copy, Hand, GripVertical, Trash2 } from "lucide-react";
+import { CirclePlus, Copy, Trash2 } from "lucide-react";
 import { saveEditedWeek } from "@/app/actions";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -68,6 +68,7 @@ interface EditableSession {
 
 interface EditableDay {
   id: string;
+  dayName: string;
   focus: string;
   isRest: boolean;
   sessions: EditableSession[];
@@ -85,6 +86,7 @@ function toEditableWeek(week: Week): EditableWeek {
     theme: week.theme,
     days: week.days.map((day) => ({
       id: day.id,
+      dayName: day.dayName,
       focus: day.focus,
       isRest: day.isRest,
       sessions: day.sessions.map((session) => ({
@@ -110,11 +112,6 @@ function cloneWeek(week: EditableWeek) {
   return JSON.parse(JSON.stringify(week)) as EditableWeek;
 }
 
-const DAY_NAMES = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
-const SWIPE_THRESHOLD = 64;
-const MAX_SWIPE_OFFSET = 84;
-const DAY_HOLD_DELAY_MS = 220;
-
 function newExerciseId(sessionId: string) {
   return `${sessionId}-custom-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
 }
@@ -137,98 +134,33 @@ function createDefaultSession(dayId: string, dayName: string): EditableSession {
   };
 }
 
-function SwipeSurface({
-  children,
-  className,
-  leftHint,
-  rightHint,
-  onSwipeLeft,
-  onSwipeRight,
-}: {
-  children: ReactNode;
-  className?: string;
-  leftHint?: string;
-  rightHint?: string;
-  onSwipeLeft?: () => void;
-  onSwipeRight?: () => void;
-}) {
-  const [offset, setOffset] = useState(0);
-  const [startX, setStartX] = useState<number | null>(null);
-
-  function reset() {
-    setOffset(0);
-    setStartX(null);
-  }
-
-  function handlePointerDown(event: React.PointerEvent<HTMLDivElement>) {
-    const target = event.target as HTMLElement;
-    if (target.closest("input, button, select, textarea, label")) return;
-    setStartX(event.clientX);
-  }
-
-  function handlePointerMove(event: React.PointerEvent<HTMLDivElement>) {
-    if (startX === null) return;
-    const nextOffset = Math.max(-MAX_SWIPE_OFFSET, Math.min(MAX_SWIPE_OFFSET, event.clientX - startX));
-    setOffset(nextOffset);
-  }
-
-  function handlePointerUp() {
-    if (offset <= -SWIPE_THRESHOLD) onSwipeLeft?.();
-    if (offset >= SWIPE_THRESHOLD) onSwipeRight?.();
-    reset();
-  }
-
-  return (
-    <div className={`relative overflow-hidden ${className ?? ""}`}>
-      <div className="pointer-events-none absolute inset-y-0 left-3 flex items-center text-[11px] font-medium text-blue-500/80">
-        {rightHint ?? ""}
-      </div>
-      <div className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-[11px] font-medium text-blue-500/80">
-        {leftHint ?? ""}
-      </div>
-      <div
-        onPointerDown={handlePointerDown}
-        onPointerMove={handlePointerMove}
-        onPointerUp={handlePointerUp}
-        onPointerCancel={reset}
-        onPointerLeave={() => {
-          if (startX !== null) handlePointerUp();
-        }}
-        className="relative z-10 transition-transform duration-150 ease-out"
-        style={{ transform: `translateX(${offset}px)`, touchAction: "pan-y" }}
-      >
-        {children}
-      </div>
-    </div>
-  );
-}
-
 export default function PlanEditor({
   planId,
   week,
+  dayId,
   isOpen,
   onOpenChange,
 }: {
   planId: string;
   week: Week;
+  dayId?: string | null;
   isOpen?: boolean;
   onOpenChange?: (open: boolean) => void;
 }) {
   const [internalOpen, setInternalOpen] = useState(false);
   const [draft, setDraft] = useState<EditableWeek>(() => toEditableWeek(week));
   const [error, setError] = useState<string | null>(null);
-  const [armedDayId, setArmedDayId] = useState<string | null>(null);
-  const [activeDragDayId, setActiveDragDayId] = useState<string | null>(null);
-  const [dragIndicatorY, setDragIndicatorY] = useState<number | null>(null);
   const [pending, startTransition] = useTransition();
   const router = useRouter();
-  const dayHoldTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const dragStartPointRef = useRef<{ x: number; y: number } | null>(null);
-  const dayCardRefs = useRef<Record<string, HTMLDivElement | null>>({});
-  const activeDragDayIdRef = useRef<string | null>(null);
-  const draftRef = useRef(draft);
-  const pointerMoveLogicRef = useRef<((event: PointerEvent) => void) | null>(null);
-  const pointerUpLogicRef = useRef<(() => void) | null>(null);
+  const selectedDayIndex = useMemo(() => {
+    if (dayId) {
+      const index = draft.days.findIndex((day) => day.id === dayId);
+      if (index >= 0) return index;
+    }
+
+    return -1;
+  }, [dayId, draft.days]);
+  const selectedDay = draft.days[selectedDayIndex] ?? null;
 
   const hasLogs = useMemo(
     () =>
@@ -258,148 +190,10 @@ export default function PlanEditor({
       setInternalOpen(false);
     }
     setError(null);
-    setArmedDayId(null);
-    setActiveDragDayId(null);
-    setDragIndicatorY(null);
   }, [onOpenChange, week]);
-
-  const onWindowPointerMove = useCallback((event: PointerEvent) => {
-    pointerMoveLogicRef.current?.(event);
-  }, []);
-
-  const onWindowPointerUp = useCallback(() => {
-    pointerUpLogicRef.current?.();
-  }, []);
-
-  useEffect(() => {
-    return () => {
-      if (dayHoldTimeoutRef.current) clearTimeout(dayHoldTimeoutRef.current);
-      window.removeEventListener("pointermove", onWindowPointerMove);
-      window.removeEventListener("pointerup", onWindowPointerUp);
-      window.removeEventListener("pointercancel", onWindowPointerUp);
-    };
-  }, [onWindowPointerMove, onWindowPointerUp]);
-
-  useEffect(() => {
-    activeDragDayIdRef.current = activeDragDayId;
-  }, [activeDragDayId]);
-
-  useEffect(() => {
-    draftRef.current = draft;
-  }, [draft]);
 
   function updateDraft(updater: (current: EditableWeek) => EditableWeek) {
     setDraft((current) => updater(cloneWeek(current)));
-  }
-
-  function moveDay(index: number, direction: -1 | 1) {
-    updateDraft((current) => {
-      const nextIndex = index + direction;
-      if (nextIndex < 0 || nextIndex >= current.days.length) return current;
-      const [moved] = current.days.splice(index, 1);
-      current.days.splice(nextIndex, 0, moved);
-      return current;
-    });
-  }
-
-  const moveDayToIndex = useCallback((dayId: string, targetIndex: number) => {
-    updateDraft((current) => {
-      const fromIndex = current.days.findIndex((day) => day.id === dayId);
-      if (fromIndex < 0 || targetIndex < 0 || targetIndex >= current.days.length || fromIndex === targetIndex) {
-        return current;
-      }
-
-      const [moved] = current.days.splice(fromIndex, 1);
-      current.days.splice(targetIndex, 0, moved);
-      return current;
-    });
-  }, []);
-
-  const clearDayDragState = useCallback(() => {
-    if (dayHoldTimeoutRef.current) clearTimeout(dayHoldTimeoutRef.current);
-    dayHoldTimeoutRef.current = null;
-    dragStartPointRef.current = null;
-    activeDragDayIdRef.current = null;
-    setArmedDayId(null);
-    setActiveDragDayId(null);
-    setDragIndicatorY(null);
-    window.removeEventListener("pointermove", onWindowPointerMove);
-    window.removeEventListener("pointerup", onWindowPointerUp);
-    window.removeEventListener("pointercancel", onWindowPointerUp);
-  }, [onWindowPointerMove, onWindowPointerUp]);
-
-  useEffect(() => {
-    pointerUpLogicRef.current = clearDayDragState;
-  }, [clearDayDragState]);
-
-  useEffect(() => {
-    pointerMoveLogicRef.current = (event: PointerEvent) => {
-      const startPoint = dragStartPointRef.current;
-      if (!startPoint) return;
-
-      const draggingDayId = activeDragDayIdRef.current;
-      const currentDraft = draftRef.current;
-
-      if (!draggingDayId) {
-        const movedX = Math.abs(event.clientX - startPoint.x);
-        const movedY = Math.abs(event.clientY - startPoint.y);
-        if (movedX > 10 || movedY > 10) {
-          clearDayDragState();
-        }
-        return;
-      }
-
-      setDragIndicatorY(event.clientY);
-
-      const hoveredIndex = currentDraft.days.findIndex((candidate) => {
-        const element = dayCardRefs.current[candidate.id];
-        if (!element) return false;
-        const rect = element.getBoundingClientRect();
-        return event.clientY >= rect.top && event.clientY <= rect.bottom;
-      });
-
-      if (hoveredIndex >= 0) {
-        moveDayToIndex(draggingDayId, hoveredIndex);
-        return;
-      }
-
-      const beforeIndex = currentDraft.days.findIndex((candidate) => {
-        const element = dayCardRefs.current[candidate.id];
-        if (!element) return false;
-        const rect = element.getBoundingClientRect();
-        return event.clientY < rect.top;
-      });
-
-      if (beforeIndex >= 0) {
-        moveDayToIndex(draggingDayId, beforeIndex);
-        return;
-      }
-
-      const lastIndex = currentDraft.days.length - 1;
-      const lastElement = dayCardRefs.current[currentDraft.days[lastIndex]?.id ?? ""];
-      if (lastElement && event.clientY > lastElement.getBoundingClientRect().bottom) {
-        moveDayToIndex(draggingDayId, lastIndex);
-      }
-    };
-  }, [clearDayDragState, draft, moveDayToIndex]);
-
-  function beginDayHold(dayId: string, event: ReactPointerEvent<HTMLButtonElement>) {
-    if (pending) return;
-    if (dayHoldTimeoutRef.current) clearTimeout(dayHoldTimeoutRef.current);
-
-    event.preventDefault();
-    dragStartPointRef.current = { x: event.clientX, y: event.clientY };
-    setArmedDayId(dayId);
-    window.addEventListener("pointermove", onWindowPointerMove);
-    window.addEventListener("pointerup", onWindowPointerUp);
-    window.addEventListener("pointercancel", onWindowPointerUp);
-
-    dayHoldTimeoutRef.current = setTimeout(() => {
-      activeDragDayIdRef.current = dayId;
-      setActiveDragDayId(dayId);
-      setDragIndicatorY(event.clientY);
-      setArmedDayId(null);
-    }, DAY_HOLD_DELAY_MS);
   }
 
   function removeExercise(dayIndex: number, sessionIndex: number, exerciseIndex: number) {
@@ -422,34 +216,44 @@ export default function PlanEditor({
     });
   }
 
-  function moveExercise(dayIndex: number, sessionIndex: number, exerciseIndex: number, targetDayId: string) {
+  function moveExerciseWithinDay(dayIndex: number, sessionIndex: number, exerciseIndex: number, direction: -1 | 1) {
     updateDraft((current) => {
-      const sourceSession = current.days[dayIndex].sessions[sessionIndex];
-      const [exercise] = sourceSession.exercises.splice(exerciseIndex, 1);
-      const targetDayIndex = current.days.findIndex((day) => day.id === targetDayId);
-      const targetDay = current.days[targetDayIndex];
-      if (!exercise || !targetDay) {
-        if (exercise) sourceSession.exercises.splice(exerciseIndex, 0, exercise);
+      const day = current.days[dayIndex];
+      const sourceSession = day.sessions[sessionIndex];
+      const targetExerciseIndex = exerciseIndex + direction;
+
+      if (targetExerciseIndex >= 0 && targetExerciseIndex < sourceSession.exercises.length) {
+        const [exercise] = sourceSession.exercises.splice(exerciseIndex, 1);
+        sourceSession.exercises.splice(targetExerciseIndex, 0, exercise);
         return current;
       }
 
-      if (targetDay.sessions.length === 0) {
-        targetDay.sessions.push(createDefaultSession(targetDay.id, DAY_NAMES[targetDayIndex]));
-      }
+      const targetSessionIndex = sessionIndex + direction;
+      const targetSession = day.sessions[targetSessionIndex];
+      if (!targetSession) return current;
 
-      targetDay.isRest = false;
-      targetDay.focus = targetDay.focus === "Rest" ? "Training" : targetDay.focus;
-      const targetSession = targetDay.sessions[0];
-      targetSession.exercises.push(exercise);
+      const [exercise] = sourceSession.exercises.splice(exerciseIndex, 1);
+      const insertIndex = direction < 0 ? targetSession.exercises.length : 0;
+      targetSession.exercises.splice(insertIndex, 0, exercise);
       return current;
     });
+  }
+
+  function canMoveExerciseWithinDay(dayIndex: number, sessionIndex: number, exerciseIndex: number, direction: -1 | 1) {
+    const day = draft.days[dayIndex];
+    if (!day) return false;
+    const session = day.sessions[sessionIndex];
+    if (!session) return false;
+    const targetExerciseIndex = exerciseIndex + direction;
+    if (targetExerciseIndex >= 0 && targetExerciseIndex < session.exercises.length) return true;
+    return Boolean(day.sessions[sessionIndex + direction]);
   }
 
   function addCustomExercise(dayIndex: number) {
     updateDraft((current) => {
       const day = current.days[dayIndex];
       if (day.sessions.length === 0) {
-        day.sessions.push(createDefaultSession(day.id, DAY_NAMES[dayIndex]));
+        day.sessions.push(createDefaultSession(day.id, day.dayName));
       }
 
       day.isRest = false;
@@ -521,17 +325,6 @@ export default function PlanEditor({
     });
   }
 
-  function moveExerciseToAdjacentTrainingDay(
-    dayIndex: number,
-    sessionIndex: number,
-    exerciseIndex: number,
-    direction: -1 | 1,
-  ) {
-    const targetDay = draft.days[dayIndex + direction];
-    if (!targetDay) return;
-    moveExercise(dayIndex, sessionIndex, exerciseIndex, targetDay.id);
-  }
-
   if (!isEditing) {
     return null;
   }
@@ -541,11 +334,11 @@ export default function PlanEditor({
       <CardHeader>
         <div className="flex items-start justify-between gap-3">
           <div>
-            <CardTitle className="text-slate-800">{hasLogs ? "Add To This Week" : "Edit This Week"}</CardTitle>
+            <CardTitle className="text-slate-800">{hasLogs ? `Add To ${selectedDay?.dayName ?? "Day"}` : `Edit ${selectedDay?.dayName ?? "Day"}`}</CardTitle>
             <CardDescription>
               {hasLogs
                 ? "Existing logged work stays protected. Add extra exercises when you want more to track."
-                : "Reorder days, drop exercises, move work around, and save a new version without going back to AI."}
+                : "Edit the selected day without opening the rest of the week."}
             </CardDescription>
           </div>
           <Button type="button" variant="outline" onClick={() => setEditing(false)} disabled={pending}>
@@ -568,67 +361,9 @@ export default function PlanEditor({
             )}
 
             <div className="space-y-3">
-              {!hasLogs && activeDragDayId && dragIndicatorY !== null && (
-                <div
-                  className="pointer-events-none fixed right-5 z-50 flex items-center gap-2 rounded-full bg-slate-900 px-3 py-2 text-xs font-medium text-white shadow-lg"
-                  style={{ top: Math.max(16, dragIndicatorY - 18) }}
-                >
-                  <Hand className="h-4 w-4" />
-                  Move day
-                </div>
-              )}
-              {!hasLogs && (
-                <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
-                <div className="mb-3 flex items-center justify-between gap-3">
-                  <div>
-                    <p className="text-sm font-semibold text-slate-800">Day order</p>
-                    <p className="text-xs text-slate-500">Press and hold a handle, then drag the day up or down.</p>
-                  </div>
-                </div>
-                <div className="space-y-2">
-                  {draft.days.map((day, dayIndex) => (
-                    <div
-                      key={`${day.id}-order`}
-                      ref={(element) => {
-                        dayCardRefs.current[day.id] = element;
-                      }}
-                      className={`flex select-none items-center gap-3 rounded-lg border border-slate-200 bg-white px-3 py-2 transition-shadow ${
-                        activeDragDayId === day.id ? "shadow-xl ring-2 ring-blue-300" : ""
-                      }`}
-                      style={{ WebkitUserSelect: "none", WebkitTouchCallout: "none" }}
-                      onContextMenu={(event) => event.preventDefault()}
-                    >
-                      <button
-                        type="button"
-                        aria-label={`Reorder ${DAY_NAMES[dayIndex]}`}
-                        onPointerDown={(event) => beginDayHold(day.id, event)}
-                        className={`inline-flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-500 shadow-sm transition ${
-                          armedDayId === day.id || activeDragDayId === day.id ? "scale-105 border-blue-300 text-blue-600" : "active:scale-95"
-                        }`}
-                        style={{ touchAction: "none", WebkitUserSelect: "none", WebkitTouchCallout: "none" }}
-                        onContextMenu={(event) => event.preventDefault()}
-                      >
-                        {activeDragDayId === day.id ? <Hand className="h-4 w-4" /> : <GripVertical className="h-4 w-4" />}
-                      </button>
-                      <div className="min-w-0 flex-1 select-none" style={{ WebkitUserSelect: "none", WebkitTouchCallout: "none" }}>
-                        <p className="text-sm font-semibold text-slate-800">{dayIndex + 1}. {DAY_NAMES[dayIndex]}</p>
-                        <p className="truncate text-xs text-slate-500">{day.isRest ? "Rest day" : day.focus}</p>
-                      </div>
-                      <div className="hidden gap-2 sm:flex">
-                        <Button type="button" variant="outline" size="sm" onClick={() => moveDay(dayIndex, -1)} disabled={dayIndex === 0}>
-                          Up
-                        </Button>
-                        <Button type="button" variant="outline" size="sm" onClick={() => moveDay(dayIndex, 1)} disabled={dayIndex === draft.days.length - 1}>
-                          Down
-                        </Button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-              )}
-              {draft.days
+              {selectedDay ? draft.days
                 .map((day, dayIndex) => ({ day, dayIndex }))
+                .filter(({ day }) => day.id === selectedDay.id)
                 .map(({ day, dayIndex }) => (
                 <div
                   key={day.id}
@@ -636,7 +371,7 @@ export default function PlanEditor({
                 >
                     <div className="flex items-center justify-between gap-3">
                       <div>
-                        <p className="text-sm font-semibold text-slate-800">{dayIndex + 1}. {DAY_NAMES[dayIndex]}</p>
+                        <p className="text-sm font-semibold text-slate-800">{day.dayName}</p>
                         <p className="text-xs text-slate-500">{day.isRest ? "Rest day" : day.focus}</p>
                       </div>
                       {day.sessions.length === 0 && (
@@ -645,7 +380,7 @@ export default function PlanEditor({
                           size="sm"
                           variant="outline"
                           onClick={() => addCustomExercise(dayIndex)}
-                          aria-label={`Add exercise to ${DAY_NAMES[dayIndex]}`}
+                          aria-label={`Add exercise to ${day.dayName}`}
                           title="Add exercise"
                           className="gap-1.5 rounded-full border-sky-200 bg-sky-50 text-sky-700 shadow-sm transition hover:border-sky-300 hover:bg-sky-100 hover:text-sky-800"
                         >
@@ -668,7 +403,7 @@ export default function PlanEditor({
                               size="sm"
                               variant="outline"
                               onClick={() => addCustomExercise(dayIndex)}
-                              aria-label={`Add exercise to ${DAY_NAMES[dayIndex]}`}
+                              aria-label={`Add exercise to ${day.dayName}`}
                               title="Add exercise"
                               className="gap-1.5 rounded-full border-sky-200 bg-sky-50 text-sky-700 shadow-sm transition hover:border-sky-300 hover:bg-sky-100 hover:text-sky-800"
                             >
@@ -682,21 +417,7 @@ export default function PlanEditor({
                               (() => {
                                 const canEditExercise = !hasLogs || isCustomExerciseId(exercise.id);
                                 return (
-                              <SwipeSurface
-                                key={exercise.id}
-                                rightHint={dayIndex > 0 ? "Prev day" : ""}
-                                leftHint={dayIndex < draft.days.length - 1 ? "Next day" : ""}
-                                onSwipeRight={
-                                  !hasLogs && dayIndex > 0
-                                    ? () => moveExerciseToAdjacentTrainingDay(dayIndex, sessionIndex, exerciseIndex, -1)
-                                    : undefined
-                                }
-                                onSwipeLeft={
-                                  !hasLogs && dayIndex < draft.days.length - 1
-                                    ? () => moveExerciseToAdjacentTrainingDay(dayIndex, sessionIndex, exerciseIndex, 1)
-                                    : undefined
-                                }
-                              >
+                              <div key={exercise.id}>
                                 <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
                                   <div className="mb-2">
                                     <div className="flex items-end justify-between gap-2">
@@ -710,6 +431,30 @@ export default function PlanEditor({
                                       </div>
                                       {canEditExercise && (
                                         <div className="flex items-center gap-1 pb-px">
+                                        <Button
+                                          type="button"
+                                          size="sm"
+                                          variant="outline"
+                                          onClick={() => moveExerciseWithinDay(dayIndex, sessionIndex, exerciseIndex, -1)}
+                                          disabled={!canMoveExerciseWithinDay(dayIndex, sessionIndex, exerciseIndex, -1)}
+                                          aria-label={`Move ${exercise.name} earlier`}
+                                          title="Move earlier"
+                                          className="rounded-full border-slate-300 bg-white text-slate-600 shadow-sm transition hover:border-sky-200 hover:bg-sky-50 hover:text-sky-700"
+                                        >
+                                          Up
+                                        </Button>
+                                        <Button
+                                          type="button"
+                                          size="sm"
+                                          variant="outline"
+                                          onClick={() => moveExerciseWithinDay(dayIndex, sessionIndex, exerciseIndex, 1)}
+                                          disabled={!canMoveExerciseWithinDay(dayIndex, sessionIndex, exerciseIndex, 1)}
+                                          aria-label={`Move ${exercise.name} later`}
+                                          title="Move later"
+                                          className="rounded-full border-slate-300 bg-white text-slate-600 shadow-sm transition hover:border-sky-200 hover:bg-sky-50 hover:text-sky-700"
+                                        >
+                                          Down
+                                        </Button>
                                         <Button
                                           type="button"
                                           size="icon"
@@ -735,7 +480,7 @@ export default function PlanEditor({
                                       </div>
                                       )}
                                     </div>
-                                    {!hasLogs && <p className="mt-1 text-[11px] text-slate-400">Swipe to move between training days.</p>}
+                                    {!hasLogs && <p className="mt-1 text-[11px] text-slate-400">Use Up and Down to move this exercise within the selected day.</p>}
                                     {hasLogs && !canEditExercise && (
                                       <p className="mt-1 text-[11px] text-slate-400">Protected because this week has logs.</p>
                                     )}
@@ -781,7 +526,7 @@ export default function PlanEditor({
                                     </div>
                                   </div>
                                 </div>
-                              </SwipeSurface>
+                              </div>
                                 );
                               })()
                             ))}
@@ -790,7 +535,11 @@ export default function PlanEditor({
                       ))}
                     </div>
                   </div>
-              ))}
+              )) : (
+                <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+                  Open a day in the week view, then use Edit Day.
+                </div>
+              )}
             </div>
 
             {error && (

@@ -52,6 +52,7 @@ function hasMeaningfulActuals(actuals: unknown) {
 export interface ProfileSnapshot extends PlanInput {
   createdAt: string;
   planRequest?: PlanRequest;
+  planStrategy?: PlanStrategy;
 }
 
 export interface ExerciseSnapshot {
@@ -75,6 +76,8 @@ export interface ExerciseSnapshot {
   holdType?: string | null;
   prescriptionDetails?: string | null;
   modifications?: string | null;
+  cues?: string[] | null;
+  purpose?: string | null;
 }
 
 export interface SessionSnapshot {
@@ -86,6 +89,8 @@ export interface SessionSnapshot {
   intensity?: string | null;
   warmup?: string | null;
   cooldown?: string | null;
+  coachingFocus?: string | null;
+  modificationGuidance?: string | null;
   exercises: ExerciseSnapshot[];
 }
 
@@ -96,6 +101,8 @@ export interface DaySnapshot {
   focus: string;
   isRest: boolean;
   coachNotes?: string | null;
+  readinessGuidance?: string | null;
+  fallbackOption?: string | null;
   sessions: SessionSnapshot[];
 }
 
@@ -105,6 +112,9 @@ export interface WeekSnapshot {
   theme: string;
   summary?: string | null;
   progressionNote?: string | null;
+  coachRationale?: string | null;
+  keyAdaptations?: string[] | null;
+  watchouts?: string[] | null;
   days: DaySnapshot[];
 }
 
@@ -117,8 +127,24 @@ export interface PlanGuidance {
   progressionTable: Array<Record<string, string>>;
 }
 
+export interface PlanStrategy {
+  athleteSummary: string;
+  goalInterpretation: string;
+  riskFactors: string[];
+  phaseStructure: Array<{ phase: string; weeks: string; focus: string }>;
+  intensityDistribution: string;
+  recoveryStrategy: string;
+  benchmarks: string[];
+  coachingPrinciples: string[];
+}
+
 export interface PlanSnapshot {
   planGuidance?: PlanGuidance | null;
+  planStrategy?: PlanStrategy | null;
+  coachOverview?: string | null;
+  athleteContextSummary?: string | null;
+  progressionStrategy?: string | null;
+  recoveryStrategy?: string | null;
   weeks: WeekSnapshot[];
 }
 
@@ -155,6 +181,11 @@ export interface WeekView extends Omit<WeekSnapshot, "days"> {
 
 export interface PlanView {
   planGuidance: PlanGuidance | null;
+  planStrategy?: PlanStrategy | null;
+  coachOverview?: string | null;
+  athleteContextSummary?: string | null;
+  progressionStrategy?: string | null;
+  recoveryStrategy?: string | null;
   weeks: WeekView[];
 }
 
@@ -232,6 +263,22 @@ export function buildPlanGuidance(profile: ProfileSnapshot, weeks: Array<WeekDat
   };
 }
 
+export function richPlanFieldsFromStrategy(planStrategy?: PlanStrategy | null) {
+  if (!planStrategy) return {};
+
+  const progressionStrategy = planStrategy.phaseStructure
+    .map((phase) => `${phase.weeks}: ${phase.phase} - ${phase.focus}`)
+    .join(" | ");
+
+  return {
+    planStrategy,
+    coachOverview: planStrategy.goalInterpretation,
+    athleteContextSummary: planStrategy.athleteSummary,
+    progressionStrategy: progressionStrategy || undefined,
+    recoveryStrategy: planStrategy.recoveryStrategy,
+  };
+}
+
 export function buildPlanSnapshot(weeks: WeekData[], planGuidance: PlanGuidance | null = null): PlanSnapshot {
   return {
     planGuidance,
@@ -241,6 +288,9 @@ export function buildPlanSnapshot(weeks: WeekData[], planGuidance: PlanGuidance 
       theme: week.theme,
       summary: week.summary ?? null,
       progressionNote: week.progressionNote ?? null,
+      coachRationale: week.coachRationale ?? null,
+      keyAdaptations: week.keyAdaptations ?? null,
+      watchouts: week.watchouts ?? null,
       days: week.days.map((day) => ({
         key: `w${week.weekNum}-d${day.dayNum}`,
         dayNum: day.dayNum,
@@ -248,6 +298,8 @@ export function buildPlanSnapshot(weeks: WeekData[], planGuidance: PlanGuidance 
         focus: day.focus,
         isRest: day.isRest,
         coachNotes: day.coachNotes ?? null,
+        readinessGuidance: day.readinessGuidance ?? null,
+        fallbackOption: day.fallbackOption ?? null,
         sessions: day.sessions.map((session, sessionIndex) => ({
           key: `w${week.weekNum}-d${day.dayNum}-s${sessionIndex + 1}-${slug(session.name)}`,
           name: session.name,
@@ -257,6 +309,8 @@ export function buildPlanSnapshot(weeks: WeekData[], planGuidance: PlanGuidance 
           intensity: session.intensity ?? null,
           warmup: session.warmup ?? null,
           cooldown: session.cooldown ?? null,
+          coachingFocus: session.coachingFocus ?? null,
+          modificationGuidance: session.modificationGuidance ?? null,
           exercises: session.exercises.map((exercise, exerciseIndex) => ({
             key: `w${week.weekNum}-d${day.dayNum}-s${sessionIndex + 1}-e${exerciseIndex + 1}-${slug(exercise.name)}`,
             name: exercise.name,
@@ -278,6 +332,8 @@ export function buildPlanSnapshot(weeks: WeekData[], planGuidance: PlanGuidance 
             holdType: exercise.holdType ?? null,
             prescriptionDetails: exercise.prescriptionDetails ?? null,
             modifications: exercise.modifications ?? null,
+            cues: exercise.cues ?? null,
+            purpose: exercise.purpose ?? null,
           })),
         })),
       })),
@@ -318,6 +374,11 @@ export function buildPlanView(snapshot: PlanSnapshot, logs: WorkoutLogRecord[]):
 
   return {
     planGuidance: snapshot.planGuidance ?? null,
+    planStrategy: snapshot.planStrategy ?? null,
+    coachOverview: snapshot.coachOverview ?? null,
+    athleteContextSummary: snapshot.athleteContextSummary ?? null,
+    progressionStrategy: snapshot.progressionStrategy ?? null,
+    recoveryStrategy: snapshot.recoveryStrategy ?? null,
     weeks: snapshot.weeks.map((week) => ({
       ...week,
       id: week.key,

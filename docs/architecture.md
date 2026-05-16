@@ -15,7 +15,8 @@ Next.js 14 App Router              <- Docker service: web
        |- Prisma 7 + pg adapter -> PostgreSQL 16   <- Docker service: postgres
        \- OpenAI-compatible chat completions
             |- simulator when app/.env points local <- Docker service: simulator
-            \- live provider when app/.env points remote
+            |- live provider when app/.env points remote
+            \- optional intake gateway <- Docker service: guardrails
 
 Plan generation worker                 <- Docker service: plan-worker
   |- polls PlanGenerationJob
@@ -89,8 +90,8 @@ Plan generation worker                 <- Docker service: plan-worker
 
 ### Manual Plan Editing
 
-1. User opens `Edit This Week` from the pencil icon in the plan summary.
-2. The client edits the current week in local state.
+1. User opens `Edit Day` from the pencil icon in the plan summary.
+2. The client edits the currently selected/highlighted day inside the active week in local state.
 3. `saveEditedWeek()` validates the edited week payload.
 4. Destructive structural edits to logged weeks are rejected to preserve history.
 5. Logged weeks allow additive custom exercises only; existing logged days, sessions, and exercises are preserved.
@@ -99,10 +100,13 @@ Plan generation worker                 <- Docker service: plan-worker
 
 Current editor behavior:
 
-- day reordering happens in the compact `Day order` list
-- detailed exercise editing includes rest days
+- the week viewer can keep multiple days open for reading, but the editor targets one day: the most recently selected/highlighted day
+- day reordering is not exposed in the current direct editor
+- detailed exercise editing is scoped to the selected day
+- exercise Up/Down controls reorder work within that day, crossing adjacent sessions in the same day when needed
 - adding an exercise to a rest day converts it into a training day
 - add / duplicate / delete actions are icon-based
+- logging supports structured set, interval, attempt, or summary rows, with Add row controls for extra performed work
 - broad future-plan adjustments remain separate from precise manual day edits
 
 ### Future Plan Adjustment
@@ -193,9 +197,9 @@ This keeps revision history intact and avoids the complexity of mutating a deep 
   - pencil / coach actions
   - shared navigation menu
 - `PlanWorkspace`
-  - coordinates selected week across editor, adjuster, and viewer
+  - coordinates selected week and selected day across editor, adjuster, and viewer
 - `PlanEditor`
-  - direct editing for the selected week, including additive exercises on logged weeks
+  - direct editing for the selected day, including additive exercises on logged weeks
 - `PlanAdjuster`
   - conversational future-plan adjustments with inferred scope, proposal review, and apply confirmation
 - `PlanViewer`
@@ -209,5 +213,6 @@ This keeps revision history intact and avoids the complexity of mutating a deep 
 - guided intake refreshes the session on each chat exchange and before plan creation so long active chats do not expire mid-flow
 - the `migrate` service must succeed before `web` starts
 - migrations are raw SQL files tracked in `_app_migrations`
-- Docker reads AI backend settings from `app/.env`; copy `app/.env-simulator` or `app/.env-aibackend` to switch modes, then recreate `web` and `plan-worker`
+- Docker reads AI backend settings from `app/.env`; copy `app/.env-simulator`, `app/.env-aibackend`, or `app/.env-aibackend-nemo` to switch modes, then recreate `web` and `plan-worker`
+- optional NeMo guarded intake also requires the `guardrails` profile and a running `guardrails` service
 - `docker-compose.dev.yml` overlays the base compose file for local bind-mounted development

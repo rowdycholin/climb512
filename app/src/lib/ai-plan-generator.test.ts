@@ -1,8 +1,10 @@
 import { describe, expect, test } from "vitest";
 import {
   buildNextWeekPrompt,
+  buildFallbackPlanStrategy,
   CLIMBING_GRIP_SAFETY_RULES,
   dayNamesForPlanStart,
+  normalizeGeneratedWeek,
   summarizeGeneratedWeeks,
   validateGeneratedWeek,
   type PreviousWeekSummary,
@@ -103,36 +105,94 @@ describe("ai plan generator sequential core", () => {
       {
         weekNum: 1,
         theme: "Baseline power",
+        summary: null,
+        progressionNote: null,
+        coachRationale: null,
         trainingDays: 3,
         restDays: 4,
         totalSessions: 3,
         totalExercises: 3,
+        totalDurationMinutes: 155,
+        trainingDayPattern: [
+          "Monday: Limit bouldering",
+          "Tuesday: Rest",
+          "Wednesday: Strength",
+          "Thursday: Rest",
+          "Friday: Technique",
+          "Saturday: Rest",
+          "Sunday: Rest",
+        ],
         focusAreas: ["Limit bouldering", "Rest", "Strength", "Technique"],
+        sessionTypes: ["Limit boulders", "Pull strength", "Movement drills"],
+        intensityTargets: [],
         keyExercises: ["Limit problems", "Weighted pull-ups", "Silent feet"],
+        keyAdaptations: [],
+        watchouts: [],
       },
     ]);
   });
 
   test("builds a next-week prompt with previous summaries and repair feedback", () => {
     const previousWeekSummaries = summarizeGeneratedWeeks([validWeek]);
+    const planStrategy = buildFallbackPlanStrategy(request, 34);
     const prompt = buildNextWeekPrompt({
       request,
       athleteAge: 34,
       weekNum: 2,
       totalWeeks: 8,
       previousWeekSummaries,
+      planStrategy,
       repairFeedback: "Reduce elbow stress and avoid extra pulling volume.",
     });
 
     expect(prompt).toContain("Week 2 of 8");
     expect(prompt).toContain("PREVIOUS_WEEK_SUMMARIES_JSON");
+    expect(prompt).toContain("PLAN_STRATEGY_JSON");
+    expect(prompt).toContain("Use PLAN_STRATEGY_JSON to keep this week aligned");
+    expect(prompt).toContain("Treat totalDurationMinutes, trainingDayPattern, intensityTargets");
+    expect(prompt).toContain("Explain what changed from the immediately previous week");
     expect(prompt).toContain("\"weekNum\":1");
+    expect(prompt).toContain("34-year-old athlete");
     expect(prompt).toContain("Progress volume, intensity, exercise difficulty, or specificity gradually.");
     expect(prompt).toContain("Athlete requested structure");
     expect(prompt).toContain("Wednesday strength");
     expect(prompt).toContain("Reduce elbow stress");
     expect(prompt).toContain("mild elbow irritation");
     expect(prompt).toContain("campus board");
+    expect(prompt).toContain("coachRationale");
+    expect(prompt).toContain("readinessGuidance");
+    expect(prompt).toContain("modificationGuidance");
+    expect(prompt).toContain("Rich coaching fields may be 1-4 concise sentences");
+    expect(prompt).not.toContain("All string values must be SHORT");
+  });
+
+  test("builds route-grade climbing prompts without bouldering or hangboard confusion", () => {
+    const routeRequest: PlanRequest = {
+      ...request,
+      disciplines: ["sport"],
+      goalDescription: "Lead 5.11a",
+      currentLevel: "5.10a",
+      targetLevel: "5.11a",
+      equipment: ["indoor gym", "lead wall", "top rope", "bouldering wall", "Kilter Board"],
+      trainingFocus: ["strength"],
+      planStructureNotes: "Climb Monday, Wednesday, Friday. Strength and cardio Tuesday and Saturday.",
+      constraints: { injuries: [], limitations: [], avoidExercises: [] },
+    };
+
+    const prompt = buildNextWeekPrompt({
+      request: routeRequest,
+      athleteAge: 68,
+      weekNum: 1,
+      totalWeeks: 4,
+      previousWeekSummaries: [],
+      planStrategy: buildFallbackPlanStrategy(routeRequest, 68),
+    });
+
+    expect(prompt).toContain("YDS grades like 5.10a and 5.11a are roped route grades");
+    expect(prompt).toContain("Do not write \"5.11a boulder problem\"");
+    expect(prompt).toContain("Kilter Board, MoonBoard, Tension Board");
+    expect(prompt).toContain("Do not prescribe hangs on those boards");
+    expect(prompt).toContain("Hangs, repeaters, max hangs, and half-crimp hangs require hangboard or fingerboard equipment explicitly listed");
   });
 
   test("rotates generated day labels from the requested start date", () => {
@@ -176,6 +236,20 @@ describe("ai plan generator sequential core", () => {
     expect(prompt).not.toContain("This is a deload or consolidation week unless");
   });
 
+  test("builds a fallback full-block strategy from the request", () => {
+    const strategy = buildFallbackPlanStrategy(request, 34);
+
+    expect(strategy.athleteSummary).toContain("34-year-old");
+    expect(strategy.goalInterpretation).toContain("8-week");
+    expect(strategy.phaseStructure[0]).toMatchObject({
+      phase: "Build",
+      weeks: "Weeks 1-8",
+    });
+    expect(strategy.riskFactors).toContain("mild elbow irritation");
+    expect(strategy.riskFactors).toContain("Avoid campus board");
+    expect(strategy.recoveryStrategy).toContain("rest days");
+  });
+
   test("climbing generation prompts forbid full-crimp hangboard work", () => {
     const prompt = buildNextWeekPrompt({
       request,
@@ -192,6 +266,162 @@ describe("ai plan generator sequential core", () => {
 
   test("validates a well-formed generated week", () => {
     expect(validateGeneratedWeek(validWeek, 1)).toBe(validWeek);
+  });
+
+  test("rejects route grades used as bouldering grades and hangs on board walls", () => {
+    const badWeek: WeekData = {
+      ...validWeek,
+      days: validWeek.days.map((day) => day.dayNum === 1
+        ? {
+            ...day,
+            sessions: [
+              {
+                ...day.sessions[0],
+                exercises: [
+                  {
+                    name: "Early 5.11a Boulder Problem Attempts",
+                    sets: "3",
+                    reps: "2 attempts",
+                    grade: "5.11a",
+                    notes: "Try hard moves",
+                  },
+                  {
+                    name: "Kilter Board Half-Crimp Hangs",
+                    sets: "3",
+                    reps: "5",
+                    work: "5 sec hold",
+                    notes: "Half crimp only",
+                  },
+                ],
+              },
+            ],
+          }
+        : day),
+    };
+
+    expect(() => validateGeneratedWeek(badWeek, 1)).toThrow(/route grade for bouldering|hangs on a board/);
+  });
+
+  test("allows board support work to mention a route-grade lead goal in coaching prose", () => {
+    const supportWeek: WeekData = {
+      ...validWeek,
+      days: validWeek.days.map((day) => day.dayNum === 1
+        ? {
+            ...day,
+            sessions: [
+              {
+                ...day.sessions[0],
+                exercises: [
+                  {
+                    name: "Kilter Board Power-Endurance Intervals",
+                    sets: "3",
+                    reps: "4 problems",
+                    grade: "moderate",
+                    purpose: "Support 5.11a lead fitness without treating 5.11a as a boulder grade.",
+                  },
+                ],
+              },
+            ],
+          }
+        : day),
+    };
+
+    expect(validateGeneratedWeek(supportWeek, 1)).toBe(supportWeek);
+  });
+
+  test("normalizes rich coaching prose without weakening prescription validation", () => {
+    const normalized = normalizeGeneratedWeek({
+      weekNum: 1,
+      theme: "Base",
+      summary: "## Summary\nBuild capacity with crisp work.",
+      progressionNote: "**Progress** gradually before adding intensity.",
+      coachRationale: "This week builds a base because the athlete has elbow irritation and needs repeatable quality before harder sessions.",
+      keyAdaptations: ["Movement quality", "Movement quality", "Aerobic base", "Power endurance", "Finger capacity", "Extra item"],
+      watchouts: "Finger pain; rushing warmups",
+      days: [
+        {
+          dayNum: 1,
+          focus: "Technique",
+          isRest: false,
+          coachNotes: "```Keep effort smooth and stop if elbow pain rises.```",
+          readinessGuidance: "If energy is low, reduce hard attempts and keep movement easy.",
+          fallbackOption: "Use easy terrain if board climbing feels tweaky.",
+          sessions: [
+            {
+              name: "Main",
+              description: "Practice movement.",
+              duration: "45",
+              coachingFocus: "Quiet feet and relaxed hands.",
+              modificationGuidance: "Cut one set if form fades.",
+              exercises: [
+                {
+                  name: "Silent feet",
+                  duration: "15 min",
+                  notes: "Move quietly",
+                  purpose: "Rehearse precise foot placements under low fatigue.",
+                  cues: ["Quiet feet", "Soft grip", "Quiet feet"],
+                  modifications: "Use easier climbs if accuracy drops.",
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    }, 1);
+
+    expect(normalized.summary).toBe("Summary Build capacity with crisp work.");
+    expect(normalized.progressionNote).toBe("Progress gradually before adding intensity.");
+    expect(normalized.coachRationale).toContain("elbow irritation");
+    expect(normalized.keyAdaptations).toEqual(["Movement quality", "Aerobic base", "Power endurance", "Finger capacity", "Extra item"]);
+    expect(normalized.watchouts).toEqual(["Finger pain", "rushing warmups"]);
+    expect(normalized.days[0].coachNotes).toBe("Keep effort smooth and stop if elbow pain rises.");
+    expect(normalized.days[0].readinessGuidance).toContain("reduce hard attempts");
+    expect(normalized.days[0].sessions[0].coachingFocus).toBe("Quiet feet and relaxed hands.");
+    expect(normalized.days[0].sessions[0].exercises[0].purpose).toContain("foot placements");
+    expect(normalized.days[0].sessions[0].exercises[0].cues).toEqual(["Quiet feet", "Soft grip"]);
+    expect(validateGeneratedWeek(normalized, 1)).toBe(normalized);
+  });
+
+  test("strips unsafe medical prose while preserving usable prescription data", () => {
+    const normalized = normalizeGeneratedWeek({
+      weekNum: 1,
+      theme: "Base",
+      days: [
+        {
+          dayNum: 1,
+          focus: "Strength",
+          isRest: false,
+          readinessGuidance: "This diagnosis requires medical treatment.",
+          sessions: [
+            {
+              name: "Main",
+              description: "Strength support.",
+              duration: 45,
+              modificationGuidance: "Prescribe medication before doing this.",
+              exercises: [
+                {
+                  name: "Bodyweight rows",
+                  sets: "3",
+                  reps: "8",
+                  notes: "Smooth reps",
+                  purpose: "Diagnosed elbow issue treatment plan.",
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    }, 1);
+
+    expect(normalized.days[0].readinessGuidance).toBeUndefined();
+    expect(normalized.days[0].sessions[0].modificationGuidance).toBeUndefined();
+    expect(normalized.days[0].sessions[0].exercises[0].purpose).toBeUndefined();
+    expect(normalized.days[0].sessions[0].exercises[0]).toMatchObject({
+      name: "Bodyweight rows",
+      sets: "3",
+      reps: "8",
+    });
+    expect(validateGeneratedWeek(normalized, 1)).toBe(normalized);
   });
 
   test("allows warm-up, main session, and cooldown sections on a training day", () => {

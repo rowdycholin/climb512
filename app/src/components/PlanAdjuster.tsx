@@ -63,6 +63,7 @@ interface Proposal {
   requiresGoalChangeConfirmation: boolean;
   previewGroups: string[];
   richPreviewGroups: string[];
+  rationalePreviewGroups: string[];
   previewDetails: Array<{
     weekNum: number;
     dayNum: number;
@@ -403,6 +404,12 @@ function buildProposal(messages: ChatMessage[], latestMessage: string, weeks: We
     requiresGoalChangeConfirmation,
     previewGroups: preview.groups,
     richPreviewGroups: [],
+    rationalePreviewGroups: [
+      "The adjustment starts from editable future work so completed logs stay attached to the older version.",
+      requiresGoalChangeConfirmation
+        ? "Because this may change the goal or target, the app requires confirmation before applying it."
+        : "The larger sport, goal, target, and block length stay intact while future training details are adjusted.",
+    ],
     previewDetails: preview.details,
   };
 }
@@ -456,6 +463,12 @@ function aiProposalFromRaw(rawProposal: string, feedback: string, weeks: Week[])
       coaching?: string[];
       prescriptions?: string[];
     };
+    adjustmentRationale?: {
+      whatChanged?: string;
+      whyChanged?: string;
+      affectedTrainingLogic?: string;
+      recoveryImpact?: string;
+    };
   };
   const effective = weekDayFromPlanDay(parsed.effectiveFromPlanDay);
   const dayNameByRef = new Map<string, { dayName: string; focus: string }>();
@@ -473,6 +486,12 @@ function aiProposalFromRaw(rawProposal: string, feedback: string, weeks: Week[])
     scope: { type: "future_from_day", startWeek: effective.weekNum, startDay: effective.dayNum },
     scopeLabel: `From Week ${effective.weekNum}, Day ${effective.dayNum} through plan end`,
     requiresGoalChangeConfirmation: parsed.requiresGoalChangeConfirmation,
+    rationalePreviewGroups: [
+      parsed.adjustmentRationale?.whatChanged,
+      parsed.adjustmentRationale?.whyChanged,
+      parsed.adjustmentRationale?.affectedTrainingLogic,
+      parsed.adjustmentRationale?.recoveryImpact,
+    ].filter((item): item is string => Boolean(item)),
     richPreviewGroups: [
       ...(parsed.richChanges?.planGuidance ?? []),
       ...(parsed.richChanges?.coaching ?? []),
@@ -550,7 +569,13 @@ export default function PlanAdjuster({
         setMessages(parsed.messages);
       }
       if (typeof parsed.draft === "string") setDraft(parsed.draft);
-      setProposal(parsed.proposal ?? null);
+      setProposal(parsed.proposal
+        ? {
+            ...parsed.proposal,
+            richPreviewGroups: parsed.proposal.richPreviewGroups ?? [],
+            rationalePreviewGroups: parsed.proposal.rationalePreviewGroups ?? [],
+          }
+        : null);
       setGoalChangeConfirmed(Boolean(parsed.goalChangeConfirmed));
       setDetailsOpen(Boolean(parsed.detailsOpen));
     } catch {
@@ -723,7 +748,20 @@ export default function PlanAdjuster({
     formData.set("feedback", proposal.feedback);
     formData.set("adjustmentScope", JSON.stringify(proposal.scope));
     formData.set("proposalSummary", proposal.summary);
-    formData.set("proposalChanges", JSON.stringify([...proposal.changes, ...proposal.previewGroups, ...proposal.richPreviewGroups]));
+    formData.set("proposalChanges", JSON.stringify([
+      ...proposal.changes,
+      ...proposal.previewGroups,
+      ...proposal.rationalePreviewGroups,
+      ...proposal.richPreviewGroups,
+    ]));
+    if (proposal.rationalePreviewGroups.length > 0) {
+      formData.set("adjustmentRationale", JSON.stringify({
+        whatChanged: proposal.rationalePreviewGroups[0] ?? proposal.summary,
+        whyChanged: proposal.rationalePreviewGroups[1] ?? proposal.summary,
+        affectedTrainingLogic: proposal.rationalePreviewGroups[2] ?? proposal.scopeLabel,
+        recoveryImpact: proposal.rationalePreviewGroups[3] ?? "Future editable days are adjusted while logged history stays protected.",
+      }));
+    }
     formData.set("requiresGoalChangeConfirmation", proposal.requiresGoalChangeConfirmation ? "true" : "false");
     formData.set("goalChangeConfirmed", goalChangeConfirmed ? "true" : "false");
     if (proposal.rawProposal) formData.set("proposal", proposal.rawProposal);
@@ -869,6 +907,19 @@ export default function PlanAdjuster({
                 </li>
               ))}
             </ul>
+            {proposal.rationalePreviewGroups.length > 0 && (
+              <div className="mt-3 rounded-lg border border-sky-200 bg-white/70 px-3 py-2">
+                <p className="text-xs font-semibold uppercase tracking-[0.12em] text-sky-700">Adjustment rationale</p>
+                <ul className="mt-2 space-y-1 text-xs text-slate-700">
+                  {proposal.rationalePreviewGroups.map((change) => (
+                    <li key={change} className="flex gap-2">
+                      <span aria-hidden="true">-</span>
+                      <span>{change}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
             {proposal.richPreviewGroups.length > 0 && (
               <div className="mt-3 rounded-lg border border-sky-200 bg-white/70 px-3 py-2">
                 <p className="text-xs font-semibold uppercase tracking-[0.12em] text-sky-700">Rich detail changes</p>

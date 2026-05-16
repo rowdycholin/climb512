@@ -101,6 +101,12 @@ interface ConfirmedPlanAdjustmentInput {
   scope?: AdjustmentScope | null;
   proposalSummary?: string | null;
   proposalChanges?: string[];
+  adjustmentRationale?: {
+    whatChanged: string;
+    whyChanged: string;
+    affectedTrainingLogic: string;
+    recoveryImpact: string;
+  } | null;
   goalChangeConfirmed?: boolean;
 }
 
@@ -664,6 +670,8 @@ function adjustedExercise(exercise: ExerciseSnapshot, reason: PlanAdjustmentReas
     sets: numberText(exercise.sets, direction),
     reps: direction === "easier" ? numberText(exercise.reps, "easier") : exercise.reps,
     duration: durationText(exercise.duration, direction),
+    purpose: exercise.purpose ?? (direction === "easier" ? "Preserve the training intent with lower fatigue." : "Add a small extra stimulus while quality stays high."),
+    cues: exercise.cues ?? (direction === "easier" ? ["Smooth form", "Stop before strain"] : ["Quality first", "Do not chase fatigue"]),
     notes: direction === "easier"
       ? "Keep effort controlled and stop before form breaks."
       : "Use the stronger stimulus only while movement quality stays high.",
@@ -679,6 +687,15 @@ function adjustedDay(day: DaySnapshot, reason: PlanAdjustmentReason, feedback: s
   return {
     ...day,
     focus: reason === "injury" ? "Modified Training" : day.focus,
+    coachNotes: easier
+      ? "Adjusted to protect recovery while preserving the plan goal."
+      : "Adjusted upward only if movement quality stays high.",
+    readinessGuidance: easier
+      ? "If fatigue or pain rises, cut the final set or switch to the fallback option."
+      : "Use the added work only if warm-up quality and motivation are both good.",
+    fallbackOption: easier
+      ? "Keep the warm-up, choose the easiest useful variation, and stop after the first quality drop."
+      : "Keep the original prescription if the stronger option feels forced.",
     sessions: day.sessions.map((session) => ({
       ...session,
       duration: isRunningDay && easier
@@ -692,6 +709,12 @@ function adjustedDay(day: DaySnapshot, reason: PlanAdjustmentReason, feedback: s
         : isRunningDay && easier
           ? "Reduce intensity and keep the work aerobic so the legs can recover."
         : "Protect recovery and keep the session consistent.",
+      coachingFocus: easier
+        ? "Lower the cost of the session without losing the core skill or aerobic intent."
+        : "Add only a modest stimulus and keep execution clean.",
+      modificationGuidance: easier
+        ? "Reduce one set, shorten duration, or lower RPE before removing the whole session."
+        : "Return to the original version if form, pace, or movement quality fades.",
       exercises: session.exercises.map((exercise) => adjustedExercise(exercise, reason, feedback)),
     })),
   };
@@ -830,6 +853,8 @@ function easierRepeaterExercise(exercise: ExerciseSnapshot): ExerciseSnapshot {
     duration: null,
     rest: "2 min",
     notes: "Use a comfortable edge and stop before form or finger comfort changes.",
+    purpose: "Keep finger-strength practice in the plan with a lower-intensity stimulus.",
+    cues: ["Comfortable edge", "Stop before strain"],
   };
 }
 
@@ -849,6 +874,8 @@ function saferInjuryExercise(exercise: ExerciseSnapshot, feedback: string): Exer
     duration: durationText(exercise.duration, "easier"),
     rest: exercise.rest ?? "2 min",
     notes: "Keep this conservative and stop if symptoms increase.",
+    purpose: "Preserve useful training while reducing symptom-provoking load.",
+    cues: ["Pain-free range", "Move slowly"],
   };
 }
 
@@ -862,9 +889,14 @@ function applyExerciseSwapFixture(day: DaySnapshot, feedback: string) {
     ...day,
     focus: day.focus === "Rest" ? "Finger Strength" : day.focus,
     isRest: false,
+    coachNotes: "Adjusted to reduce finger intensity while keeping a useful strength signal.",
+    readinessGuidance: "Use only comfortable grips and stop if finger comfort changes.",
+    fallbackOption: "Skip the fingerboard and do easy movement drills if fingers feel tired.",
     sessions: day.sessions.map((session) => ({
       ...session,
       description: "Adjusted to a lower-intensity finger-strength option.",
+      coachingFocus: "Keep tissue stress lower than max hangs while practicing repeatable effort.",
+      modificationGuidance: "Use a larger edge, remove load, or stop after fewer sets if comfort changes.",
       exercises: session.exercises.map((exercise) => {
         if (!/\bmax\s*hang|hangs?|fingerboard|hangboard\b/i.test(exercise.name)) return exercise;
         changed = true;
@@ -885,6 +917,10 @@ function applyExerciseSwapFixture(day: DaySnapshot, feedback: string) {
           name: "Finger Strength",
           description: "Adjusted to a lower-intensity finger-strength option.",
           duration: 30,
+          objective: "Keep finger-strength work low intensity and repeatable.",
+          intensity: "RPE 5-6",
+          coachingFocus: "Comfortable repeaters instead of maximal hangs.",
+          modificationGuidance: "Use a larger edge or skip the session if fingers feel irritated.",
           exercises: [
             easierRepeaterExercise({
               key: `${day.key}-adjusted-e1-repeaters`,
@@ -906,6 +942,8 @@ function applyExerciseSwapFixture(day: DaySnapshot, feedback: string) {
       {
         ...firstSession,
         description: "Adjusted to a lower-intensity finger-strength option.",
+        coachingFocus: "Comfortable repeaters instead of maximal hangs.",
+        modificationGuidance: "Use a larger edge or stop early if finger comfort changes.",
         exercises: [
           easierRepeaterExercise(firstSession.exercises[0] ?? {
             key: `${firstSession.key}-e1-repeaters`,
@@ -929,10 +967,15 @@ function applyInjuryFixture(day: DaySnapshot, feedback: string) {
   return {
     ...day,
     focus: "Modified Training",
+    coachNotes: "Adjusted conservatively around the reported issue while keeping useful training in place.",
+    readinessGuidance: "Stay in a pain-free range and reduce the session further if symptoms increase.",
+    fallbackOption: "Replace the session with easy mobility or full rest if symptoms are present during warm-up.",
     sessions: day.sessions.map((session) => ({
       ...session,
       duration: Math.max(20, session.duration - 10),
       description: "Conservative injury-aware session that keeps the plan goal intact.",
+      coachingFocus: "Keep movement quality and symptom control ahead of workload.",
+      modificationGuidance: "Cut volume first, then intensity, and stop if symptoms increase.",
       exercises: session.exercises.map((exercise) => saferInjuryExercise(exercise, feedback)),
     })),
   };
@@ -1050,6 +1093,23 @@ function parseProposalChanges(value: FormDataEntryValue | null) {
     return parsed.filter((item): item is string => typeof item === "string" && item.trim().length > 0).slice(0, 12);
   } catch {
     return [];
+  }
+}
+
+function parseAdjustmentRationale(value: FormDataEntryValue | null) {
+  if (typeof value !== "string" || !value.trim()) return null;
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    if (!parsed || typeof parsed !== "object") return null;
+    const item = parsed as Record<string, unknown>;
+    const whatChanged = typeof item.whatChanged === "string" ? item.whatChanged.trim().slice(0, 500) : "";
+    const whyChanged = typeof item.whyChanged === "string" ? item.whyChanged.trim().slice(0, 500) : "";
+    const affectedTrainingLogic = typeof item.affectedTrainingLogic === "string" ? item.affectedTrainingLogic.trim().slice(0, 500) : "";
+    const recoveryImpact = typeof item.recoveryImpact === "string" ? item.recoveryImpact.trim().slice(0, 500) : "";
+    if (!whatChanged || !whyChanged || !affectedTrainingLogic || !recoveryImpact) return null;
+    return { whatChanged, whyChanged, affectedTrainingLogic, recoveryImpact };
+  } catch {
+    return null;
   }
 }
 
@@ -1468,12 +1528,18 @@ export async function continuePlanIntake(input: {
   }
   await refreshSession(session);
 
+  const user = await prisma.user.findUnique({
+    where: { id: session.userId },
+    select: { age: true },
+  });
+
   const draft = partialIntakeDraftSchema.parse(input.draft ?? {});
   return await continuePlanIntakeWithAiContract({
     draft,
     userMessage: input.userMessage,
     messages: input.messages,
     coachName: input.coachName,
+    athleteAge: user?.age,
     clientToday: input.clientToday,
     clientTimeZone: input.clientTimeZone,
   });
@@ -1643,6 +1709,7 @@ export async function revertPlanVersion(formData: FormData) {
 }
 
 export async function repairPlanGeneration(formData: FormData) {
+  const started = Date.now();
   const session = await getSession();
   if (!session.isLoggedIn) redirect("/login");
   await refreshSession(session);
@@ -1748,7 +1815,7 @@ export async function repairPlanGeneration(formData: FormData) {
   });
 
   console.log(
-    `[web] repaired plan generation plan=${plan.id} job=${job.id} resumeWeek=${resumeWeek}/${job.totalWeeks}`,
+    `[web] repaired plan generation plan=${plan.id} job=${job.id} resumeWeek=${resumeWeek}/${job.totalWeeks} retainedWeeks=${retainedGeneratedWeeks} durationMs=${Date.now() - started}`,
   );
 
   redirect(`/plan/${plan.id}`);
@@ -2002,6 +2069,7 @@ async function saveConfirmedFutureAdjustment(input: ConfirmedPlanAdjustmentInput
         changes: input.proposalChanges ?? [],
         scope: input.scope ?? null,
         affectedDays,
+        adjustmentRationale: input.adjustmentRationale ?? null,
       },
       basedOnVersionId: plan.currentVersion.id,
       effectiveFromWeek: adjustmentRequest.effectiveFrom.weekNum,
@@ -2143,6 +2211,7 @@ async function saveConfirmedAiAdjustmentProposal(input: {
           scope: null,
           affectedDays,
           richChanges,
+          adjustmentRationale: normalizedProposal.adjustmentRationale ?? null,
           revisedPlanSnapshot: normalizedProposal.revisedPlanSnapshot,
         }),
       },
@@ -2259,6 +2328,7 @@ async function saveConfirmedAiAdjustmentIntent(input: {
           ],
           effectiveFromPlanDay: input.intent.effectiveFromPlanDay,
           affectedDays,
+          adjustmentRationale: input.intent.adjustmentRationale,
           richChanges: {
             planGuidance: input.intent.richImpact.planGuidance ? input.intent.coachingChanges : [],
             coaching: input.intent.richImpact.dayCoaching || input.intent.richImpact.weekSummaries ? input.intent.coachingChanges : [],
@@ -2324,6 +2394,7 @@ export async function applyConfirmedPlanAdjustment(formData: FormData): Promise<
     scope: parseAdjustmentScope(formData.get("adjustmentScope")),
     proposalSummary,
     proposalChanges: parseProposalChanges(formData.get("proposalChanges")),
+    adjustmentRationale: parseAdjustmentRationale(formData.get("adjustmentRationale")),
     goalChangeConfirmed,
   });
 }

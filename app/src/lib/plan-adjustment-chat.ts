@@ -58,6 +58,8 @@ const adjustmentExerciseSnapshotSchema = z.object({
   holdType: optionalNullableTextSchema,
   prescriptionDetails: optionalNullableTextSchema,
   modifications: optionalNullableTextSchema,
+  cues: z.array(z.string()).nullable().optional(),
+  purpose: optionalNullableTextSchema,
 });
 
 const adjustmentSessionSnapshotSchema = z.object({
@@ -69,6 +71,8 @@ const adjustmentSessionSnapshotSchema = z.object({
   intensity: optionalNullableTextSchema,
   warmup: optionalNullableTextSchema,
   cooldown: optionalNullableTextSchema,
+  coachingFocus: optionalNullableTextSchema,
+  modificationGuidance: optionalNullableTextSchema,
   exercises: z.array(adjustmentExerciseSnapshotSchema),
 });
 
@@ -79,6 +83,8 @@ const adjustmentDaySnapshotSchema = z.object({
   focus: z.string().trim().min(1),
   isRest: z.boolean(),
   coachNotes: optionalNullableTextSchema,
+  readinessGuidance: optionalNullableTextSchema,
+  fallbackOption: optionalNullableTextSchema,
   sessions: z.array(adjustmentSessionSnapshotSchema),
 });
 
@@ -88,6 +94,9 @@ const adjustmentWeekSnapshotSchema = z.object({
   theme: z.string().trim().min(1),
   summary: optionalNullableTextSchema,
   progressionNote: optionalNullableTextSchema,
+  coachRationale: optionalNullableTextSchema,
+  keyAdaptations: z.array(z.string()).nullable().optional(),
+  watchouts: z.array(z.string()).nullable().optional(),
   days: z.array(adjustmentDaySnapshotSchema).length(7),
 });
 
@@ -131,6 +140,13 @@ const adjustmentRichChangeSummarySchema = z.object({
   prescriptions: z.array(z.string()).default([]),
 });
 
+const adjustmentRationaleSchema = z.object({
+  whatChanged: z.string().trim().min(1).max(500),
+  whyChanged: z.string().trim().min(1).max(500),
+  affectedTrainingLogic: z.string().trim().min(1).max(500),
+  recoveryImpact: z.string().trim().min(1).max(500),
+});
+
 export const adjustmentChatProposalSchema = z.object({
   summary: z.string().trim().min(1).max(500),
   changes: z.array(z.string().trim().min(1).max(300)).min(1).max(12),
@@ -149,6 +165,7 @@ export const adjustmentChatProposalSchema = z.object({
   preservesOriginalGoal: z.boolean(),
   requiresGoalChangeConfirmation: z.boolean(),
   goalChange: adjustmentGoalChangeSchema.optional(),
+  adjustmentRationale: adjustmentRationaleSchema.optional(),
   richChanges: adjustmentRichChangeSummarySchema.optional(),
   revisedPlanSnapshot: adjustmentPlanSnapshotSchema,
 });
@@ -177,6 +194,7 @@ export const adjustmentIntentSchema = z.object({
   targetSessionTypes: z.array(z.string().trim().min(1).max(80)).default([]),
   prescriptionChanges: z.array(z.string().trim().min(1).max(300)).default([]),
   coachingChanges: z.array(z.string().trim().min(1).max(300)).default([]),
+  adjustmentRationale: adjustmentRationaleSchema,
   richImpact: z
     .object({
       planGuidance: z.boolean().default(false),
@@ -222,6 +240,7 @@ export type AdjustmentChatProposal = z.infer<typeof adjustmentChatProposalSchema
 export type AdjustmentIntent = z.infer<typeof adjustmentIntentSchema>;
 export type AdjustmentProposalValidationResult = z.infer<typeof adjustmentProposalValidationResultSchema>;
 export type AdjustmentRichChangeSummary = z.infer<typeof adjustmentRichChangeSummarySchema>;
+export type AdjustmentRationale = z.infer<typeof adjustmentRationaleSchema>;
 
 export interface AdjustmentChatContext {
   planId: string;
@@ -263,7 +282,12 @@ export interface AdjustmentChatContext {
     isRest: boolean;
     summary?: string | null;
     progressionNote?: string | null;
+    coachRationale?: string | null;
+    keyAdaptations?: string[] | null;
+    watchouts?: string[] | null;
     coachNotes?: string | null;
+    readinessGuidance?: string | null;
+    fallbackOption?: string | null;
     sessions: Array<{
       key: string;
       name: string;
@@ -273,6 +297,8 @@ export interface AdjustmentChatContext {
       intensity?: string | null;
       warmup?: string | null;
       cooldown?: string | null;
+      coachingFocus?: string | null;
+      modificationGuidance?: string | null;
       exercises: Array<{
         key: string;
         name: string;
@@ -294,6 +320,8 @@ export interface AdjustmentChatContext {
         holdType?: string | null;
         prescriptionDetails?: string | null;
         modifications?: string | null;
+        cues?: string[] | null;
+        purpose?: string | null;
       }>;
     }>;
   }>;
@@ -358,6 +386,8 @@ function richSessionContext(session: SessionSnapshot) {
     intensity: session.intensity ?? null,
     warmup: session.warmup ?? null,
     cooldown: session.cooldown ?? null,
+    coachingFocus: session.coachingFocus ?? null,
+    modificationGuidance: session.modificationGuidance ?? null,
     exercises: session.exercises.map((exercise) => ({
       key: exercise.key,
       name: exercise.name,
@@ -379,6 +409,8 @@ function richSessionContext(session: SessionSnapshot) {
       holdType: exercise.holdType ?? null,
       prescriptionDetails: exercise.prescriptionDetails ?? null,
       modifications: exercise.modifications ?? null,
+      cues: exercise.cues ?? null,
+      purpose: exercise.purpose ?? null,
     })),
   };
 }
@@ -440,7 +472,12 @@ export function buildAdjustmentChatContext(params: {
       isRest: day.isRest,
       summary: week.summary ?? null,
       progressionNote: week.progressionNote ?? null,
+      coachRationale: week.coachRationale ?? null,
+      keyAdaptations: week.keyAdaptations ?? null,
+      watchouts: week.watchouts ?? null,
       coachNotes: day.coachNotes ?? null,
+      readinessGuidance: day.readinessGuidance ?? null,
+      fallbackOption: day.fallbackOption ?? null,
       sessions: day.sessions.map(richSessionContext),
     })),
   };
@@ -465,6 +502,8 @@ Boundaries:
 - Preserve planGuidance and rich coaching fields unless the user's request intentionally changes the larger training intent.
 - Preserve structured prescription fields such as work, restBetweenSets, load, intensity, grade, tempo, distance, and modifications when changing unrelated text.
 - When work/rest/load/intensity or coaching details should change, describe those changes in prescriptionChanges, coachingChanges, and changedDays summaries.
+- Include adjustmentRationale when returning an intent. Explain what changes, why it changes, the training logic affected, and the recovery impact.
+- If the adjustment changes future training, make coachingChanges name which rich fields should be updated: week coachRationale/progressionNote, day coachNotes/readinessGuidance/fallbackOption, session coachingFocus/modificationGuidance, or exercise purpose/cues/modifications.
 
 Return JSON only.`;
 }
@@ -490,6 +529,7 @@ IMPORTANT INTENT RULES:
 - Describe the intended training changes precisely enough for a week generator to apply them later.
 - Use prescriptionChanges for work/rest/load/intensity/RPE/volume changes.
 - Use coachingChanges for plan guidance, week summaries, day coach notes, session objective/intensity/warmup/cooldown, or modifications.
+- Include adjustmentRationale with coach-readable explanations for what changed, why it changed, training logic, and recovery impact.
 - If the user wants to change sport, goal, target level/date, event, block length, or training days per week, set requiresGoalChangeConfirmation to true.
 
 FOLLOW_UP SHAPE:
@@ -517,6 +557,12 @@ INTENT SHAPE:
     "targetSessionTypes": ["fingerboard", "limit bouldering"],
     "prescriptionChanges": ["reduce fingerboard intensity by 1-2 RPE", "keep warmups and cooldowns unchanged"],
     "coachingChanges": ["add recovery-focused coach notes on adjusted days"],
+    "adjustmentRationale": {
+      "whatChanged": "Future fingerboard intensity is reduced while logged days stay fixed.",
+      "whyChanged": "The athlete reported finger fatigue, so the plan needs less local tissue stress before hard climbing resumes.",
+      "affectedTrainingLogic": "The block still targets V6 movement quality, but the next weeks trade some maximal loading for repeatable quality.",
+      "recoveryImpact": "Extra margin is added through lower RPE, longer rests, and readiness guidance on affected days."
+    },
     "richImpact": { "planGuidance": false, "weekSummaries": true, "dayCoaching": true, "exercisePrescriptions": true }
   }
 }`;
@@ -527,8 +573,12 @@ function nullableText(value: unknown) {
 }
 
 function changedText(label: string, before: unknown, after: unknown) {
-  const oldValue = nullableText(before);
-  const newValue = nullableText(after);
+  const oldValue = Array.isArray(before)
+    ? before.filter((item): item is string => typeof item === "string" && item.trim().length > 0).join(", ") || null
+    : nullableText(before);
+  const newValue = Array.isArray(after)
+    ? after.filter((item): item is string => typeof item === "string" && item.trim().length > 0).join(", ") || null
+    : nullableText(after);
   if (oldValue === newValue) return null;
   if (oldValue && newValue) return `${label}: ${oldValue} -> ${newValue}`;
   if (newValue) return `${label}: added ${newValue}`;
@@ -547,7 +597,19 @@ function exerciseByKey(session: SessionSnapshot) {
   return new Map(session.exercises.map((exercise) => [exercise.key, exercise]));
 }
 
-const sessionRichFields = ["objective", "intensity", "warmup", "cooldown"] as const;
+const weekRichFields = ["summary", "progressionNote", "coachRationale", "keyAdaptations", "watchouts"] as const;
+const dayRichFields = ["coachNotes", "readinessGuidance", "fallbackOption"] as const;
+const sessionRichFields = ["objective", "intensity", "warmup", "cooldown", "coachingFocus", "modificationGuidance"] as const;
+const richFieldLabels: Record<string, string> = {
+  progressionNote: "progression",
+  coachRationale: "coach rationale",
+  keyAdaptations: "key adaptations",
+  coachNotes: "coach notes",
+  readinessGuidance: "readiness guidance",
+  fallbackOption: "fallback option",
+  coachingFocus: "coaching focus",
+  modificationGuidance: "modification guidance",
+};
 const exercisePrescriptionFields = [
   "sets",
   "reps",
@@ -566,6 +628,8 @@ const exercisePrescriptionFields = [
   "holdType",
   "prescriptionDetails",
   "modifications",
+  "purpose",
+  "cues",
 ] as const;
 
 function dayLabel(weekNum: number, day: DaySnapshot) {
@@ -604,10 +668,10 @@ export function summarizeRichSnapshotChanges(params: {
     const adjustedWeek = adjustedWeeks.get(originalWeek.weekNum);
     if (!adjustedWeek) continue;
 
-    const weekSummaryChange = changedText(`Week ${originalWeek.weekNum} summary`, originalWeek.summary, adjustedWeek.summary);
-    if (weekSummaryChange) coaching.push(weekSummaryChange);
-    const weekProgressionChange = changedText(`Week ${originalWeek.weekNum} progression`, originalWeek.progressionNote, adjustedWeek.progressionNote);
-    if (weekProgressionChange) coaching.push(weekProgressionChange);
+    for (const field of weekRichFields) {
+      const change = changedText(`Week ${originalWeek.weekNum} ${richFieldLabels[field] ?? field}`, originalWeek[field], adjustedWeek[field]);
+      if (change) coaching.push(change);
+    }
 
     const adjustedDays = new Map(adjustedWeek.days.map((day) => [day.dayNum, day]));
     for (const originalDay of originalWeek.days) {
@@ -616,8 +680,10 @@ export function summarizeRichSnapshotChanges(params: {
       const adjustedDay = adjustedDays.get(originalDay.dayNum);
       if (!adjustedDay) continue;
 
-      const coachNotesChange = changedText(`${dayLabel(originalWeek.weekNum, originalDay)} coach notes`, originalDay.coachNotes, adjustedDay.coachNotes);
-      if (coachNotesChange) coaching.push(coachNotesChange);
+      for (const field of dayRichFields) {
+        const change = changedText(`${dayLabel(originalWeek.weekNum, originalDay)} ${richFieldLabels[field] ?? field}`, originalDay[field], adjustedDay[field]);
+        if (change) coaching.push(change);
+      }
 
       const adjustedSessions = sessionByKey(adjustedDay);
       for (const originalSession of originalDay.sessions) {
@@ -625,7 +691,7 @@ export function summarizeRichSnapshotChanges(params: {
         if (!adjustedSession) continue;
 
         for (const field of sessionRichFields) {
-          const change = changedText(`${dayLabel(originalWeek.weekNum, originalDay)} ${originalSession.name} ${field}`, originalSession[field], adjustedSession[field]);
+          const change = changedText(`${dayLabel(originalWeek.weekNum, originalDay)} ${originalSession.name} ${richFieldLabels[field] ?? field}`, originalSession[field], adjustedSession[field]);
           if (change) coaching.push(change);
         }
 

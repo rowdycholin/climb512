@@ -59,6 +59,43 @@ test("does not treat a sport-only answer as current level", () => {
   assert.match(response.message, /running goal|race or distance/i);
 });
 
+test("treats trad climbing as a climbing discipline instead of a goal", () => {
+  const response = generateIntakeResponseFromPrompt(prompt({
+    draft: { disciplines: [], equipment: [], trainingFocus: [] },
+    latest: "Trad Climbing",
+    recent: [{ role: "assistant", content: "Which one would you like to train for?" }],
+  }));
+
+  assert.equal(response.status, "needs_more_info");
+  assert.equal(response.planRequestDraft.sport, "climbing");
+  assert.deepEqual(response.planRequestDraft.disciplines, ["trad"]);
+  assert.equal(response.planRequestDraft.goalDescription, undefined);
+  assert.equal(response.planRequestDraft.currentLevel, undefined);
+  assert.match(response.message, /climbing goal/i);
+});
+
+test("asks current level for a trad plan after the earlier basics are known", () => {
+  const response = generateIntakeResponseFromPrompt(prompt({
+    draft: {
+      sport: "climbing",
+      disciplines: ["trad"],
+      goalType: "ongoing",
+      goalDescription: "Build trad climbing fitness",
+      blockLengthWeeks: 8,
+      daysPerWeek: 3,
+      startDate: "2026-05-08",
+      equipment: [],
+      trainingFocus: [],
+    },
+    latest: "ok",
+    recent: [{ role: "assistant", content: "Let's anchor the first week. When would you like to start?" }],
+  }));
+
+  assert.equal(response.status, "needs_more_info");
+  assert.equal(response.planRequestDraft.currentLevel, undefined);
+  assert.match(response.message, /current training level/i);
+});
+
 test("asks for clarification when the goal conflicts with the selected sport", () => {
   const response = generateIntakeResponseFromPrompt(prompt({
     draft: {

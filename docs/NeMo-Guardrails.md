@@ -41,7 +41,7 @@ MAIN_MODEL="${ANTHROPIC_MODEL:-${OPENAI_MODEL:-gpt-4o-mini}}"
 For the live NeMo env, that resolves to:
 
 ```text
-model=anthropic/claude-haiku-4-5
+model=openai/gpt-5.5
 baseUrl=https://openrouter.ai/api/v1
 engine=openai
 ```
@@ -306,7 +306,7 @@ If the project keeps LLM-based self-checks, configure a cheaper/faster model for
 Possible approaches:
 
 - Add a separate `content_safety`, `topic_control`, or `llama_guard` model if the provider supports one.
-- Keep `anthropic/claude-haiku-4-5` as the main response model.
+- Keep `openai/gpt-5.5` as the main response model.
 - Use the guardrail model only for input/output checks that still require semantic classification.
 
 Implementation steps:

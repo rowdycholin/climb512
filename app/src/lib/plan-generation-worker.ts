@@ -1,7 +1,7 @@
 import { prisma } from "./prisma";
-import { generateAdjustedWeekFromIntent, generateNextWeekFromPlanContext } from "./ai-plan-generator";
+import { buildFallbackPlanStrategy, generateAdjustedWeekFromIntent, generateNextWeekFromPlanContext, generatePlanStrategyWithAI } from "./ai-plan-generator";
 import { composePlanSnapshotFromGeneratedWeeks, getNextJobStatusAfterWeek } from "./plan-generation-state";
-import { buildPlanGuidance, parseProfileSnapshot, toStoredJson, type PlanSnapshot, type ProfileSnapshot, type WeekSnapshot } from "./plan-snapshot";
+import { buildPlanGuidance, parseProfileSnapshot, richPlanFieldsFromStrategy, toStoredJson, type PlanSnapshot, type ProfileSnapshot, type WeekSnapshot } from "./plan-snapshot";
 import { adjustmentIntentSchema } from "./plan-adjustment-chat";
 import { buildPlanSnapshot } from "./plan-snapshot";
 import type { Prisma } from "@prisma/client";
@@ -54,6 +54,7 @@ function parseAdjustmentJobMetadata(raw: unknown) {
     effectiveFromPlanDay?: unknown;
     affectedDays?: unknown;
     richChanges?: unknown;
+    adjustmentRationale?: unknown;
   };
 
   const adjustmentIntent = metadata.adjustmentIntent
@@ -73,6 +74,9 @@ function parseAdjustmentJobMetadata(raw: unknown) {
     effectiveFromPlanDay: typeof metadata.effectiveFromPlanDay === "number" ? metadata.effectiveFromPlanDay : null,
     affectedDays: Array.isArray(metadata.affectedDays) ? metadata.affectedDays : [],
     richChanges: metadata.richChanges ?? null,
+    adjustmentRationale: metadata.adjustmentRationale && typeof metadata.adjustmentRationale === "object"
+      ? metadata.adjustmentRationale as Record<string, unknown>
+      : null,
   };
 }
 
@@ -123,19 +127,27 @@ function withIntentWeekSummary(params: {
 
   const prescriptionText = intent.prescriptionChanges.slice(0, 2).join("; ");
   const coachingText = intent.coachingChanges.slice(0, 1).join("; ");
+  const rationaleText = intent.adjustmentRationale?.whyChanged;
   const adjustmentText = [prescriptionText, coachingText].filter(Boolean).join("; ");
   if (!adjustmentText) return params.week;
 
   const summary = params.week.summary?.trim()
     ? `${params.week.summary.trim()} Adjusted: ${adjustmentText}.`
     : `Adjusted: ${adjustmentText}.`;
+  const coachRationale = params.week.coachRationale?.trim()
+    ? `${params.week.coachRationale.trim()} Adjustment rationale: ${rationaleText ?? adjustmentText}.`
+    : `Adjustment rationale: ${rationaleText ?? adjustmentText}.`;
 
   return {
     ...params.week,
-    summary: summary.slice(0, 220),
+    summary: summary.slice(0, 320),
     progressionNote: params.week.progressionNote?.trim()
       ? params.week.progressionNote
-      : `This week reflects the approved adjustment: ${adjustmentText}.`.slice(0, 220),
+      : `This week reflects the approved adjustment: ${adjustmentText}.`.slice(0, 320),
+    coachRationale: coachRationale.slice(0, 520),
+    watchouts: params.week.watchouts?.length
+      ? params.week.watchouts
+      : [intent.adjustmentRationale.recoveryImpact].filter(Boolean).slice(0, 5),
   };
 }
 
@@ -266,6 +278,7 @@ async function saveGeneratedWeek(params: {
       generatedSnapshot = {
         ...generatedSnapshot,
         planGuidance: buildPlanGuidance(profileSnapshot, generatedSnapshot.weeks),
+        ...richPlanFieldsFromStrategy(profileSnapshot.planStrategy),
       };
       const latest = await tx.planVersion.findFirst({
         where: { planId: job.planId },
@@ -383,6 +396,7 @@ async function saveAdjustedWeek(params: {
             changes: metadata.proposalChanges,
             affectedDays: metadata.affectedDays,
             richChanges: metadata.richChanges,
+            adjustmentRationale: metadata.adjustmentRationale ?? metadata.adjustmentIntent?.adjustmentRationale ?? null,
             generatedSerially: true,
           }),
           profileSnapshot: toStoredJson(profileSnapshot),
@@ -423,6 +437,7 @@ async function saveAdjustedWeek(params: {
 export async function runOnePlanGenerationJob(options: PlanGenerationWorkerOptions = {}) {
   const job = await claimNextGenerationJob(options.lockTimeoutMs);
   if (!job) return { status: "idle" as const };
+  const jobStarted = Date.now();
 
   try {
     const plan = await prisma.plan.findFirst({
@@ -449,7 +464,7 @@ export async function runOnePlanGenerationJob(options: PlanGenerationWorkerOptio
       throw new Error(`Plan ${job.planId} was not found`);
     }
 
-    const profileSnapshot = parseProfileSnapshot(job.profileSnapshot);
+    let profileSnapshot = parseProfileSnapshot(job.profileSnapshot);
 
     if (job.jobType === "adjustment") {
       const metadata = parseAdjustmentJobMetadata(job.changeMetadata);
@@ -508,6 +523,10 @@ export async function runOnePlanGenerationJob(options: PlanGenerationWorkerOptio
         metadata,
       });
 
+      console.log(
+        `[plan-worker] job success type=adjustment plan=${job.planId} job=${job.id} week=${adjustedWeek.weekNum}/${job.totalWeeks} durationMs=${Date.now() - jobStarted}`,
+      );
+
       return {
         status: "generated" as const,
         jobId: job.id,
@@ -523,11 +542,30 @@ export async function runOnePlanGenerationJob(options: PlanGenerationWorkerOptio
       throw new Error(`Plan ${job.planId} is missing profileSnapshot.planRequest`);
     }
 
+    if (!profileSnapshot.planStrategy) {
+      let planStrategy = buildFallbackPlanStrategy(planRequest, plan.user.age);
+      try {
+        planStrategy = await generatePlanStrategyWithAI(planRequest, plan.user.age, options.username ?? plan.user.userId);
+      } catch (error) {
+        console.warn(
+          `[plan-worker] plan strategy fallback plan=${job.planId} job=${job.id}: ${(error as Error).message.slice(0, 300)}`,
+        );
+      }
+      profileSnapshot = {
+        ...profileSnapshot,
+        planStrategy,
+      };
+      await prisma.planGenerationJob.update({
+        where: { id: job.id },
+        data: { profileSnapshot: toStoredJson(profileSnapshot) },
+      });
+    }
+
     const existingWeeks = (plan.generationJobs[0]?.weeks ?? [])
       .map((row) => parseWeekSnapshot(row.weekSnapshot))
       .filter((week) => week.weekNum < job.nextWeekNum);
     console.log(
-      `[plan-worker] generating plan=${job.planId} job=${job.id} week=${job.nextWeekNum}/${job.totalWeeks} priorWeeks=${existingWeeks.length} sport=${planRequest.sport} user=${plan.user.userId}`,
+      `[plan-worker] generating plan=${job.planId} job=${job.id} week=${job.nextWeekNum}/${job.totalWeeks} priorWeeks=${existingWeeks.length} sport=${planRequest.sport} hasStrategy=${Boolean(profileSnapshot.planStrategy)} repair=${Boolean(job.repairNotes)} user=${plan.user.userId}`,
     );
     const week = await generateNextWeekFromPlanContext({
       request: planRequest,
@@ -535,6 +573,7 @@ export async function runOnePlanGenerationJob(options: PlanGenerationWorkerOptio
       weekNum: job.nextWeekNum,
       totalWeeks: job.totalWeeks,
       previousWeeks: existingWeeks,
+      planStrategy: profileSnapshot.planStrategy,
       repairFeedback: job.repairNotes,
       username: options.username ?? plan.user.userId,
     });
@@ -546,6 +585,10 @@ export async function runOnePlanGenerationJob(options: PlanGenerationWorkerOptio
       week,
     });
 
+    console.log(
+      `[plan-worker] job success type=generation plan=${job.planId} job=${job.id} week=${week.weekNum}/${job.totalWeeks} durationMs=${Date.now() - jobStarted}`,
+    );
+
     return {
       status: "generated" as const,
       jobId: job.id,
@@ -555,6 +598,9 @@ export async function runOnePlanGenerationJob(options: PlanGenerationWorkerOptio
       totalWeeks: job.totalWeeks,
     };
   } catch (error) {
+    console.error(
+      `[plan-worker] job failure type=${job.jobType} plan=${job.planId} job=${job.id} week=${job.nextWeekNum}/${job.totalWeeks} durationMs=${Date.now() - jobStarted}: ${(error as Error).message.slice(0, 500)}`,
+    );
     await failGenerationJob(job, error);
     return {
       status: "failed" as const,

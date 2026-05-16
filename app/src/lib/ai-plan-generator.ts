@@ -1,9 +1,10 @@
 import type { PlanInput, WeekData, DayData, SessionData, ExerciseData } from "./plan-types";
 import type { PlanRequest } from "./plan-request";
-import type { WeekSnapshot } from "./plan-snapshot";
+import type { PlanStrategy, WeekSnapshot } from "./plan-snapshot";
 import type { AdjustmentIntent } from "./plan-adjustment-chat";
 
-const MODEL = process.env.ANTHROPIC_MODEL ?? "anthropic/claude-haiku-4-5";
+const WEEK_MODEL = process.env.ANTHROPIC_WEEK_MODEL ?? process.env.ANTHROPIC_MODEL ?? "openai/gpt-5.5";
+const STRATEGY_MODEL = process.env.ANTHROPIC_STRATEGY_MODEL ?? process.env.ANTHROPIC_MODEL ?? WEEK_MODEL;
 const MAX_TOKENS = parseInt(process.env.ANTHROPIC_MAX_TOKENS ?? "5000", 10);
 
 // Base URL: OpenRouter = "https://openrouter.ai/api", direct Anthropic = "https://api.anthropic.com"
@@ -11,6 +12,13 @@ const MAX_TOKENS = parseInt(process.env.ANTHROPIC_MAX_TOKENS ?? "5000", 10);
 const BASE_URL = (process.env.ANTHROPIC_BASE_URL ?? "https://openrouter.ai/api").replace(/\/$/, "");
 const API_KEY = process.env.ANTHROPIC_API_KEY ?? "";
 const SEND_SIMULATOR_USER_HEADER = /^https?:\/\/(simulator|localhost|127\.0\.0\.1)(:\d+)?$/i.test(BASE_URL);
+const PROVIDER_LABEL = (() => {
+  try {
+    return new URL(BASE_URL).host;
+  } catch {
+    return "configured-provider";
+  }
+})();
 
 const DAY_NAMES = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
 const CALENDAR_DAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
@@ -28,7 +36,7 @@ function dayNameRules(expectedDayNames: string[]) {
 }
 
 function weekOutputShape(weekNum: number, expectedDayNames = DAY_NAMES) {
-  return `{"weekNum":${weekNum},"theme":"<short theme>","summary":"<week purpose>","progressionNote":"<how this week progresses>","days":[{"dayNum":1,"dayName":"${expectedDayNames[0]}","focus":"<focus>","isRest":false,"coachNotes":"<day intent>","sessions":[{"name":"Warm-up","description":"<one sentence>","duration":10,"objective":"<what to accomplish>","intensity":"RPE 3-4","exercises":[{"name":"<name>","duration":"5 min","notes":"<cue>"}]},{"name":"Main Session","description":"<one sentence>","duration":45,"objective":"<what to accomplish>","intensity":"<RPE/grade/effort>","exercises":[{"name":"<name>","sets":"3","reps":"5","work":"10s","restBetweenSets":"3 min","intensity":"RPE 7","grade":"<optional grade>","notes":"<cue>","modifications":"<easier/harder option>"}]},{"name":"Cooldown","description":"<one sentence>","duration":8,"cooldown":"<short cooldown guidance>","exercises":[{"name":"<name>","duration":"5 min","notes":"<cue>"}]}]},{"dayNum":2,"dayName":"${expectedDayNames[1]}","focus":"Rest","isRest":true,"sessions":[]},...7 days total]}`;
+  return `{"weekNum":${weekNum},"theme":"<short theme>","summary":"<week purpose>","progressionNote":"<how this week progresses>","coachRationale":"<why this week fits the athlete and block>","keyAdaptations":["<adaptation>"],"watchouts":["<risk or readiness watchout>"],"days":[{"dayNum":1,"dayName":"${expectedDayNames[0]}","focus":"<focus>","isRest":false,"coachNotes":"<day intent>","readinessGuidance":"<how to adjust if readiness is low>","fallbackOption":"<simpler option if time/fatigue/pain requires>","sessions":[{"name":"Warm-up","description":"<one sentence>","duration":10,"objective":"<what to accomplish>","intensity":"RPE 3-4","coachingFocus":"<what to pay attention to>","modificationGuidance":"<how to scale this session>","exercises":[{"name":"<name>","duration":"5 min","notes":"<cue>","purpose":"<why this exercise is here>","cues":["<short cue>"]}]},{"name":"Main Session","description":"<one sentence>","duration":45,"objective":"<what to accomplish>","intensity":"<RPE/grade/effort>","coachingFocus":"<session priority>","modificationGuidance":"<easier/harder option>","exercises":[{"name":"<name>","sets":"3","reps":"5","work":"10s","restBetweenSets":"3 min","intensity":"RPE 7","grade":"<optional grade>","notes":"<cue>","purpose":"<training purpose>","cues":["<short cue>"],"modifications":"<easier/harder option>"}]},{"name":"Cooldown","description":"<one sentence>","duration":8,"cooldown":"<short cooldown guidance>","exercises":[{"name":"<name>","duration":"5 min","notes":"<cue>"}]}]},{"dayNum":2,"dayName":"${expectedDayNames[1]}","focus":"Rest","isRest":true,"sessions":[]},...7 days total]}`;
 }
 
 function athleteLevelLabel(currentLevel?: string | null, targetLevel?: string | null) {
@@ -75,10 +83,10 @@ TASK BOUNDARY:
 
 OUTPUT BOUNDARY:
 - Output ONLY a single valid JSON object.
-- No explanation, no markdown, no prose.
+- No explanation, markdown, or prose outside the JSON object.
 - Your entire response must be parseable by JSON.parse().
 - Start with { and end with }.
-- Keep all string values short.`;
+- Keep prescription fields compact. Rich coaching fields may be 1-4 concise sentences.`;
 
 export const PLAN_QUALITY_RULES = `COACHING QUALITY:
 - Act like a practical coach, not a motivational speaker.
@@ -88,7 +96,7 @@ export const PLAN_QUALITY_RULES = `COACHING QUALITY:
 - For ongoing goals, favor sustainable development and avoid peaking too aggressively.
 - Include strength training only when requested or clearly useful as support.
 - Keep prescriptions specific enough to track: sets, reps, duration, rest, and short coaching notes where applicable.
-- Include concise rich coaching fields where useful: week summary/progressionNote, day coachNotes, session objective/intensity/warmup/cooldown, and exercise modifications.
+- Include concise rich coaching fields where useful: week summary/progressionNote/coachRationale/keyAdaptations/watchouts, day coachNotes/readinessGuidance/fallbackOption, session objective/intensity/warmup/cooldown/coachingFocus/modificationGuidance, and exercise purpose/cues/modifications.
 - Make exercise prescriptions unambiguous with optional work/restBetweenReps/restBetweenSets/load/intensity/tempo/grade/sides/rounds fields when they clarify the assignment.
 - Do not include medical claims, diagnosis, nutrition prescriptions, supplement advice, or unrelated coaching.`;
 
@@ -111,6 +119,43 @@ function climbingGripSafetyRulesForRequest(request: PlanRequest) {
   return /\b(climb|boulder|hangboard|fingerboard|crimp|sloper)\b/i.test(text)
     ? CLIMBING_GRIP_SAFETY_RULES
     : "";
+}
+
+function climbingSpecificityRulesForRequest(request: PlanRequest) {
+  const text = [
+    request.sport,
+    ...request.disciplines,
+    request.goalDescription,
+    request.currentLevel,
+    request.targetLevel ?? "",
+    request.planStructureNotes ?? "",
+    request.athleteNarrative ?? "",
+    ...request.equipment,
+    ...request.trainingFocus,
+  ].join(" ");
+
+  if (!/\b(climb|boulder|route|lead|top\s*rope|toprope|5\.|V\d|hangboard|fingerboard|kilter|moon|tension|board)\b/i.test(text)) {
+    return "";
+  }
+
+  const hasRouteGoal = /\b(?:lead|top\s*rope|toprope|sport\s*climb(?:ing)?|redpoint|route|5\.(?:[0-9]|1[0-5])(?:[abcd])?)\b/i.test(text);
+  const userRequestedBoardWork = /\b(?:board\s*(?:session|sessions|work|climbing|problems?)|kilter\s*board\s*(?:session|sessions|work|problems?)|moon\s*board\s*(?:session|sessions|work|problems?)|tension\s*board\s*(?:session|sessions|work|problems?))\b/i.test([
+    request.goalDescription,
+    request.planStructureNotes ?? "",
+    request.athleteNarrative ?? "",
+    ...request.trainingFocus,
+  ].join(" "));
+
+  return `CLIMBING DISCIPLINE AND EQUIPMENT SPECIFICITY:
+- YDS grades like 5.10a and 5.11a are roped route grades, not bouldering grades. Do not write "5.11a boulder problem" or "5.10a boulder problem".
+- V grades are bouldering grades. If prescribing bouldering or board climbing, use V grades, "easy/moderate/hard", or "supportive boulders" unless the athlete supplied a V grade.
+- Available equipment is context, not a checklist. Do not force every listed tool into the plan.
+- If the athlete's goal/current/target level uses 5.x route grades, make lead/top-rope/route work the primary climbing prescription. Strength and cardio days should stay strength/cardio when the athlete requested that structure.
+- For a route-grade lead goal, board climbing and bouldering are optional support only, not the main event. ${hasRouteGoal && !userRequestedBoardWork ? "Because the athlete did not explicitly ask for board climbing, avoid Kilter/Moon/Tension board workouts unless a small optional support block is clearly better than route work." : "Use board climbing only where it directly supports the stated goal."}
+- Kilter Board, MoonBoard, Tension Board, spray wall, and system board work are board-climbing tools. Do not prescribe hangs on those boards.
+- Hangs, repeaters, max hangs, and half-crimp hangs require hangboard or fingerboard equipment explicitly listed by the athlete. Do not infer a hangboard from "complete indoor gym", "climbing gym", "bouldering wall", or "Kilter Board".
+- If no hangboard/fingerboard is listed, train finger strength through route practice, grip-aware technique drills, or general pulling strength instead of hangs.
+- If the athlete says Tue/Sat are cardio and strength, do not add climbing board work on Tue/Sat.`;
 }
 
 function buildWeekPrompt(input: PlanInput, weekNum: number): string {
@@ -155,9 +200,10 @@ ${PLAN_QUALITY_RULES}
 ${CLIMBING_GRIP_SAFETY_RULES}
 
 EQUIPMENT RULES:
-${input.equipment.includes("hangboard") ? "- Hangboard available: include hangboard hangs on strength days using only half crimp, open hand, or sloper grips." : "- No hangboard: use wall holds, but do not prescribe full-crimp work."}
-${input.equipment.includes("campus board") ? "- Campus board available: include campus moves on power days." : "- No campus board: do not mention it."}
-${input.equipment.includes("weights") || input.equipment.includes("gym") ? "- Weights available: include weighted pull-ups and antagonist work." : "- No weights: use bodyweight only."}
+- Treat listed equipment as available options, not mandatory exercises.
+${input.equipment.includes("hangboard") ? "- Hangboard available: hangboard work may be included when appropriate using only half crimp, open hand, or sloper grips." : "- No hangboard: do not prescribe hangs, repeaters, or max hangs."}
+${input.equipment.includes("campus board") ? "- Campus board available: campus work may be included only when appropriate for the athlete and goal." : "- No campus board: do not mention it."}
+${input.equipment.includes("weights") || input.equipment.includes("gym") ? "- Weights available: general strength work may use appropriate gym exercises." : "- No weights: use bodyweight only."}
 
 OUTPUT: Return ONLY a single JSON object (not an array) in this exact shape:
 ${weekOutputShape(weekNum)}
@@ -168,7 +214,7 @@ RULES:
 - Training days: exactly ONE session, 3–4 exercises max
 - notes: REQUIRED, max 10 words (e.g. "Keep hips in, drive with feet")
 - sets/reps/duration/rest: include only what applies, omit the rest
-- All string values must be SHORT — no long descriptions
+- Keep trackable prescription fields short. Rich coaching fields may be 1-4 concise sentences and must explain decisions using the athlete context.
 - Return ONLY compact minified JSON, no markdown, no explanation`;
 }
 
@@ -239,7 +285,33 @@ function cappedString(v: unknown, maxLength: number): string | undefined {
   return value.length > maxLength ? value.slice(0, maxLength).trim() : value;
 }
 
-function normalizeWeek(raw: unknown, weekNum: number, expectedDayNames = DAY_NAMES): WeekData {
+function cleanRichProse(v: unknown, maxLength: number): string | undefined {
+  const value = asString(v);
+  if (!value) return undefined;
+  const cleaned = value
+    .replace(/```(?:json)?/gi, "")
+    .replace(/^#{1,6}\s+/gm, "")
+    .replace(/\*\*(.*?)\*\*/g, "$1")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!cleaned) return undefined;
+  if (/\b(?:diagnos(?:e|is|ed)|medical treatment|prescribe(?:d)? medication|supplement protocol)\b/i.test(cleaned)) {
+    return undefined;
+  }
+  return cleaned.length > maxLength ? cleaned.slice(0, maxLength).trim() : cleaned;
+}
+
+function cleanRichList(v: unknown, maxItems: number, maxLength: number): string[] | undefined {
+  const rawItems = Array.isArray(v) ? v : typeof v === "string" ? v.split(/\n|;/) : [];
+  const items = Array.from(new Set(
+    rawItems
+      .map((item) => cleanRichProse(item, maxLength))
+      .filter(Boolean) as string[],
+  )).slice(0, maxItems);
+  return items.length > 0 ? items : undefined;
+}
+
+export function normalizeGeneratedWeek(raw: unknown, weekNum: number, expectedDayNames = DAY_NAMES): WeekData {
   const week = (raw && typeof raw === "object") ? raw as Record<string, unknown> : {};
   const theme = asString(week.theme) ?? `Week ${weekNum}`;
   const rawDays = Array.isArray(week.days) ? (week.days as unknown[]) : [];
@@ -296,7 +368,9 @@ function normalizeWeek(raw: unknown, weekNum: number, expectedDayNames = DAY_NAM
           sides: cappedString(ex.sides, 40),
           holdType: cappedString(ex.holdType, 60),
           prescriptionDetails: cappedString(ex.prescriptionDetails, 180),
-          modifications: cappedString(ex.modifications, 180),
+          modifications: cleanRichProse(ex.modifications, 240),
+          cues: cleanRichList(ex.cues, 4, 60),
+          purpose: cleanRichProse(ex.purpose, 240),
         });
       }
 
@@ -306,8 +380,10 @@ function normalizeWeek(raw: unknown, weekNum: number, expectedDayNames = DAY_NAM
         duration,
         objective: cappedString(sess.objective, 180),
         intensity: cappedString(sess.intensity, 80),
-        warmup: cappedString(sess.warmup, 180),
-        cooldown: cappedString(sess.cooldown, 180),
+        warmup: cleanRichProse(sess.warmup, 240),
+        cooldown: cleanRichProse(sess.cooldown, 240),
+        coachingFocus: cleanRichProse(sess.coachingFocus, 260),
+        modificationGuidance: cleanRichProse(sess.modificationGuidance, 320),
         exercises,
       });
     }
@@ -317,7 +393,9 @@ function normalizeWeek(raw: unknown, weekNum: number, expectedDayNames = DAY_NAM
       dayName,
       focus,
       isRest,
-      coachNotes: cappedString(day.coachNotes, 220),
+      coachNotes: cleanRichProse(day.coachNotes, 260),
+      readinessGuidance: cleanRichProse(day.readinessGuidance, 320),
+      fallbackOption: cleanRichProse(day.fallbackOption, 320),
       sessions,
     });
   }
@@ -332,8 +410,11 @@ function normalizeWeek(raw: unknown, weekNum: number, expectedDayNames = DAY_NAM
   return {
     weekNum,
     theme,
-    summary: cappedString(week.summary, 220),
-    progressionNote: cappedString(week.progressionNote, 220),
+    summary: cleanRichProse(week.summary, 320),
+    progressionNote: cleanRichProse(week.progressionNote, 320),
+    coachRationale: cleanRichProse(week.coachRationale, 520),
+    keyAdaptations: cleanRichList(week.keyAdaptations, 5, 100),
+    watchouts: cleanRichList(week.watchouts, 5, 120),
     days,
   };
 }
@@ -343,15 +424,35 @@ interface ApiResult {
   finishReason: string;
 }
 
+function sanitizeProviderText(value: string) {
+  return value
+    .replace(/Bearer\s+[A-Za-z0-9._~+/=-]+/gi, "Bearer [redacted]")
+    .replace(/\b(?:sk|sk-or|sk-proj)-[A-Za-z0-9._-]+/g, "[redacted-key]")
+    .slice(0, 500);
+}
+
+function generationStepLabel(surface: string, weekNum: number) {
+  return weekNum > 0 ? `${surface} week=${weekNum}` : surface;
+}
+
 export interface PreviousWeekSummary {
   weekNum: number;
   theme: string;
+  summary: string | null;
+  progressionNote: string | null;
+  coachRationale: string | null;
   trainingDays: number;
   restDays: number;
   totalSessions: number;
   totalExercises: number;
+  totalDurationMinutes: number;
+  trainingDayPattern: string[];
   focusAreas: string[];
+  sessionTypes: string[];
+  intensityTargets: string[];
   keyExercises: string[];
+  keyAdaptations: string[];
+  watchouts: string[];
 }
 
 export interface GenerateNextWeekContext {
@@ -360,6 +461,7 @@ export interface GenerateNextWeekContext {
   weekNum: number;
   totalWeeks?: number;
   previousWeeks: Array<WeekData | WeekSnapshot>;
+  planStrategy?: PlanStrategy | null;
   repairFeedback?: string | null;
   username?: string;
 }
@@ -375,26 +477,149 @@ export function summarizeGeneratedWeeks(weeks: Array<WeekData | WeekSnapshot>): 
     .map((week) => {
       const trainingDays = week.days.filter((day) => !day.isRest).length;
       const restDays = week.days.filter((day) => day.isRest).length;
-      const sessions = week.days.reduce<Array<{ exercises: Array<{ name: string }> }>>(
+      const sessions = week.days.reduce<Array<{
+        name: string;
+        duration: number;
+        intensity?: string | null;
+        exercises: Array<{ name: string; intensity?: string | null }>;
+      }>>(
         (acc, day) => [...acc, ...day.sessions],
         [],
       );
-      const exercises = sessions.reduce<Array<{ name: string }>>(
+      const exercises = sessions.reduce<Array<{ name: string; intensity?: string | null }>>(
         (acc, session) => [...acc, ...session.exercises],
         [],
       );
+      const totalDurationMinutes = sessions.reduce((total, session) => total + (Number.isFinite(session.duration) ? session.duration : 0), 0);
+      const trainingDayPattern = week.days.map((day) => day.isRest ? `${day.dayName}: Rest` : `${day.dayName}: ${day.focus}`);
+      const intensityTargets = uniqueShort([
+        ...sessions.map((session) => session.intensity ?? null),
+        ...sessions.flatMap((session) => session.exercises.map((exercise) => exercise.intensity ?? null)),
+      ], 10);
 
       return {
         weekNum: week.weekNum,
         theme: week.theme,
+        summary: week.summary ?? null,
+        progressionNote: week.progressionNote ?? null,
+        coachRationale: week.coachRationale ?? null,
         trainingDays,
         restDays,
         totalSessions: sessions.length,
         totalExercises: exercises.length,
+        totalDurationMinutes,
+        trainingDayPattern,
         focusAreas: uniqueShort(week.days.map((day) => day.focus), 8),
+        sessionTypes: uniqueShort(sessions.map((session) => session.name), 10),
+        intensityTargets,
         keyExercises: uniqueShort(exercises.map((exercise) => exercise.name), 10),
+        keyAdaptations: uniqueShort(week.keyAdaptations ?? [], 6),
+        watchouts: uniqueShort(week.watchouts ?? [], 6),
       };
     });
+}
+
+function normalizePlanStrategy(raw: unknown, request: PlanRequest, athleteAge: number): PlanStrategy {
+  const value = raw && typeof raw === "object" ? raw as Record<string, unknown> : {};
+  const phaseRows = Array.isArray(value.phaseStructure) ? value.phaseStructure : [];
+
+  const phaseStructure = phaseRows
+    .map((row) => {
+      if (!row || typeof row !== "object") return null;
+      const item = row as Record<string, unknown>;
+      const phase = cleanRichProse(item.phase, 80);
+      const weeks = cleanRichProse(item.weeks, 80);
+      const focus = cleanRichProse(item.focus, 180);
+      if (!phase || !weeks || !focus) return null;
+      return { phase, weeks, focus };
+    })
+    .filter((row): row is { phase: string; weeks: string; focus: string } => Boolean(row))
+    .slice(0, 6);
+
+  return {
+    athleteSummary: cleanRichProse(value.athleteSummary, 500)
+      ?? `${athleteAge}-year-old athlete training for ${request.goalDescription}.`,
+    goalInterpretation: cleanRichProse(value.goalInterpretation, 500)
+      ?? `Build a ${request.blockLengthWeeks}-week ${request.sport} plan for ${request.goalDescription}.`,
+    riskFactors: cleanRichList(value.riskFactors, 6, 120)
+      ?? [
+        ...request.constraints.injuries,
+        ...request.constraints.limitations,
+        ...request.constraints.avoidExercises.map((item) => `Avoid ${item}`),
+      ].slice(0, 6),
+    phaseStructure: phaseStructure.length
+      ? phaseStructure
+      : [{ phase: "Build", weeks: `Weeks 1-${request.blockLengthWeeks}`, focus: "Progress gradually while preserving recovery." }],
+    intensityDistribution: cleanRichProse(value.intensityDistribution, 400)
+      ?? "Balance hard sessions with enough low-intensity and recovery work to keep progression sustainable.",
+    recoveryStrategy: cleanRichProse(value.recoveryStrategy, 500)
+      ?? "Keep rest days easy, avoid making up missed work all at once, and reduce load if pain or form breakdown appears.",
+    benchmarks: cleanRichList(value.benchmarks, 6, 140) ?? [],
+    coachingPrinciples: cleanRichList(value.coachingPrinciples, 8, 160)
+      ?? ["Progress gradually", "Keep hard work high quality", "Respect constraints and recovery"],
+  };
+}
+
+function buildPlanStrategyPrompt(request: PlanRequest, athleteAge: number) {
+  return `You are an experienced ${request.sport} training coach. Create a full-block strategy before weekly workouts are generated.
+
+PLAN_REQUEST_JSON:
+${JSON.stringify(request)}
+
+ATHLETE_CONTEXT:
+- Age: ${athleteAge}
+- Sport: ${request.sport}
+- Goal: ${request.goalDescription}
+- Current level: ${request.currentLevel ?? "not specified"}
+- Target level: ${request.targetLevel ?? "not specified"}
+- Plan length: ${request.blockLengthWeeks} weeks
+- Training days per week: ${request.daysPerWeek}
+- Equipment: ${request.equipment.length ? request.equipment.join(", ") : "none listed"}
+- Injuries: ${request.constraints.injuries.length ? request.constraints.injuries.join(", ") : "none listed"}
+- Limitations: ${request.constraints.limitations.length ? request.constraints.limitations.join(", ") : "none listed"}
+- Avoid exercises: ${request.constraints.avoidExercises.length ? request.constraints.avoidExercises.join(", ") : "none listed"}
+
+${climbingSpecificityRulesForRequest(request)}
+
+Return ONLY JSON in this shape:
+{"athleteSummary":"<1-3 sentences>","goalInterpretation":"<1-3 sentences>","riskFactors":["<risk or constraint>"],"phaseStructure":[{"phase":"<phase name>","weeks":"<week range>","focus":"<phase focus>"}],"intensityDistribution":"<how hard/easy work is distributed>","recoveryStrategy":"<how recovery is protected>","benchmarks":["<test or checkpoint>"],"coachingPrinciples":["<principle>"]}
+
+RULES:
+- Keep this strategic, not a workout list.
+- Use the athlete's age, goal, level, equipment, schedule, and constraints.
+- Do not diagnose medical issues or prescribe medical treatment.
+- Return valid JSON only.`;
+}
+
+export async function generatePlanStrategyWithAI(
+  request: PlanRequest,
+  athleteAge: number,
+  username?: string,
+): Promise<PlanStrategy> {
+  const started = Date.now();
+  const apiResult = await callApiWithPrompt(buildPlanStrategyPrompt(request, athleteAge), 0, username, {
+    model: STRATEGY_MODEL,
+    surface: "strategy",
+  });
+  const cleaned = apiResult.text
+    .replace(/^```(?:json)?\s*/i, "")
+    .replace(/\s*```$/, "")
+    .trim();
+  let raw: unknown;
+  try {
+    raw = JSON.parse(cleaned) as unknown;
+  } catch {
+    const repaired = repairTruncatedJson(cleaned);
+    if (!repaired) throw new Error("Plan strategy response was not valid JSON");
+    raw = JSON.parse(repaired) as unknown;
+  }
+  const strategy = normalizePlanStrategy(raw, request, athleteAge);
+  console.log(`[ai-plan] generated plan strategy provider=${PROVIDER_LABEL} model=${STRATEGY_MODEL} durationMs=${Date.now() - started}`);
+  return strategy;
+}
+
+export function buildFallbackPlanStrategy(request: PlanRequest, athleteAge: number): PlanStrategy {
+  return normalizePlanStrategy({}, request, athleteAge);
 }
 
 export function validateGeneratedWeek(week: WeekData, expectedWeekNum: number, expectedDayNames = DAY_NAMES): WeekData {
@@ -426,6 +651,20 @@ export function validateGeneratedWeek(week: WeekData, expectedWeekNum: number, e
 
       for (const exercise of session.exercises) {
         if (!exercise.name.trim()) errors.push(`day ${expectedDayNum} exercise name is required`);
+        const exerciseText = [
+          exercise.name,
+          exercise.grade,
+          exercise.notes,
+          exercise.purpose,
+          exercise.prescriptionDetails,
+        ].filter(Boolean).join(" ");
+        const exerciseNameAndGrade = [exercise.name, exercise.grade].filter(Boolean).join(" ");
+        if (/\bboulder(?:ing)?\b/i.test(exerciseNameAndGrade) && /\b5\.(?:[0-9]|1[0-5])(?:[abcd])?\b/i.test(exerciseNameAndGrade)) {
+          errors.push(`day ${expectedDayNum} uses a route grade for bouldering`);
+        }
+        if (/\b(?:kilter|moon|tension)\s*board\b/i.test(exercise.name) && /\b(?:hangs?|repeaters?|half[-\s]?crimp\s*hangs?|max\s*hangs?)\b/i.test(exerciseText)) {
+          errors.push(`day ${expectedDayNum} prescribes hangs on a board instead of a hangboard`);
+        }
       }
     }
   }
@@ -485,6 +724,7 @@ WEEK ${weekNum} of ${request.blockLengthWeeks}:
 
 ${PLAN_QUALITY_RULES}
 ${climbingGripSafetyRulesForRequest(request)}
+${climbingSpecificityRulesForRequest(request)}
 
 OUTPUT: Return ONLY a single JSON object (not an array) in this exact shape:
 ${weekOutputShape(weekNum, expectedDayNames)}
@@ -496,11 +736,13 @@ RULES:
 - Training days may have multiple sessions when useful. Warm-up, Main Session, and Cooldown are examples, not a hard limit or required structure.
 - Main Session should contain 2-4 exercises; Warm-up/Cooldown should contain 1-2 exercises.
 - Choose exercises appropriate to the sport, goal, available equipment, and constraints
+- Available equipment is not a checklist; do not use tools just because they are listed.
 - Respect athlete requested structure, named-day preferences, and requested workouts unless they conflict with safety, recovery, or the requested training-day count
 - Respect injuries, limitations, and avoid-exercise requests
 - notes: REQUIRED, max 10 words
 - Also include work/restBetweenReps/restBetweenSets/load/intensity/tempo/grade/sides/rounds when they clarify the assignment
-- All string values must be SHORT
+- Include rich coaching fields when useful: coachRationale, keyAdaptations, watchouts, readinessGuidance, fallbackOption, coachingFocus, modificationGuidance, exercise purpose, and short cues.
+- Keep trackable prescription fields short. Rich coaching fields may be 1-4 concise sentences and must explain decisions using the athlete context.
 - Return ONLY compact minified JSON, no markdown, no explanation`;
 }
 
@@ -510,6 +752,7 @@ export function buildNextWeekPrompt(params: {
   weekNum: number;
   totalWeeks?: number;
   previousWeekSummaries: PreviousWeekSummary[];
+  planStrategy?: PlanStrategy | null;
   repairFeedback?: string | null;
 }) {
   const { request, athleteAge, weekNum } = params;
@@ -569,8 +812,16 @@ WEEK_TO_GENERATE:
 PREVIOUS_WEEK_SUMMARIES_JSON:
 ${previousWeekContext}
 
+PLAN_STRATEGY_JSON:
+${JSON.stringify(params.planStrategy ?? null)}
+
 PROGRESSION RULES:
 - Use previous-week summaries to progress logically from the work already scheduled.
+- Use PLAN_STRATEGY_JSON to keep this week aligned with the full block strategy when provided.
+- Treat totalDurationMinutes, trainingDayPattern, intensityTargets, sessionTypes, keyExercises, keyAdaptations, and watchouts as continuity signals.
+- Explain what changed from the immediately previous week in coachRationale or progressionNote, including whether load, intensity, focus, exercise selection, or recovery emphasis changed.
+- Avoid repeating identical session structures or the same key exercise mix unless the repetition is intentionally planned; if repeated, say why in coachRationale.
+- Maintain a realistic fatigue curve across the block: no sudden spikes in duration, exercise count, intensity, or hard-day density unless repair feedback explicitly requires it.
 - Preserve athlete requested structure and named-day preferences across the block unless repair feedback or safety requires a change.
 - Do not repeat the exact same week unless repair feedback explicitly asks for a reset.
 - Progress volume, intensity, exercise difficulty, or specificity gradually.
@@ -581,6 +832,7 @@ ${params.repairFeedback ? `- Repair feedback from the athlete/coach: ${params.re
 
 ${PLAN_QUALITY_RULES}
 ${climbingGripSafetyRulesForRequest(request)}
+${climbingSpecificityRulesForRequest(request)}
 
 OUTPUT: Return ONLY a single JSON object (not an array) in this exact shape:
 ${weekOutputShape(weekNum, expectedDayNames)}
@@ -591,62 +843,84 @@ RULES:
 - Rest days: isRest=true, sessions=[], focus="Rest"
 - Training days may have multiple sessions when useful. Warm-up, Main Session, and Cooldown are examples, not a hard limit or required structure.
 - Choose exercises appropriate to the sport, goal, available equipment, and constraints
+- Available equipment is not a checklist; do not use tools just because they are listed.
+- If the athlete requested specific day roles, preserve those roles exactly unless safety requires a change.
 - Respect athlete requested structure, named-day preferences, and requested workouts unless they conflict with safety, recovery, or the requested training-day count
 - Respect injuries, limitations, and avoid-exercise requests as hard constraints
 - notes: REQUIRED, max 10 words
-- All string values must be SHORT
+- Include rich coaching fields when useful: coachRationale, keyAdaptations, watchouts, readinessGuidance, fallbackOption, coachingFocus, modificationGuidance, exercise purpose, and short cues.
+- Keep trackable prescription fields short. Rich coaching fields may be 1-4 concise sentences and must explain decisions using athlete context and previous weeks.
 - Return ONLY compact minified JSON, no markdown, no explanation`;
 }
 
-async function callApiWithPrompt(prompt: string, weekNum: number, username?: string): Promise<ApiResult> {
+async function callApiWithPrompt(
+  prompt: string,
+  weekNum: number,
+  username?: string,
+  options: { model?: string; surface?: string } = {},
+): Promise<ApiResult> {
   const url = `${BASE_URL}/v1/chat/completions`;
+  const model = options.model ?? WEEK_MODEL;
+  const surface = options.surface ?? "week";
+  const started = Date.now();
 
-  const res = await fetch(url, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "Authorization": `Bearer ${API_KEY}`,
-      ...(SEND_SIMULATOR_USER_HEADER && username ? { "X-Climb-User": username } : {}),
-    },
-    body: JSON.stringify({
-      model: MODEL,
-      max_tokens: MAX_TOKENS,
-      response_format: { type: "json_object" },
-      messages: [
-        {
-          role: "system",
-          content: PLAN_GENERATION_SYSTEM_PROMPT,
-        },
-        {
-          role: "user",
-          content: prompt,
-        },
-      ],
-    }),
-  });
+  try {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${API_KEY}`,
+        ...(SEND_SIMULATOR_USER_HEADER && username ? { "X-Climb-User": username } : {}),
+      },
+      body: JSON.stringify({
+        model,
+        max_tokens: MAX_TOKENS,
+        response_format: { type: "json_object" },
+        messages: [
+          {
+            role: "system",
+            content: PLAN_GENERATION_SYSTEM_PROMPT,
+          },
+          {
+            role: "user",
+            content: prompt,
+          },
+        ],
+      }),
+    });
 
-  if (!res.ok) {
-    const body = await res.text();
-    throw new Error(`AI API error ${res.status} on week ${weekNum}: ${body.slice(0, 300)}`);
+    if (!res.ok) {
+      const body = sanitizeProviderText(await res.text());
+      throw new Error(`AI API error ${res.status} on ${generationStepLabel(surface, weekNum)}: ${body.slice(0, 300)}`);
+    }
+
+    const data = await res.json() as {
+      choices?: { message?: { content?: string }; finish_reason?: string }[];
+      error?: { message?: string };
+    };
+
+    if (data.error) {
+      throw new Error(`AI error on ${generationStepLabel(surface, weekNum)}: ${sanitizeProviderText(data.error.message ?? "unknown provider error")}`);
+    }
+
+    const text = data.choices?.[0]?.message?.content?.trim() ?? "";
+    const finishReason = data.choices?.[0]?.finish_reason ?? "unknown";
+
+    if (!text) {
+      throw new Error(`No response from AI for ${generationStepLabel(surface, weekNum)} (finish_reason=${finishReason})`);
+    }
+
+    console.log(
+      `[ai-plan] provider success surface=${surface} provider=${PROVIDER_LABEL} model=${model} week=${weekNum || "n/a"} finishReason=${finishReason} durationMs=${Date.now() - started}`,
+    );
+
+    return { text, finishReason };
+  } catch (error) {
+    console.warn(
+      `[ai-plan] provider failure surface=${surface} provider=${PROVIDER_LABEL} model=${model} week=${weekNum || "n/a"} durationMs=${Date.now() - started}: ${sanitizeProviderText((error as Error).message)}`,
+    );
+    throw error;
   }
-
-  const data = await res.json() as {
-    choices?: { message?: { content?: string }; finish_reason?: string }[];
-    error?: { message?: string };
-  };
-
-  if (data.error) {
-    throw new Error(`AI error on week ${weekNum}: ${data.error.message}`);
-  }
-
-  const text = data.choices?.[0]?.message?.content?.trim() ?? "";
-  const finishReason = data.choices?.[0]?.finish_reason ?? "unknown";
-
-  if (!text) {
-    throw new Error(`No response from AI for week ${weekNum} (finish_reason=${finishReason})`);
-  }
-
-  return { text, finishReason };
 }
 
 async function generateWeekFromPrompt(
@@ -660,7 +934,7 @@ async function generateWeekFromPrompt(
   for (let attempt = 1; attempt <= 2; attempt++) {
     let apiResult: ApiResult;
     try {
-      apiResult = await callApiWithPrompt(prompt, weekNum, username);
+      apiResult = await callApiWithPrompt(prompt, weekNum, username, { model: WEEK_MODEL, surface: "week" });
     } catch (e) {
       errors.push(`attempt ${attempt}: ${(e as Error).message}`);
       continue;
@@ -691,7 +965,13 @@ async function generateWeekFromPrompt(
     }
 
     if (parseOk) {
-      return validateGeneratedWeek(normalizeWeek(raw, weekNum, expectedDayNames), weekNum, expectedDayNames);
+      try {
+        return validateGeneratedWeek(normalizeGeneratedWeek(raw, weekNum, expectedDayNames), weekNum, expectedDayNames);
+      } catch (validationError) {
+        errors.push(`attempt ${attempt}: validation failed: ${(validationError as Error).message}`);
+        console.warn(`[ai-plan] Week ${weekNum} attempt ${attempt} failed validation — retrying. ${(validationError as Error).message.slice(0, 300)}`);
+        continue;
+      }
     }
 
     errors.push(`attempt ${attempt}: unparseable (finish_reason=${apiResult.finishReason}). Raw head: ${cleaned.slice(0, 200)}`);
@@ -723,6 +1003,7 @@ export async function generateNextWeekFromPlanContext(params: GenerateNextWeekCo
     weekNum: params.weekNum,
     totalWeeks,
     previousWeekSummaries,
+    planStrategy: params.planStrategy,
     repairFeedback: params.repairFeedback,
   });
 
@@ -773,14 +1054,17 @@ RULES:
 - Keep days before effectiveFromPlanDay unchanged.
 - Preserve useful warmups, cooldowns, session objectives, exercise modifications, and structured prescription fields unless the intent says to change them.
 - For climbing adjustments, never prescribe or suggest full-crimp hangboard/fingerboard training. Use only half crimp, open hand, and sloper grips for hangboard/fingerboard work.
-- Update week.summary and week.progressionNote so they accurately describe the adjusted prescription. If RPE, intensity, volume, duration, distance, rest, or load changes, the week summary/progression note must mention the new targets instead of old ones.
-- Update affected day coachNotes and session intensity fields so they match changed exercise prescription fields.
+- Update week.summary, week.progressionNote, and week.coachRationale so they accurately describe the adjusted prescription and the adjustmentRationale.
+- If RPE, intensity, volume, duration, distance, rest, or load changes, the week summary/progression note must mention the new targets instead of old ones.
+- Update affected day coachNotes, readinessGuidance, fallbackOption, session intensity, coachingFocus, modificationGuidance, exercise purpose, cues, and modifications so they match changed exercise prescription fields.
+- Preserve unchanged rich coaching fields on unaffected days.
+- Use adjustmentRationale to explain what changed and why in affected rich fields, without adding prose outside JSON.
 - Keep rest days as rest days unless the intent explicitly changes schedule placement.
-- Keep all string values short.
+- Keep prescription strings short. Rich coaching fields may be 1-4 concise sentences.
 - Return ONLY JSON, no markdown.
 
 OUTPUT SHAPE:
-{"weekNum":${params.originalWeek.weekNum},"theme":"<theme>","summary":"<week purpose>","progressionNote":"<progression>","days":[{"dayNum":1,"dayName":"${expectedDayNames[0] ?? "Monday"}","focus":"<focus>","isRest":false,"coachNotes":"<day intent>","sessions":[{"name":"Main Session","description":"<one sentence>","duration":45,"objective":"<objective>","intensity":"RPE 6-7","exercises":[{"name":"<name>","sets":"3","reps":"5","duration":null,"rest":"2 min","intensity":"RPE 7","notes":"<cue>","modifications":"<option>"}]}]}]}`;
+{"weekNum":${params.originalWeek.weekNum},"theme":"<theme>","summary":"<week purpose>","progressionNote":"<progression>","coachRationale":"<what changed and why>","keyAdaptations":["<adaptation>"],"watchouts":["<readiness watchout>"],"days":[{"dayNum":1,"dayName":"${expectedDayNames[0] ?? "Monday"}","focus":"<focus>","isRest":false,"coachNotes":"<day intent>","readinessGuidance":"<how to scale if readiness is low>","fallbackOption":"<simpler option>","sessions":[{"name":"Main Session","description":"<one sentence>","duration":45,"objective":"<objective>","intensity":"RPE 6-7","coachingFocus":"<priority>","modificationGuidance":"<how to scale>","exercises":[{"name":"<name>","sets":"3","reps":"5","duration":null,"rest":"2 min","intensity":"RPE 7","notes":"<cue>","purpose":"<why included>","cues":["<short cue>"],"modifications":"<option>"}]}]}]}`;
 
   return generateWeekFromPrompt(prompt, params.originalWeek.weekNum, params.username, expectedDayNames.length === 7 ? expectedDayNames : DAY_NAMES);
 }

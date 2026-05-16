@@ -24,11 +24,20 @@ DATABASE_URL="postgresql://climber:climber512@localhost:5432/climbapp"
 SESSION_SECRET="super-secret-session-key-change-in-production-32chars!!"
 ANTHROPIC_API_KEY="sk-or-v1-..."
 ANTHROPIC_BASE_URL="https://openrouter.ai/api"
-ANTHROPIC_MODEL="anthropic/claude-haiku-4-5"
+ANTHROPIC_MODEL="openai/gpt-5.5"
 ANTHROPIC_MAX_TOKENS="5000"
 ```
 
-In Docker, `web` and `plan-worker` read backend AI settings from `app/.env`. To switch modes, copy `app/.env-simulator` or `app/.env-aibackend` to `app/.env`, then recreate `web` and `plan-worker`. Editing `app/.env` alone does not change the already-running container process environment.
+In Docker, `web`, `plan-worker`, and optional `guardrails` read backend AI settings from `app/.env`. To switch modes, copy `app/.env-simulator`, `app/.env-aibackend`, or `app/.env-aibackend-nemo` to `app/.env`, then recreate the affected containers. Editing `app/.env` alone does not change the already-running container process environment.
+
+Useful local profiles:
+
+| Profile | Key values | Notes |
+|---|---|---|
+| Simulator | `ANTHROPIC_BASE_URL=http://simulator:8787`, `ANTHROPIC_MODEL=simulator`, `AI_INTAKE_MODE=simulator`, `AI_GUARDRAILS_MODE=off` | Cheapest direct simulator path |
+| NeMo simulator | `ANTHROPIC_BASE_URL=http://simulator:8787`, `ANTHROPIC_MODEL=simulator`, `AI_INTAKE_MODE=simulator`, `AI_GUARDRAILS_MODE=intake` | Routes guided intake through NeMo, then to the simulator |
+| Live backend | `ANTHROPIC_BASE_URL=https://openrouter.ai/api`, `ANTHROPIC_MODEL=openai/gpt-5.5`, `AI_INTAKE_MODE=live`, `AI_GUARDRAILS_MODE=off` | Direct live provider path |
+| Live backend + NeMo | live backend values plus `AI_GUARDRAILS_MODE=intake` | Guided intake through NeMo; generation and adjustment still call the configured backend directly |
 
 ## Running The App
 
@@ -236,7 +245,7 @@ docker compose -f docker-compose.yml -f docker-compose.dev.yml exec web printenv
 
 ### Starting the optional NeMo guardrails service
 
-Phase 10 adds an opt-in NeMo Guardrails service for an intake-only proof of concept. It is not started by default, and the app keeps using the direct AI backend while `AI_GUARDRAILS_MODE=off`.
+NeMo Guardrails is an opt-in intake gateway. It is not started by default, and the app keeps using the direct AI backend while `AI_GUARDRAILS_MODE=off`.
 
 Start it explicitly:
 
@@ -244,7 +253,19 @@ Start it explicitly:
 docker compose --profile guardrails up -d --build guardrails
 ```
 
-The local guardrails scaffold lives in `guardrails/`. To route guided-intake calls through NeMo, set `AI_GUARDRAILS_MODE=intake` and `AI_GUARDRAILS_BASE_URL=http://guardrails:8000` for the `web` service, then recreate `web`. Guarded mode intentionally takes precedence over simulator/local intake so you do not accidentally test the deterministic fallback and assume NeMo is healthy. Plan generation plus adjustment generation keep using `ANTHROPIC_BASE_URL` directly.
+The local guardrails scaffold lives in `guardrails/`. To route guided-intake calls through NeMo, set `AI_GUARDRAILS_MODE=intake` and `AI_GUARDRAILS_BASE_URL=http://guardrails:8000` for the `web` service, then recreate `guardrails` and `web`. Guarded mode intentionally takes precedence over simulator/local intake so you do not accidentally test the deterministic fallback and assume NeMo is healthy. Plan generation plus adjustment generation keep using `ANTHROPIC_BASE_URL` directly.
+
+For the NeMo simulator profile:
+
+```bash
+docker compose --profile guardrails up -d --build guardrails web plan-worker
+```
+
+The guardrails container maps `ANTHROPIC_MODEL=simulator` and `ANTHROPIC_BASE_URL=http://simulator:8787` to NeMo's OpenAI-compatible engine, so its startup log should include:
+
+```text
+[guardrails] starting NeMo config=intake model=simulator baseUrl=http://simulator:8787/v1
+```
 
 ### Old session survives longer than expected
 
@@ -295,9 +316,11 @@ Global teardown removes generated test users with prefixes such as `pw-*`, `dash
 
 ## Current Editing Behavior
 
-- edit controls are visible only inside `Edit This Week`
-- detailed edit cards include rest days, and adding an exercise converts the day to training
-- day reordering still lives in the compact `Day order` list
-- cross-day moves currently rely on swipe gestures rather than a dropdown
+- edit controls are visible only inside `Edit Day`
+- `Edit Day` targets the highlighted/most recently selected day, even if multiple days are open for reading
+- detailed edit cards are scoped to that selected day, and adding an exercise converts a rest day to training
+- day reordering is not exposed in the current direct editor
+- same-day exercise movement uses Up/Down controls and can cross adjacent sessions within the selected day
+- log forms allow extra set/interval/attempt rows when the user does more than prescribed
 - logged weeks protect existing work, but users can add custom exercises and log those additions
 - `Adjust Plan` is for broader future-plan changes and starts from the next unlogged day

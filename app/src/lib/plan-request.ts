@@ -17,6 +17,12 @@ export const planRequestSchema = z.object({
   equipment: z.array(z.string().trim().min(1)).default([]),
   trainingFocus: z.array(z.string().trim().min(1)).default([]),
   planStructureNotes: z.string().trim().min(1).max(2000).optional(),
+  athleteNarrative: z.string().trim().min(1).max(2000).optional(),
+  trainingHistory: z.string().trim().min(1).max(1000).optional(),
+  recentTrainingLoad: z.string().trim().min(1).max(1000).optional(),
+  sessionLengthPreference: z.string().trim().min(1).max(500).optional(),
+  recoveryCapacity: z.string().trim().min(1).max(1000).optional(),
+  motivationContext: z.string().trim().min(1).max(1000).optional(),
   constraints: z
     .object({
       injuries: z.array(z.string().trim().min(1)).default([]),
@@ -42,8 +48,73 @@ export type GoalType = z.infer<typeof goalTypeSchema>;
 export type PlanRequest = z.infer<typeof planRequestSchema>;
 export type PartialPlanRequest = z.infer<typeof partialPlanRequestSchema>;
 
+function isConversationFillerNote(note: string) {
+  return /^(?:right|correct|yes|yep|yeah|ok(?:ay)?|looks good|no[,.\s]*(?:that )?(?:covers it|that's it|i think that's it)|no[,.\s]*i think that's it|i already told you\b|as i said\b|like i said\b|you already have\b)/i.test(note.trim());
+}
+
+export function sanitizePlanStructureNotes(value?: string) {
+  if (!value) return undefined;
+  const notes = value
+    .split(/\s*\|\s*/)
+    .map((note) => note.trim().replace(/\s+/g, " "))
+    .filter((note) => note && !isConversationFillerNote(note));
+  return notes.length ? notes.join(" | ") : undefined;
+}
+
+function requestText(request: PlanRequest) {
+  return [
+    request.sport,
+    ...request.disciplines,
+    request.goalDescription,
+    request.currentLevel,
+    request.targetLevel,
+    request.planStructureNotes,
+    request.athleteNarrative,
+    ...request.trainingFocus,
+  ].filter(Boolean).join(" ");
+}
+
+function hasRouteClimbingSignal(request: PlanRequest) {
+  const text = requestText(request);
+  return /\b(?:lead|top\s*rope|toprope|sport\s*climb(?:ing)?|redpoint|route|5\.(?:[0-9]|1[0-5])(?:[abcd])?)\b/i.test(text);
+}
+
+function hasBoulderingGoalSignal(request: PlanRequest) {
+  const text = [
+    request.goalDescription,
+    request.currentLevel,
+    request.targetLevel,
+    request.planStructureNotes,
+    ...request.trainingFocus,
+  ].filter(Boolean).join(" ");
+  return /\b(?:boulder(?:ing)?|boulder\s*problem|problem|V(?:[0-9]|1[0-7]))\b/i.test(text);
+}
+
+export function normalizePlanRequest(request: PlanRequest): PlanRequest {
+  const cleanedNotes = sanitizePlanStructureNotes(request.planStructureNotes);
+  const baseRequest = {
+    ...request,
+    planStructureNotes: cleanedNotes,
+  };
+
+  if (!/\bclimb/i.test(baseRequest.sport)) return baseRequest;
+  if (!hasRouteClimbingSignal(baseRequest)) return baseRequest;
+
+  const existing = baseRequest.disciplines.map((discipline) => discipline.trim()).filter(Boolean);
+  const shouldKeepBouldering = hasBoulderingGoalSignal(baseRequest);
+  const withoutMisleadingDefault = existing.filter((discipline) =>
+    shouldKeepBouldering || !/^bouldering$/i.test(discipline),
+  );
+  const nextDisciplines = Array.from(new Set(["sport", ...withoutMisleadingDefault]));
+
+  return {
+    ...baseRequest,
+    disciplines: nextDisciplines,
+  };
+}
+
 function firstDiscipline(request: PlanRequest) {
-  return request.disciplines[0] || "bouldering";
+  return request.disciplines[0] || (/\bclimb/i.test(request.sport) ? "sport" : request.sport);
 }
 
 function describeGoal(request: PlanRequest) {
@@ -53,6 +124,12 @@ function describeGoal(request: PlanRequest) {
     request.targetDate ? `Target date: ${request.targetDate}` : null,
     request.trainingFocus.length ? `Focus: ${request.trainingFocus.join(", ")}` : null,
     request.planStructureNotes ? `Plan structure: ${request.planStructureNotes}` : null,
+    request.athleteNarrative ? `Athlete context: ${request.athleteNarrative}` : null,
+    request.trainingHistory ? `Training history: ${request.trainingHistory}` : null,
+    request.recentTrainingLoad ? `Recent load: ${request.recentTrainingLoad}` : null,
+    request.sessionLengthPreference ? `Session length: ${request.sessionLengthPreference}` : null,
+    request.recoveryCapacity ? `Recovery capacity: ${request.recoveryCapacity}` : null,
+    request.motivationContext ? `Motivation: ${request.motivationContext}` : null,
     request.strengthTraining.include
       ? `Include strength training${request.strengthTraining.focusAreas.length ? ` for ${request.strengthTraining.focusAreas.join(", ")}` : ""}`
       : null,

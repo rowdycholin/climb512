@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { continueIntakeDraft, createInitialIntakeDraft } from "./intake";
+import { continueIntakeDraft, createInitialIntakeDraft, intakeDraftToPlanRequest } from "./intake";
 
 function answer(draft: ReturnType<typeof createInitialIntakeDraft>, userMessage: string) {
   return continueIntakeDraft({ draft, userMessage }).draft;
@@ -14,6 +14,46 @@ describe("intake progression", () => {
 
     expect(response.draft.intakeTemplateId).toBe("climbing_strength");
     expect(response.assistantMessage).toBe("Climbing it is. What climbing goal should this plan move you toward: a route or boulder, a trip or competition, a grade, a skill, or general climbing fitness?");
+  });
+
+  test("normalizes route-grade climbing goals to sport climbing instead of default bouldering", () => {
+    const request = intakeDraftToPlanRequest({
+      sport: "climbing",
+      disciplines: ["bouldering"],
+      goalType: "ongoing",
+      goalDescription: "Lead 5.11a",
+      blockLengthWeeks: 4,
+      daysPerWeek: 5,
+      currentLevel: "5.10a",
+      targetLevel: "5.11a",
+      startDate: "2026-05-25",
+      equipment: ["indoor gym", "lead wall", "top rope", "bouldering wall", "Kilter Board"],
+      constraints: { injuries: [], limitations: [], avoidExercises: [] },
+      strengthTraining: { include: true, focusAreas: ["pulling", "pushing", "core"] },
+    });
+
+    expect(request.disciplines[0]).toBe("sport");
+    expect(request.disciplines).not.toContain("bouldering");
+  });
+
+  test("removes conversational correction fragments from plan structure notes", () => {
+    const request = intakeDraftToPlanRequest({
+      sport: "climbing",
+      disciplines: ["sport"],
+      goalType: "ongoing",
+      goalDescription: "lead 5.11a",
+      blockLengthWeeks: 4,
+      daysPerWeek: 5,
+      currentLevel: "5.10a",
+      targetLevel: "5.11a",
+      startDate: "2026-05-25",
+      equipment: ["indoor gym", "lead wall"],
+      planStructureNotes: "M, W, F: climbing days. Tue, Sat: cardio and strength. Thu, Sun: rest days. | I already told you that cardio and strength are on Tues and Sat. Right",
+      constraints: { injuries: [], limitations: [], avoidExercises: [] },
+      strengthTraining: { include: true, focusAreas: ["climbing-specific strength"] },
+    });
+
+    expect(request.planStructureNotes).toBe("M, W, F: climbing days. Tue, Sat: cardio and strength. Thu, Sun: rest days.");
   });
 
   test("uses the running template after a running sport answer", () => {

@@ -4,7 +4,9 @@ import {
   buildPlanView,
   findExerciseInSnapshot,
   hasMeaningfulWorkoutLog,
+  parseProfileSnapshot,
   parsePlanSnapshot,
+  richPlanFieldsFromStrategy,
   toStoredJson,
   type PlanSnapshot,
   type WeekSnapshot,
@@ -20,6 +22,7 @@ function snapshotForGenerationState(params: {
   generationStatus: string;
   generationJobs: Array<{
     jobType?: string;
+    profileSnapshot: unknown;
     weeks: Array<{
       weekSnapshot: unknown;
     }>;
@@ -36,16 +39,20 @@ function snapshotForGenerationState(params: {
   const generatedSnapshot = composePlanSnapshotFromGeneratedWeeks(
     rows.map((row) => parseWeekSnapshot(row.weekSnapshot)),
   );
+  const generatedSnapshotWithStrategy = {
+    ...generatedSnapshot,
+    ...richPlanFieldsFromStrategy(parseProfileSnapshot(latestJob.profileSnapshot).planStrategy),
+  };
 
   if (
     params.generationStatus === "ready" &&
     params.currentSnapshot &&
-    params.currentSnapshot.weeks.length >= generatedSnapshot.weeks.length
+    params.currentSnapshot.weeks.length >= generatedSnapshotWithStrategy.weeks.length
   ) {
     return params.currentSnapshot;
   }
 
-  return generatedSnapshot;
+  return generatedSnapshotWithStrategy;
 }
 
 export async function findOwnedPlanById(planId: string, userId: string) {

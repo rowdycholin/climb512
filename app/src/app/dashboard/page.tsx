@@ -1,8 +1,9 @@
 import { redirect } from "next/navigation";
 import Link from "next/link";
+import { cookies } from "next/headers";
 import { getSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
-import { getPlanCalendarStatus } from "@/lib/plan-calendar";
+import { CLIENT_TIME_ZONE_COOKIE, getPlanCalendarStatus, normalizeTimeZone } from "@/lib/plan-calendar";
 import { parsePlanSnapshot, parseProfileSnapshot } from "@/lib/plan-snapshot";
 import AppHeader from "@/components/AppHeader";
 import DashboardClient from "@/components/DashboardClient";
@@ -21,6 +22,7 @@ const completionDateFormatter = new Intl.DateTimeFormat("en-US", {
 export default async function DashboardPage() {
   const session = await getSession();
   if (!session.isLoggedIn) redirect("/login");
+  const timeZone = normalizeTimeZone((await cookies()).get(CLIENT_TIME_ZONE_COOKIE)?.value);
 
   const plans = await prisma.plan.findMany({
     where: { userId: session.userId },
@@ -42,6 +44,7 @@ export default async function DashboardPage() {
       const calendar = getPlanCalendarStatus({
         startDate: plan.startDate,
         totalWeeks: snapshot.weeks.length || profile.weeksDuration,
+        timeZone,
       });
       return {
         id: plan.id,

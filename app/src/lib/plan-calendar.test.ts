@@ -27,4 +27,26 @@ describe("getPlanCalendarStatus", () => {
     expect(status.totalPlanDays).toBe(28);
     expect(status.isComplete).toBe(true);
   });
+
+  test("uses the user's timezone when UTC has already rolled to tomorrow", () => {
+    const now = new Date("2026-05-15T01:30:00.000Z"); // May 14 in America/New_York
+
+    const may13Plan = getPlanCalendarStatus({
+      startDate: new Date("2026-05-13T00:00:00.000Z"),
+      now,
+      totalWeeks: 4,
+      timeZone: "America/New_York",
+    });
+    expect(may13Plan.currentPlanDay).toBe(2);
+    expect(may13Plan.isBeforeStart).toBe(false);
+
+    const may15Plan = getPlanCalendarStatus({
+      startDate: new Date("2026-05-15T00:00:00.000Z"),
+      now,
+      totalWeeks: 4,
+      timeZone: "America/New_York",
+    });
+    expect(may15Plan.currentPlanDay).toBe(0);
+    expect(may15Plan.isBeforeStart).toBe(true);
+  });
 });

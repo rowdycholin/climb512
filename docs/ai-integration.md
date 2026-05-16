@@ -38,6 +38,13 @@ Guided intake creates a plan shell, stores the original `PlanRequest` in `PlanGe
 
 Manual onboarding still generates the full plan in the request/response path until the worker flow is stable.
 
+Guided-intake worker generation now uses a richer two-pass shape:
+
+1. **Plan strategy**: the worker asks the model for a block-level strategy with athlete summary, goal interpretation, phase structure, intensity distribution, recovery strategy, benchmarks, and coaching principles. If this provider call fails, the worker stores a conservative fallback strategy and continues.
+2. **Weekly generation**: each week prompt receives the original `PlanRequest`, athlete age, the block strategy, prior generated week summaries, and any repair notes.
+
+The prior-week summaries include training-day pattern, total duration, session types, intensity targets, key exercises, adaptations, and watchouts. This is meant to reduce accidental repetition and keep load progression visible across the block.
+
 `Plan.startDate` is saved on the `Plan` record for calendar positioning. It is included in the structured request for guided intake but the durable calendar anchor remains the `Plan.startDate` column.
 
 ## Guided intake
@@ -84,7 +91,9 @@ Future-plan adjustment starts from the plan page's `Adjust Plan` panel:
 7. locked history and out-of-scope days are validated as unchanged
 8. the adjusted snapshot is saved as a new `PlanVersion` with `changeMetadata`
 
-Live-provider mode sends the current plan context and adjustment conversation to the AI backend. The model must either ask one follow-up question or return a structured proposal with summary, changed days, changed weeks, effective-from day, and a complete revised plan snapshot. The server validates the proposal before apply. Simulator/local mode uses deterministic fixtures that return the same proposal shape.
+Live-provider mode sends the current plan context and adjustment conversation to the AI backend. The model must either ask one follow-up question or return a compact adjustment intent with changed days/weeks, prescription changes, coaching changes, rich-impact flags, and an adjustment rationale. Applying an intent creates an adjustment generation job; the worker regenerates affected future weeks serially and protects locked/logged history. Simulator/local mode uses deterministic fixtures behind the same apply flow.
+
+Older full-snapshot adjustment proposals are still accepted for compatibility, validated, and then routed through the same generation-job pathway.
 
 ## Response handling
 
@@ -95,6 +104,7 @@ Plan generation:
 - parses the returned content
 - repairs some truncated JSON responses when possible
 - normalizes week/day/session/exercise fields into the app's plan types
+- keeps strict validation on trackable workout fields while soft-normalizing optional rich coaching prose
 
 Guided intake:
 
@@ -108,6 +118,28 @@ Plan adjustment:
 - validates the model's adjustment response with Zod
 - makes one AI-backed repair attempt when live adjustment JSON is malformed
 - rejects proposals that alter locked history, remove required identifiers, omit changed-day declarations, or change the plan goal without explicit user confirmation
+- stores adjustment rationale in `PlanVersion.changeMetadata` so the plan page can explain what changed and why
+
+## Observability
+
+AI logs intentionally include provider host, model name, surface, finish reason, duration, job type, week number, repair state, and failure mode. They do not log request headers or API keys.
+
+Current plan-generation surfaces:
+
+- `strategy`
+- `week`
+- `adjustment`
+- `adjustment-json-repair`
+
+Useful log prefixes:
+
+- `[ai-plan] provider success|failure ...`
+- `[ai-plan] generated plan strategy ...`
+- `[ai-adjustment] provider success|failure ...`
+- `[plan-worker] job success|failure ...`
+- `[web] repaired plan generation ...`
+
+Provider response bodies are truncated and obvious bearer/API-key patterns are redacted before being placed in error messages.
 
 ## Runtime backends
 
@@ -156,6 +188,9 @@ When `AI_GUARDRAILS_MODE=intake`, the web app sends guided-intake model requests
 | `ANTHROPIC_API_KEY` | backend auth token |
 | `ANTHROPIC_BASE_URL` | provider base URL |
 | `ANTHROPIC_MODEL` | model identifier |
+| `ANTHROPIC_WEEK_MODEL` | optional override for week-generation calls |
+| `ANTHROPIC_STRATEGY_MODEL` | optional override for plan-strategy calls |
+| `ANTHROPIC_ADJUSTMENT_MODEL` | optional override for adjustment-chat and adjustment-repair calls |
 | `ANTHROPIC_MAX_TOKENS` | output token cap |
 | `ANTHROPIC_INTAKE_MAX_TOKENS` | intake response token cap |
 | `ANTHROPIC_ADJUSTMENT_MAX_TOKENS` | adjustment response token cap |
@@ -184,6 +219,14 @@ Instead:
 
 That makes generated plans easier to revise later without destroying historical logs.
 
-## Rich plan detail direction
+## Rich plan detail
 
-The current plan snapshot focuses on compact, trackable fields. A planned roadmap item will add optional rich coaching fields such as week summaries, progression notes, day coach notes, session objectives/intensity, warmups/cooldowns, and exercise modifications. These should remain optional and separate from logging fields so old snapshots keep working and workout tracking stays simple.
+Plan snapshots now keep compact trackable prescription data alongside optional rich coaching fields:
+
+- plan overview, athlete context, progression strategy, and recovery strategy
+- week rationale, adaptations, and watchouts
+- day readiness guidance and fallback options
+- session coaching focus and modification guidance
+- exercise purpose and cues
+
+These fields are optional. Older snapshots continue to render, and workout logging still reads the compact prescription fields.

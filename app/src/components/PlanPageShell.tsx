@@ -38,6 +38,10 @@ interface PlanPageShellProps {
   planId: string;
   weeks: Parameters<typeof PlanWorkspace>[0]["weeks"];
   planGuidance: Parameters<typeof PlanWorkspace>[0]["planGuidance"];
+  coachOverview?: Parameters<typeof PlanWorkspace>[0]["coachOverview"];
+  athleteContextSummary?: Parameters<typeof PlanWorkspace>[0]["athleteContextSummary"];
+  progressionStrategy?: Parameters<typeof PlanWorkspace>[0]["progressionStrategy"];
+  recoveryStrategy?: Parameters<typeof PlanWorkspace>[0]["recoveryStrategy"];
   totalWeeks: number;
   initialWeekIndex: number;
   initialDayIndex: number;
@@ -75,6 +79,18 @@ interface PlanPageShellProps {
       previewCreatedAtLabel: string | null;
       currentVersionNum: number;
       changeMetadata: {
+        changes: string[];
+        richChanges: {
+          planGuidance: string[];
+          coaching: string[];
+          prescriptions: string[];
+        };
+        adjustmentRationale: {
+          whatChanged: string;
+          whyChanged: string;
+          affectedTrainingLogic: string;
+          recoveryImpact: string;
+        } | null;
         affectedDays: Array<{
           weekNum: number;
           dayNum: number;
@@ -122,6 +138,10 @@ export default function PlanPageShell({
   planId,
   weeks,
   planGuidance,
+  coachOverview,
+  athleteContextSummary,
+  progressionStrategy,
+  recoveryStrategy,
   totalWeeks,
   initialWeekIndex,
   initialDayIndex,
@@ -531,6 +551,24 @@ export default function PlanPageShell({
           </div>
         )}
 
+        {summary.version.changeMetadata?.adjustmentRationale && !summary.version.isPreview && summary.generation.isReady && (
+          <div className="border-t border-slate-100 bg-sky-50/60 px-4 py-3 sm:px-5">
+            <StatusBanner tone="info" className="bg-white">
+              <p className="font-medium">Latest adjustment rationale</p>
+              <p className="mt-1">{summary.version.changeMetadata.adjustmentRationale.whatChanged}</p>
+              <p className="mt-1 text-sky-800">{summary.version.changeMetadata.adjustmentRationale.whyChanged}</p>
+              <div className="mt-2 grid gap-2 text-xs text-slate-700 sm:grid-cols-2">
+                <p className="rounded-md border border-sky-100 bg-sky-50 px-2 py-1">
+                  {summary.version.changeMetadata.adjustmentRationale.affectedTrainingLogic}
+                </p>
+                <p className="rounded-md border border-sky-100 bg-sky-50 px-2 py-1">
+                  {summary.version.changeMetadata.adjustmentRationale.recoveryImpact}
+                </p>
+              </div>
+            </StatusBanner>
+          </div>
+        )}
+
         {summary.completion.isUserCompleted && summary.completion.completedAtLabel && (
           <div className="border-t border-slate-100 bg-slate-50/70 px-4 py-3 sm:px-5">
             <StatusBanner tone="success" className="bg-white">
@@ -587,8 +625,12 @@ export default function PlanPageShell({
           planId={planId}
           initialUiState={initialUiState}
           weeks={weeks}
-        planGuidance={planGuidance}
-        totalWeeks={totalWeeks}
+          planGuidance={planGuidance}
+          coachOverview={coachOverview}
+          athleteContextSummary={athleteContextSummary}
+          progressionStrategy={progressionStrategy}
+          recoveryStrategy={recoveryStrategy}
+          totalWeeks={totalWeeks}
         generation={summary.generation}
         sport={summary.sport}
         disciplines={summary.disciplines}

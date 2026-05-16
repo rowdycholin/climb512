@@ -2,7 +2,7 @@ import { z } from "zod";
 import { clonePlanSnapshot } from "./plan-access";
 import type { PlanSnapshot, ProfileSnapshot } from "./plan-snapshot";
 
-const MODEL = process.env.ANTHROPIC_MODEL ?? "anthropic/claude-haiku-4-5";
+const MODEL = process.env.ANTHROPIC_MODEL ?? "openai/gpt-5.5";
 const MAX_TOKENS = parseInt(process.env.ANTHROPIC_MAX_TOKENS ?? "5000", 10);
 const BASE_URL = (process.env.ANTHROPIC_BASE_URL ?? "https://openrouter.ai/api").replace(/\/$/, "");
 const API_KEY = process.env.ANTHROPIC_API_KEY ?? "";

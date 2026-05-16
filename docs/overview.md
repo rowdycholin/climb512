@@ -15,7 +15,8 @@ Users can:
 - see start date, day X of total plan days, and completed-plan status after the final day
 - explicitly mark a plan complete, leave completion notes, and reopen it if needed
 - log workouts by week and day
-- edit a selected week directly, including adding extra trackable exercises after a day has logs
+- edit the currently selected day directly, including adding extra trackable exercises after a day has logs
+- reorder exercises within the selected day and add extra logging rows when the performed work exceeds the prescription
 - adjust the plan through a conversational proposal flow that can target one day, one week, a date range, or future days from a point
 - review plan version history, preview older versions in read-only mode, and revert by creating a new current version from an older accepted version
 - move around authenticated screens from a shared menu
@@ -50,15 +51,17 @@ The preferred UX direction is:
 - personalized intake coach naming: Alix for female users, Alex for male or prefer-not-to-say users
 - AI focused on plan generation from validated inputs
 - AI-assisted plan adjustment through a scoped day-level request contract; live-provider mode can call the AI backend, while simulator/local mode keeps deterministic fixtures for repeatable testing
-- richer generated coaching detail is planned so week/day/session intent can be shown separately from trackable workout fields
+- richer generated coaching detail is shown separately from trackable workout fields so users can scan the workout quickly and expand the coaching context when needed
 
 Current editing behavior:
 
-- the pencil icon opens `Edit This Week`
+- the pencil icon opens `Edit Day`
 - the chat icon opens `Adjust Plan` for future-plan changes
-- day reordering happens in the compact `Day order` list
-- detailed editing includes rest days so exercises can be added when a rest day becomes a training day
-- add / duplicate / delete actions are icon-based inside the editor
+- the week view may have multiple days open for reading, but the editor targets the most recently selected/highlighted day
+- day reordering is currently removed from the direct editor
+- detailed editing is limited to that selected day; adding an exercise to a rest day converts it into a training day
+- add / duplicate / delete actions are icon-based inside the editor, with Up/Down controls for same-day exercise ordering
+- logging supports structured set/interval/attempt rows, and users can add extra rows for additional performed work
 
 ## Technology Stack
 
@@ -76,7 +79,9 @@ Current editing behavior:
 
 ## Important Operational Notes
 
-In Docker, the app and plan worker read backend AI settings from `app/.env`. Copy `app/.env-simulator` or `app/.env-aibackend` to `app/.env`, then recreate `web` and `plan-worker` to switch backends.
+In Docker, the app, plan worker, and optional guardrails service read backend AI settings from `app/.env`. Copy `app/.env-simulator`, `app/.env-aibackend`, or `app/.env-aibackend-nemo` to `app/.env`, then recreate the affected containers. The current simulator+NeMo profile uses `ANTHROPIC_BASE_URL=http://simulator:8787`, `ANTHROPIC_MODEL=simulator`, `AI_INTAKE_MODE=simulator`, and `AI_GUARDRAILS_MODE=intake`.
+
+Guided-intake plan generation is sequential in the worker. The worker first creates a full-block strategy, then generates weeks with prior-week summaries so phase progression, load, and recovery stay coherent. Strategy, week, and adjustment model choices remain environment-driven through the `ANTHROPIC_*MODEL` variables documented in `docs/ai-integration.md`.
 
 For local development, `docker-compose.dev.yml` bind-mounts `./app` into the web and plan-worker containers, runs `next dev` for web, and runs the worker from mounted source.
 

@@ -3,6 +3,7 @@ import {
   partialPlanRequestSchema,
   planRequestSchema,
   planRequestToLegacyPlanInput,
+  normalizePlanRequest,
   type PartialPlanRequest,
   type PlanRequest,
 } from "./plan-request";
@@ -189,7 +190,6 @@ function applyGenericExtraction(draft: PartialIntakeDraft, text: string) {
 function applyStepAnswer(draft: PartialIntakeDraft, step: IntakeStep, text: string, clientToday?: string) {
   if (step === "sport") {
     draft.sport = normalizeSport(text);
-    if (draft.sport === "climbing" && !draft.disciplines?.length) draft.disciplines = ["bouldering"];
     return;
   }
 
@@ -298,7 +298,7 @@ export function continueIntakeDraft(params: {
 }
 
 export function intakeDraftToPlanRequest(draft: IntakeDraft | PlanRequest): PlanRequest {
-  return planRequestSchema.parse(draft);
+  return normalizePlanRequest(planRequestSchema.parse(draft));
 }
 
 export function intakeDraftToPlanInput(draft: IntakeDraft | PlanRequest, age: number): PlanInput {
@@ -306,5 +306,5 @@ export function intakeDraftToPlanInput(draft: IntakeDraft | PlanRequest, age: nu
 }
 
 export function parseIntakeDraftJson(raw: string) {
-  return planRequestSchema.parse(JSON.parse(raw));
+  return normalizePlanRequest(planRequestSchema.parse(JSON.parse(raw)));
 }

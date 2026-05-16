@@ -57,11 +57,20 @@ function appendNote(draft, note) {
 }
 
 function normalizeSport(text) {
-  if (/\b(?:climb(?:ing)?|boulder(?:ing)?)\b/i.test(text)) return "climbing";
+  if (/\b(?:climb(?:ing)?|boulder(?:ing)?|trad|traditional|sport\s*climb(?:ing)?|lead\s*climb(?:ing)?|top\s*rope|toprope)\b/i.test(text)) return "climbing";
   if (/\b(?:run(?:ning)?|runner|5k|10k|marathon|half marathon)\b/i.test(text)) return "running";
   if (/\b(?:cycl(?:e|ing|ist)|bike|biking|road riding|mountain biking)\b/i.test(text)) return "cycling";
   if (/\b(?:strength(?:\/conditioning)?|conditioning|weight training|weightlifting|weight lifting|lifting|barbell)\b/i.test(text)) return "strength training";
   return text.trim().toLowerCase();
+}
+
+function inferClimbingDisciplines(text) {
+  const disciplines = [];
+  if (/\bboulder(?:ing)?\b/i.test(text)) disciplines.push("bouldering");
+  if (/\b(?:trad|traditional|crack|multi[-\s]?pitch|gear)\b/i.test(text)) disciplines.push("trad");
+  if (/\b(?:sport\s*climb(?:ing)?|lead\s*climb(?:ing)?|redpoint|5\.(?:[0-9]|1[0-5])(?:[abcd])?)\b/i.test(text)) disciplines.push("sport");
+  if (/\b(?:top\s*rope|toprope)\b/i.test(text)) disciplines.push("top rope");
+  return unique(disciplines);
 }
 
 function inferActivityFamily(text) {
@@ -81,7 +90,7 @@ function inferActivityFamily(text) {
 }
 
 function isSportOnlyAnswer(text) {
-  return /^(?:climbing|running|cycling|strength(?:\s+and\s+conditioning|\s+training)?|strength\/conditioning)[.!?]?$/i.test(text.trim());
+  return /^(?:climbing|trad(?:itional)?(?:\s+climbing)?|sport\s*climb(?:ing)?|lead\s*climb(?:ing)?|boulder(?:ing)?|top\s*rope(?:\s+climbing)?|toprope(?:\s+climbing)?|running|cycling|strength(?:\s+and\s+conditioning|\s+training)?|strength\/conditioning)[.!?]?$/i.test(text.trim());
 }
 
 function sportGoalConflictQuestion(currentSport, inferredSport) {
@@ -224,7 +233,10 @@ function applyLatestAnswer(draft, latest, previousAssistant, today, recent) {
     const sport = normalizeSport(answer);
     if (sport) {
       draft.sport = sport;
-      if (sport === "climbing" && !draft.disciplines?.length) draft.disciplines = ["bouldering"];
+      if (sport === "climbing" && !draft.disciplines?.length) {
+        const disciplines = inferClimbingDisciplines(answer);
+        draft.disciplines = disciplines.length ? disciplines : [];
+      }
       if (isSportOnlyAnswer(answer)) return;
     }
   }

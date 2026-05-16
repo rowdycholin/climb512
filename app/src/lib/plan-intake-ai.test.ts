@@ -6,6 +6,7 @@ import {
   continuePlanIntakeWithAiContract,
   firstQuestionOnly,
   getPlanIntakeTransportConfig,
+  hasActionableIntakeQuestion,
   INTAKE_READY_MESSAGE,
   INTAKE_VALIDATION_FALLBACK_MESSAGE,
   isPlanIntakeMessageAllowed,
@@ -77,6 +78,22 @@ describe("plan intake AI contract", () => {
 
     expect(response.status).toBe("needs_more_info");
     expect(response.planRequestDraft.sport).toBe("running");
+  });
+
+  test("replaces rhetorical needs-more-info messages with the next real intake question", () => {
+    const response = nextNonDuplicateQuestion(validatePlanIntakeAiResponse({
+      status: "needs_more_info",
+      message: "5.11a is a solid target—that's real climbing?",
+      planRequestDraft: {
+        sport: "climbing",
+        disciplines: ["sport"],
+        goalDescription: "lead 5.11a",
+      },
+    }));
+
+    expect(response).toBe("Let's choose a useful runway. How many weeks should this block run?");
+    expect(hasActionableIntakeQuestion("5.11a is a solid target—that's real climbing?")).toBe(false);
+    expect(hasActionableIntakeQuestion(response)).toBe(true);
   });
 
   test("normalizes live-model placeholder values in partial drafts", () => {
@@ -548,6 +565,29 @@ describe("plan intake AI contract", () => {
     expect(response.assistantMessage).toBe("That gives me the weekly rhythm. Are there days you prefer for training?");
   });
 
+  test("treats combined named-day schedule answers as workout and rest preferences", async () => {
+    process.env.AI_INTAKE_MODE = "local";
+
+    const response = await continuePlanIntakeWithAiContract({
+      draft: {
+        ...completeDraft,
+        daysPerWeek: undefined,
+        preferredWorkoutDaysAsked: undefined,
+        preferredRestDaysAsked: undefined,
+        finalIntakeReviewAsked: undefined,
+      },
+      userMessage: "M, W, F are for climbing and Tue and Sat are for cardio and strength and Th and Sun are rest days.",
+      messages: [{ role: "assistant", content: "How many days per week can you train and still recover well?" }],
+    });
+
+    expect(response.ready).toBe(false);
+    expect(response.draft.daysPerWeek).toBe(5);
+    expect(response.draft.preferredWorkoutDaysAsked).toBe(true);
+    expect(response.draft.preferredRestDaysAsked).toBe(true);
+    expect(response.draft.planStructureNotes).toContain("M, W, F are for climbing");
+    expect(response.assistantMessage).toBe("I have the main pieces for the plan. Anything else I should account for before I build it?");
+  });
+
   test("overrides premature final review with scheduling preference checkpoints", () => {
     const response = validatePlanIntakeAiResponse({
       status: "needs_more_info",
@@ -626,6 +666,22 @@ describe("plan intake AI contract", () => {
     expect(response.ready).toBe(true);
     expect(response.assistantMessage).toBe(INTAKE_READY_MESSAGE);
     expect(response.draft.planStructureNotes).toContain("I want to be able to run a 10K");
+  });
+
+  test("does not store conversational corrections as plan structure notes", async () => {
+    const response = await continuePlanIntakeWithAiContract({
+      draft: { ...completeDraft, planStructureNotes: "Tue, Sat: cardio and strength.", finalIntakeReviewAsked: true },
+      userMessage: "I already told you that cardio and strength are on Tues and Sat. Right",
+      messages: [
+        {
+          role: "assistant",
+          content: "I have the main pieces for the plan. Anything else I should account for before I build it?",
+        },
+      ],
+    });
+
+    expect(response.ready).toBe(true);
+    expect(response.draft.planStructureNotes).toBe("Tue, Sat: cardio and strength.");
   });
 
   test("treats generic final constraints prompt as answered by no", async () => {
@@ -782,9 +838,12 @@ describe("plan intake AI contract", () => {
       draft: { sport: "running", daysPerWeek: 4 },
       userMessage: "I want to train for a 10k.",
       messages: [],
+      athleteAge: 47,
       clientToday: "2026-05-01",
     });
 
+    expect(prompt).toContain("ATHLETE_AGE:");
+    expect(prompt).toContain("47");
     expect(prompt).toContain("Treat MISSING_REQUIRED_FIELDS as background state, not as a script");
     expect(prompt).toContain("readiness checkpoints, not a separate fixed interview script");
     expect(prompt).toContain("Infer reasonable structured values from natural answers");
@@ -794,6 +853,33 @@ describe("plan intake AI contract", () => {
     expect(prompt).toContain("For race or event goals, do not move on to level");
     expect(prompt).toContain("Fifty miles a week is a serious base");
     expect(prompt).toContain("Do not use empty filler");
+    expect(prompt).toContain("athleteNarrative");
+    expect(prompt).toContain("recentTrainingLoad");
+    expect(prompt).toContain("do not ask the user to repeat their age");
+  });
+
+  test("normalizes optional athlete narrative context from live intake", () => {
+    const response = validatePlanIntakeAiResponse({
+      status: "needs_more_info",
+      message: "That training history helps. How many days per week can you train?",
+      planRequestDraft: {
+        sport: "climbing",
+        goalDescription: "Send V7 outdoors",
+        athleteNarrative: "Returning climber balancing work stress.",
+        trainingHistory: "Ten years climbing, recent consistency is lower.",
+        recentTrainingLoad: "Two climbing days most weeks.",
+        sessionLengthPreference: "60-75 minutes on weekdays.",
+        recoveryCapacity: "Sleep is inconsistent during travel weeks.",
+        motivationContext: "Wants confidence for a fall trip.",
+      },
+    });
+
+    expect(response.planRequestDraft.athleteNarrative).toContain("Returning climber");
+    expect(response.planRequestDraft.trainingHistory).toContain("Ten years");
+    expect(response.planRequestDraft.recentTrainingLoad).toContain("Two climbing days");
+    expect(response.planRequestDraft.sessionLengthPreference).toContain("60-75 minutes");
+    expect(response.planRequestDraft.recoveryCapacity).toContain("Sleep is inconsistent");
+    expect(response.planRequestDraft.motivationContext).toContain("fall trip");
   });
 
   test.each([

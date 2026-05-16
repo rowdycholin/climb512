@@ -1,5 +1,6 @@
+import { cookies } from "next/headers";
 import { prisma } from "./prisma";
-import { getPlanCalendarStatus } from "./plan-calendar";
+import { CLIENT_TIME_ZONE_COOKIE, getPlanCalendarStatus, normalizeTimeZone } from "./plan-calendar";
 import { parsePlanSnapshot, parseProfileSnapshot } from "./plan-snapshot";
 
 export interface PostLoginPlanState {
@@ -23,7 +24,7 @@ export function selectActivePlanId(plans: Array<{
     profileSnapshot: unknown;
     planSnapshot: unknown;
   } | null;
-}>, now = new Date()) {
+}>, now = new Date(), timeZone?: string | null) {
   const activePlans = plans.filter((plan) => {
     if (!plan.currentVersion || plan.completedAt) return false;
 
@@ -34,6 +35,7 @@ export function selectActivePlanId(plans: Array<{
       startDate: plan.startDate,
       totalWeeks,
       now,
+      timeZone,
     });
 
     return !calendar.isBeforeStart && !calendar.isComplete;
@@ -49,6 +51,7 @@ export function selectActivePlanId(plans: Array<{
 }
 
 export async function getPostLoginPath(userId: string) {
+  const timeZone = normalizeTimeZone((await cookies()).get(CLIENT_TIME_ZONE_COOKIE)?.value);
   const plans = await prisma.plan.findMany({
     where: { userId },
     include: { currentVersion: true },
@@ -56,6 +59,6 @@ export async function getPostLoginPath(userId: string) {
 
   return resolvePostLoginPath({
     hasPlans: plans.length > 0,
-    activePlanId: selectActivePlanId(plans),
+    activePlanId: selectActivePlanId(plans, new Date(), timeZone),
   });
 }

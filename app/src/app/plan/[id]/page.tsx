@@ -1,8 +1,9 @@
 import { notFound, redirect } from "next/navigation";
+import { cookies } from "next/headers";
 import { getSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
 import { findOwnedPlanWithLogs } from "@/lib/plan-access";
-import { getPlanCalendarStatus } from "@/lib/plan-calendar";
+import { CLIENT_TIME_ZONE_COOKIE, getPlanCalendarStatus, normalizeTimeZone } from "@/lib/plan-calendar";
 import { countGeneratedWeeks, getPlanGenerationProgress } from "@/lib/plan-generation-state";
 import { parsePlanUiState } from "@/lib/plan-ui-state";
 import { buildPlanView, parsePlanSnapshot, parseProfileSnapshot } from "@/lib/plan-snapshot";
@@ -14,10 +15,46 @@ function parseAdjustmentMetadata(raw: unknown) {
   if (!raw || typeof raw !== "object") return null;
   const value = raw as {
     affectedDays?: unknown;
+    changes?: unknown;
+    richChanges?: unknown;
+    adjustmentRationale?: unknown;
   };
   if (!Array.isArray(value.affectedDays)) return null;
+  const richChanges = value.richChanges && typeof value.richChanges === "object"
+    ? value.richChanges as { planGuidance?: unknown; coaching?: unknown; prescriptions?: unknown }
+    : null;
+  const adjustmentRationale = value.adjustmentRationale && typeof value.adjustmentRationale === "object"
+    ? value.adjustmentRationale as {
+        whatChanged?: unknown;
+        whyChanged?: unknown;
+        affectedTrainingLogic?: unknown;
+        recoveryImpact?: unknown;
+      }
+    : null;
 
   return {
+    changes: Array.isArray(value.changes)
+      ? value.changes.filter((item): item is string => typeof item === "string").slice(0, 12)
+      : [],
+    richChanges: {
+      planGuidance: Array.isArray(richChanges?.planGuidance)
+        ? richChanges.planGuidance.filter((item): item is string => typeof item === "string").slice(0, 6)
+        : [],
+      coaching: Array.isArray(richChanges?.coaching)
+        ? richChanges.coaching.filter((item): item is string => typeof item === "string").slice(0, 10)
+        : [],
+      prescriptions: Array.isArray(richChanges?.prescriptions)
+        ? richChanges.prescriptions.filter((item): item is string => typeof item === "string").slice(0, 12)
+        : [],
+    },
+    adjustmentRationale: adjustmentRationale
+      ? {
+          whatChanged: typeof adjustmentRationale.whatChanged === "string" ? adjustmentRationale.whatChanged : "",
+          whyChanged: typeof adjustmentRationale.whyChanged === "string" ? adjustmentRationale.whyChanged : "",
+          affectedTrainingLogic: typeof adjustmentRationale.affectedTrainingLogic === "string" ? adjustmentRationale.affectedTrainingLogic : "",
+          recoveryImpact: typeof adjustmentRationale.recoveryImpact === "string" ? adjustmentRationale.recoveryImpact : "",
+        }
+      : null,
     affectedDays: value.affectedDays
       .map((day) => {
         if (!day || typeof day !== "object") return null;
@@ -63,6 +100,7 @@ export default async function PlanPage({
 }) {
   const session = await getSession();
   if (!session.isLoggedIn) redirect("/login");
+  const timeZone = normalizeTimeZone((await cookies()).get(CLIENT_TIME_ZONE_COOKIE)?.value);
 
   const plan = await findOwnedPlanWithLogs(params.id, session.userId);
   if (!plan) notFound();
@@ -113,6 +151,7 @@ export default async function PlanPage({
   const calendarStatus = getPlanCalendarStatus({
     startDate: plan.startDate,
     totalWeeks,
+    timeZone,
   });
   const completedAtLabel = plan.completedAt
     ? new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" }).format(plan.completedAt)
@@ -155,6 +194,10 @@ export default async function PlanPage({
           planId={plan.id}
           weeks={weeks}
           planGuidance={planView.planGuidance}
+          coachOverview={planView.coachOverview}
+          athleteContextSummary={planView.athleteContextSummary}
+          progressionStrategy={planView.progressionStrategy}
+          recoveryStrategy={planView.recoveryStrategy}
           totalWeeks={totalWeeks}
           initialWeekIndex={currentWeekIndex}
           initialDayIndex={currentDayIndex}

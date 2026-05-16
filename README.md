@@ -27,10 +27,10 @@ Then open `http://localhost:8080`.
 5. Generate a plan.
 6. Open the plan to the current calendar week/day based on `Plan.startDate`.
 7. View and log workouts week by week.
-8. Edit future weeks directly with `Edit This Week`.
+8. Edit the selected/open day directly with `Edit Day`.
 9. Save changes as a new `PlanVersion`.
 
-The app still contains an AI adjustment prototype, but the primary editing direction is direct editing first, with AI treated as optional future coaching help.
+The app supports direct day editing for precise changes and a separate AI-assisted `Adjust Plan` flow for broader future-plan changes.
 
 ## Current Architecture
 
@@ -43,15 +43,17 @@ The app still contains an AI adjustment prototype, but the primary editing direc
   - `PlanVersion` stores `profileSnapshot` and `planSnapshot` JSON
   - `WorkoutLog` stores what the user actually did against snapshot exercise keys
 - AI transport: OpenAI-compatible chat completions via plain `fetch`
-- Guided intake: rule-based interview flow that asks one question at a time, builds a generic `PlanRequest`, then adapts it to the current generator format
-- Docker default: plan generation is routed to the local `simulator` service, not a paid provider
+- Guided intake: model-backed interview flow with app-side validation, optional NeMo guardrails, and simulator/local deterministic modes for tests
+- Docker default: plan generation is routed by `app/.env`; the simulator profile avoids paid provider calls
 
 ## Docker Services
 
 - `postgres`: PostgreSQL 16 database
 - `migrate`: one-shot SQL migration runner
-- `simulator`: local AI backend simulator for plan generation
+- `simulator`: local OpenAI-compatible AI backend simulator for intake and plan generation
+- `guardrails`: optional NeMo Guardrails intake gateway, enabled with the `guardrails` Compose profile
 - `web`: Next.js app
+- `plan-worker`: background worker for sequential plan-week generation
 
 ## Useful Commands
 
@@ -59,6 +61,8 @@ The app still contains an AI adjustment prototype, but the primary editing direc
 docker compose up --build -d
 docker compose logs web --tail=20
 docker compose logs simulator --tail=20
+docker compose logs plan-worker --tail=20
+docker compose --profile guardrails logs guardrails --tail=20
 docker compose down
 docker compose down -v
 ```
@@ -95,3 +99,4 @@ npx playwright test tests/plan-viewer-progress.spec.ts
 - [docs/ai_plan_chat.md](docs/ai_plan_chat.md)
 - [docs/ai-simulator.md](docs/ai-simulator.md)
 - [docs/plan-editing.md](docs/plan-editing.md)
+- [docs/NeMo-Guardrails.md](docs/NeMo-Guardrails.md)

@@ -355,7 +355,7 @@ Configuration:
 ```text
 AI_INTAKE_MODE=live
 AI_GUARDRAILS_MODE=off
-ANTHROPIC_MODEL=anthropic/claude-haiku-4-5
+ANTHROPIC_MODEL=openai/gpt-5.5
 ```
 
 Route:
@@ -385,7 +385,7 @@ AI_INTAKE_MODE=live
 AI_GUARDRAILS_MODE=intake
 AI_GUARDRAILS_BASE_URL=http://guardrails:8000
 ANTHROPIC_BASE_URL=https://openrouter.ai/api
-ANTHROPIC_MODEL=anthropic/claude-haiku-4-5
+ANTHROPIC_MODEL=openai/gpt-5.5
 ```
 
 Route:

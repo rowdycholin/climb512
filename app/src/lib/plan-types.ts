@@ -29,6 +29,8 @@ export interface ExerciseData {
   holdType?: string;
   prescriptionDetails?: string;
   modifications?: string;
+  cues?: string[];
+  purpose?: string;
 }
 
 export interface SessionData {
@@ -39,6 +41,8 @@ export interface SessionData {
   intensity?: string;
   warmup?: string;
   cooldown?: string;
+  coachingFocus?: string;
+  modificationGuidance?: string;
   exercises: ExerciseData[];
 }
 
@@ -48,6 +52,8 @@ export interface DayData {
   focus: string;
   isRest: boolean;
   coachNotes?: string;
+  readinessGuidance?: string;
+  fallbackOption?: string;
   sessions: SessionData[];
 }
 
@@ -56,5 +62,8 @@ export interface WeekData {
   theme: string;
   summary?: string;
   progressionNote?: string;
+  coachRationale?: string;
+  keyAdaptations?: string[];
+  watchouts?: string[];
   days: DayData[];
 }

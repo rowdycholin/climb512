@@ -139,10 +139,19 @@ test("generated weeks include rich coaching and prescription fields", () => {
 
   assert(week.summary);
   assert(week.progressionNote);
+  assert(week.coachRationale);
+  assert(Array.isArray(week.keyAdaptations));
+  assert(Array.isArray(week.watchouts));
   assert(trainingDay.coachNotes);
+  assert(trainingDay.readinessGuidance);
+  assert(trainingDay.fallbackOption);
   assert.deepEqual(trainingDay.sessions.map((session) => session.name), ["Warm-up", "Main Session", "Cooldown"]);
   assert(mainSession.objective);
   assert(mainSession.intensity);
+  assert(mainSession.coachingFocus);
+  assert(mainSession.modificationGuidance);
+  assert(mainSession.exercises.some((exercise) => exercise.purpose));
+  assert(mainSession.exercises.some((exercise) => Array.isArray(exercise.cues) && exercise.cues.length > 0));
   assert(mainSession.exercises.some((exercise) => exercise.intensity || exercise.work || exercise.restBetweenSets));
 });
 

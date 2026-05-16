@@ -39,6 +39,8 @@ interface Exercise {
   holdType?: string | null;
   prescriptionDetails?: string | null;
   modifications?: string | null;
+  cues?: string[] | null;
+  purpose?: string | null;
   logs: ExerciseLog[];
 }
 
@@ -51,6 +53,8 @@ interface DaySession {
   intensity?: string | null;
   warmup?: string | null;
   cooldown?: string | null;
+  coachingFocus?: string | null;
+  modificationGuidance?: string | null;
   exercises: Exercise[];
 }
 
@@ -61,6 +65,8 @@ interface Day {
   focus: string;
   isRest: boolean;
   coachNotes?: string | null;
+  readinessGuidance?: string | null;
+  fallbackOption?: string | null;
   sessions: DaySession[];
 }
 
@@ -70,6 +76,9 @@ interface Week {
   theme: string;
   summary?: string | null;
   progressionNote?: string | null;
+  coachRationale?: string | null;
+  keyAdaptations?: string[] | null;
+  watchouts?: string[] | null;
   days: Day[];
 }
 
@@ -116,6 +125,10 @@ const FOCUS_COLORS: Record<string, string> = {
 
 function detailItems(items: Array<{ label: string; value?: string | null }>) {
   return items.filter((item) => item.value?.trim());
+}
+
+function nonEmptyItems(items?: string[] | null) {
+  return (items ?? []).map((item) => item.trim()).filter(Boolean);
 }
 
 function exercisePrescriptionChips(exercise: Exercise) {
@@ -235,6 +248,13 @@ function actualEntry(log: ExerciseLog | null, mode: string, index: number) {
   return (actuals.entries[index] as Record<string, unknown> | undefined) ?? {};
 }
 
+function actualEntryCount(log: ExerciseLog | null, mode: string) {
+  if (!log?.actuals || typeof log.actuals !== "object") return 0;
+  const actuals = log.actuals as { mode?: unknown; entries?: unknown };
+  if (actuals.mode !== mode || !Array.isArray(actuals.entries)) return 0;
+  return actuals.entries.length;
+}
+
 function stringActual(value: unknown) {
   return typeof value === "string" || typeof value === "number" ? String(value) : "";
 }
@@ -290,21 +310,39 @@ function scrollToPlanDay(dayId: string) {
 function PlanGuidancePanel({
   planId,
   planGuidance,
+  coachOverview,
+  athleteContextSummary,
+  progressionStrategy,
+  recoveryStrategy,
   initialOpen,
 }: {
   planId: string;
   planGuidance?: PlanGuidance | null;
+  coachOverview?: string | null;
+  athleteContextSummary?: string | null;
+  progressionStrategy?: string | null;
+  recoveryStrategy?: string | null;
   initialOpen: boolean;
 }) {
   const [guidanceOpen, setGuidanceOpen] = useState(initialOpen);
+  const intensityDistribution = planGuidance?.intensityDistribution ?? [];
+  const progressionPrinciples = planGuidance?.progressionPrinciples ?? [];
+  const recoveryPrinciples = planGuidance?.recoveryPrinciples ?? [];
+  const recommendations = planGuidance?.recommendations ?? [];
+  const progressionTable = planGuidance?.progressionTable ?? [];
 
-  if (!planGuidance) return null;
-  const hasGuidance = Boolean(planGuidance.overview)
-    || planGuidance.intensityDistribution.length > 0
-    || planGuidance.progressionPrinciples.length > 0
-    || planGuidance.recoveryPrinciples.length > 0
-    || planGuidance.recommendations.length > 0
-    || planGuidance.progressionTable.length > 0;
+  const hasGuidance = Boolean(
+    coachOverview
+      || athleteContextSummary
+      || progressionStrategy
+      || recoveryStrategy
+      || planGuidance?.overview,
+  )
+    || intensityDistribution.length > 0
+    || progressionPrinciples.length > 0
+    || recoveryPrinciples.length > 0
+    || recommendations.length > 0
+    || progressionTable.length > 0;
   if (!hasGuidance) return null;
 
   return (
@@ -326,12 +364,38 @@ function PlanGuidancePanel({
       </button>
       {guidanceOpen && (
         <div className="space-y-4 px-4 pb-3">
-          {planGuidance.overview && <p className="leading-relaxed text-slate-600">{planGuidance.overview}</p>}
-          {planGuidance.intensityDistribution.length > 0 && (
+          {(coachOverview || athleteContextSummary || progressionStrategy || recoveryStrategy) && (
+            <div className="grid gap-2">
+              {coachOverview && (
+                <p className="rounded-lg border border-sky-100 bg-sky-50 px-3 py-2 leading-relaxed text-sky-950">
+                  {coachOverview}
+                </p>
+              )}
+              {athleteContextSummary && (
+                <p className="rounded-lg border border-slate-100 bg-slate-50 px-3 py-2 text-xs leading-relaxed text-slate-600">
+                  <span className="font-semibold text-slate-700">Athlete context:</span> {athleteContextSummary}
+                </p>
+              )}
+              <div className="grid gap-2 sm:grid-cols-2">
+                {progressionStrategy && (
+                  <p className="rounded-lg border border-slate-100 bg-white px-3 py-2 text-xs leading-relaxed text-slate-600">
+                    <span className="font-semibold text-slate-700">Progression:</span> {progressionStrategy}
+                  </p>
+                )}
+                {recoveryStrategy && (
+                  <p className="rounded-lg border border-slate-100 bg-white px-3 py-2 text-xs leading-relaxed text-slate-600">
+                    <span className="font-semibold text-slate-700">Recovery:</span> {recoveryStrategy}
+                  </p>
+                )}
+              </div>
+            </div>
+          )}
+          {planGuidance?.overview && <p className="leading-relaxed text-slate-600">{planGuidance.overview}</p>}
+          {intensityDistribution.length > 0 && (
             <div>
               <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Intensity Distribution</p>
               <div className="grid gap-2 sm:grid-cols-2">
-                {planGuidance.intensityDistribution.map((item, index) => (
+                {intensityDistribution.map((item, index) => (
                   <div key={`${item.label}-${index}`} className="rounded-lg border border-slate-100 bg-slate-50 px-3 py-2">
                     <span className="text-xs font-semibold text-slate-700">{item.label}</span>
                     <p className="mt-0.5 text-xs text-slate-500">{item.detail}</p>
@@ -340,48 +404,48 @@ function PlanGuidancePanel({
               </div>
             </div>
           )}
-          {(planGuidance.progressionPrinciples.length > 0 || planGuidance.recoveryPrinciples.length > 0) && (
+          {(progressionPrinciples.length > 0 || recoveryPrinciples.length > 0) && (
             <div className="grid gap-3 sm:grid-cols-2">
-              {planGuidance.progressionPrinciples.length > 0 && (
+              {progressionPrinciples.length > 0 && (
                 <div>
                   <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-500">Progression</p>
                   <ul className="space-y-1 text-xs leading-relaxed text-slate-600">
-                    {planGuidance.progressionPrinciples.map((item) => <li key={item}>{item}</li>)}
+                    {progressionPrinciples.map((item) => <li key={item}>{item}</li>)}
                   </ul>
                 </div>
               )}
-              {planGuidance.recoveryPrinciples.length > 0 && (
+              {recoveryPrinciples.length > 0 && (
                 <div>
                   <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-500">Recovery</p>
                   <ul className="space-y-1 text-xs leading-relaxed text-slate-600">
-                    {planGuidance.recoveryPrinciples.map((item) => <li key={item}>{item}</li>)}
+                    {recoveryPrinciples.map((item) => <li key={item}>{item}</li>)}
                   </ul>
                 </div>
               )}
             </div>
           )}
-          {planGuidance.recommendations.length > 0 && (
+          {recommendations.length > 0 && (
             <div>
               <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-500">Recommendations</p>
               <ul className="space-y-1 text-xs leading-relaxed text-slate-600">
-                {planGuidance.recommendations.map((item) => <li key={item}>{item}</li>)}
+                {recommendations.map((item) => <li key={item}>{item}</li>)}
               </ul>
             </div>
           )}
-          {planGuidance.progressionTable.length > 0 && (
+          {progressionTable.length > 0 && (
             <div className="overflow-x-auto">
               <table className="w-full min-w-[420px] border-collapse text-xs">
                 <thead>
                   <tr className="border-b border-slate-200 text-left text-slate-500">
-                    {Object.keys(planGuidance.progressionTable[0]).map((key) => (
+                    {Object.keys(progressionTable[0]).map((key) => (
                       <th key={key} className="py-1.5 pr-3 font-semibold capitalize">{key}</th>
                     ))}
                   </tr>
                 </thead>
                 <tbody>
-                  {planGuidance.progressionTable.map((row, index) => (
+                  {progressionTable.map((row, index) => (
                     <tr key={index} className="border-b border-slate-100 last:border-0">
-                      {Object.keys(planGuidance.progressionTable[0]).map((key) => (
+                      {Object.keys(progressionTable[0]).map((key) => (
                         <td key={key} className="py-1.5 pr-3 text-slate-600">{row[key]}</td>
                       ))}
                     </tr>
@@ -399,14 +463,19 @@ function PlanGuidancePanel({
 function DetailedLogFields({ exercise, log }: { exercise: Exercise; log: ExerciseLog | null }) {
   const shape = loggingShape(exercise);
   const setTarget = setTargetField(exercise);
+  const [rowCount, setRowCount] = useState(() => Math.max(shape.rowCount, actualEntryCount(log, shape.mode)));
   const inputClass = "h-10 min-w-0 rounded-lg border border-slate-300 bg-white px-2 text-sm text-slate-800 placeholder:text-slate-400 focus:border-blue-400 focus:outline-none";
   const checkboxLabelClass = "flex h-10 items-center gap-2 rounded-lg border border-slate-200 bg-white px-2 text-xs font-medium text-slate-600";
+
+  useEffect(() => {
+    setRowCount(Math.max(shape.rowCount, actualEntryCount(log, shape.mode)));
+  }, [exercise.id, log, shape.mode, shape.rowCount]);
 
   if (shape.mode === "sets") {
     return (
       <div className="space-y-2">
         <input type="hidden" name="actualMode" value="sets" />
-        <input type="hidden" name="actualRowCount" value={shape.rowCount} />
+        <input type="hidden" name="actualRowCount" value={rowCount} />
         <div className="hidden grid-cols-[56px_72px_minmax(76px,1fr)_64px_minmax(92px,1fr)] gap-2 px-1 text-xs font-medium text-slate-500 sm:grid">
           <span>Done</span>
           <span>Reps</span>
@@ -414,7 +483,7 @@ function DetailedLogFields({ exercise, log }: { exercise: Exercise; log: Exercis
           <span>RPE</span>
           <span>Notes</span>
         </div>
-        {Array.from({ length: shape.rowCount }, (_, index) => {
+        {Array.from({ length: rowCount }, (_, index) => {
           const row = index + 1;
           const entry = actualEntry(log, "sets", index);
           return (
@@ -430,6 +499,13 @@ function DetailedLogFields({ exercise, log }: { exercise: Exercise; log: Exercis
             </div>
           );
         })}
+        <button
+          type="button"
+          onClick={() => setRowCount((count) => Math.min(count + 1, 24))}
+          className="min-h-9 rounded-lg border border-slate-300 bg-white px-3 text-xs font-medium text-slate-600 transition-colors hover:bg-slate-50 hover:text-slate-800"
+        >
+          Add set
+        </button>
       </div>
     );
   }
@@ -438,7 +514,7 @@ function DetailedLogFields({ exercise, log }: { exercise: Exercise; log: Exercis
     return (
       <div className="space-y-2">
         <input type="hidden" name="actualMode" value="intervals" />
-        <input type="hidden" name="actualRowCount" value={shape.rowCount} />
+        <input type="hidden" name="actualRowCount" value={rowCount} />
         <div className="hidden grid-cols-[56px_minmax(76px,1fr)_minmax(76px,1fr)_64px_minmax(92px,1fr)] gap-2 px-1 text-xs font-medium text-slate-500 sm:grid">
           <span>Done</span>
           <span>Work</span>
@@ -446,7 +522,7 @@ function DetailedLogFields({ exercise, log }: { exercise: Exercise; log: Exercis
           <span>RPE</span>
           <span>Notes</span>
         </div>
-        {Array.from({ length: shape.rowCount }, (_, index) => {
+        {Array.from({ length: rowCount }, (_, index) => {
           const row = index + 1;
           const entry = actualEntry(log, "intervals", index);
           return (
@@ -462,6 +538,13 @@ function DetailedLogFields({ exercise, log }: { exercise: Exercise; log: Exercis
             </div>
           );
         })}
+        <button
+          type="button"
+          onClick={() => setRowCount((count) => Math.min(count + 1, 40))}
+          className="min-h-9 rounded-lg border border-slate-300 bg-white px-3 text-xs font-medium text-slate-600 transition-colors hover:bg-slate-50 hover:text-slate-800"
+        >
+          Add interval
+        </button>
       </div>
     );
   }
@@ -470,7 +553,7 @@ function DetailedLogFields({ exercise, log }: { exercise: Exercise; log: Exercis
     return (
       <div className="space-y-2">
         <input type="hidden" name="actualMode" value="attempts" />
-        <input type="hidden" name="actualRowCount" value={shape.rowCount} />
+        <input type="hidden" name="actualRowCount" value={rowCount} />
         <div className="hidden grid-cols-[56px_minmax(96px,1fr)_minmax(76px,1fr)_64px_minmax(92px,1fr)] gap-2 px-1 text-xs font-medium text-slate-500 sm:grid">
           <span>#</span>
           <span>Result</span>
@@ -478,7 +561,7 @@ function DetailedLogFields({ exercise, log }: { exercise: Exercise; log: Exercis
           <span>RPE</span>
           <span>Notes</span>
         </div>
-        {Array.from({ length: shape.rowCount }, (_, index) => {
+        {Array.from({ length: rowCount }, (_, index) => {
           const row = index + 1;
           const entry = actualEntry(log, "attempts", index);
           return (
@@ -497,6 +580,13 @@ function DetailedLogFields({ exercise, log }: { exercise: Exercise; log: Exercis
             </div>
           );
         })}
+        <button
+          type="button"
+          onClick={() => setRowCount((count) => Math.min(count + 1, 24))}
+          className="min-h-9 rounded-lg border border-slate-300 bg-white px-3 text-xs font-medium text-slate-600 transition-colors hover:bg-slate-50 hover:text-slate-800"
+        >
+          Add attempt
+        </button>
       </div>
     );
   }
@@ -534,7 +624,12 @@ function ExerciseRow({ planId, exercise, readOnly = false }: { planId: string; e
     { label: "Sides", value: exercise.sides },
     { label: "Hold", value: exercise.holdType },
   ]);
-  const hasExpandableDetails = prescriptionDetails.length > 0 || Boolean(exercise.prescriptionDetails) || Boolean(exercise.modifications);
+  const cues = nonEmptyItems(exercise.cues);
+  const hasExpandableDetails = prescriptionDetails.length > 0
+    || Boolean(exercise.prescriptionDetails)
+    || Boolean(exercise.modifications)
+    || cues.length > 0
+    || Boolean(exercise.purpose);
 
   useEffect(() => {
     setCompleted(log?.completed ?? false);
@@ -688,10 +783,20 @@ function ExerciseRow({ planId, exercise, readOnly = false }: { planId: string; e
                   </div>
                 )}
                 {exercise.prescriptionDetails && <p className="leading-relaxed">{exercise.prescriptionDetails}</p>}
+                {exercise.purpose && (
+                  <p className="leading-relaxed">
+                    <span className="font-semibold text-slate-600">Purpose:</span> {exercise.purpose}
+                  </p>
+                )}
                 {exercise.modifications && (
                   <p className="leading-relaxed">
                     <span className="font-semibold text-slate-600">Modify:</span> {exercise.modifications}
                   </p>
+                )}
+                {cues.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5">
+                    {cues.map((cue) => <SmallChip key={cue}>{cue}</SmallChip>)}
+                  </div>
                 )}
               </div>
             </details>
@@ -745,9 +850,9 @@ function ExerciseRow({ planId, exercise, readOnly = false }: { planId: string; e
 }
 
 function SessionBlock({ planId, session, readOnly = false }: { planId: string; session: DaySession; readOnly?: boolean }) {
-  const sessionDetails = detailItems([
-    { label: "Objective", value: session.objective },
-    { label: "Intensity", value: session.intensity },
+  const sessionGuidance = detailItems([
+    { label: "Coaching focus", value: session.coachingFocus },
+    { label: "Modify", value: session.modificationGuidance },
     { label: "Warm-up", value: session.warmup },
     { label: "Cooldown", value: session.cooldown },
   ]);
@@ -768,11 +873,11 @@ function SessionBlock({ planId, session, readOnly = false }: { planId: string; s
           {session.intensity && <SmallChip tone="blue">{session.intensity}</SmallChip>}
         </div>
       )}
-      {sessionDetails.some((item) => item.label === "Warm-up" || item.label === "Cooldown") && (
+      {sessionGuidance.length > 0 && (
         <details className="mb-2 px-1 text-xs text-slate-500">
           <summary className="cursor-pointer font-medium text-slate-600">Session details</summary>
           <div className="mt-2 space-y-1.5 rounded-lg border border-slate-100 bg-slate-50 px-3 py-2">
-            {sessionDetails.map((item) => (
+            {sessionGuidance.map((item) => (
               <p key={item.label} className="leading-relaxed">
                 <span className="font-semibold text-slate-600">{item.label}:</span> {item.value}
               </p>
@@ -837,6 +942,10 @@ function DayCard({
     .filter((exercise) => exercise.logs[0]?.completed).length;
   const hasProgress = completedExercises > 0;
   const isAdjusted = Boolean(adjustmentSummary);
+  const dayGuidance = detailItems([
+    { label: "Readiness", value: day.readinessGuidance },
+    { label: "Fallback", value: day.fallbackOption },
+  ]);
 
   return (
     <AccordionItem
@@ -899,6 +1008,15 @@ function DayCard({
             {day.coachNotes}
           </p>
         )}
+        {dayGuidance.length > 0 && (
+          <div className="mb-3 grid gap-2">
+            {dayGuidance.map((item) => (
+              <p key={item.label} className="rounded-lg border border-slate-100 bg-slate-50 px-3 py-2 text-xs leading-relaxed text-slate-600">
+                <span className="font-semibold text-slate-700">{item.label}:</span> {item.value}
+              </p>
+            ))}
+          </div>
+        )}
         {day.sessions.map((session) => (
           <SessionBlock key={session.id} planId={planId} session={session} readOnly={readOnly} />
         ))}
@@ -951,6 +1069,7 @@ function WeekCard({
   initialUiState,
   initialDayIndex,
   adjustmentMetadata,
+  onActiveDayChange,
   readOnly,
 }: {
   planId: string;
@@ -958,13 +1077,16 @@ function WeekCard({
   initialUiState: PlanUiState;
   initialDayIndex: number;
   adjustmentMetadata?: AdjustmentMetadata | null;
+  onActiveDayChange?: (dayId: string | null) => void;
   readOnly?: boolean;
 }) {
   const trainingDays = week.days.filter((day) => !day.isRest).length;
   const allExercises = week.days.flatMap((day) => day.sessions.flatMap((session) => session.exercises));
   const completedCount = allExercises.filter((exercise) => exercise.logs[0]?.completed).length;
   const initialDayId = week.days[initialDayIndex]?.id ?? null;
-  const hasWeekSummary = Boolean(week.summary || week.progressionNote || week.days.length);
+  const keyAdaptations = nonEmptyItems(week.keyAdaptations);
+  const watchouts = nonEmptyItems(week.watchouts);
+  const hasWeekSummary = Boolean(week.summary || week.progressionNote || week.coachRationale || keyAdaptations.length || watchouts.length || week.days.length);
 
   const [openDayIds, setOpenDayIds] = useState<string[]>(() => (initialDayId ? [initialDayId] : []));
   const [highlightedDayId, setHighlightedDayId] = useState<string | null>(initialDayId);
@@ -977,7 +1099,8 @@ function WeekCard({
   useEffect(() => {
     setOpenDayIds(initialDayId ? [initialDayId] : []);
     setHighlightedDayId(initialDayId);
-  }, [initialDayId, week.id]);
+    onActiveDayChange?.(initialDayId);
+  }, [initialDayId, onActiveDayChange, week.id]);
 
   useEffect(() => {
     if (!initialDayId) return;
@@ -1027,6 +1150,35 @@ function WeekCard({
                   {week.progressionNote && <p className="text-xs text-slate-500">{week.progressionNote}</p>}
                 </div>
               )}
+              {(week.coachRationale || keyAdaptations.length > 0 || watchouts.length > 0) && (
+                <div className="space-y-2 border-b border-slate-100 px-3 py-3 text-xs leading-relaxed text-slate-600">
+                  {week.coachRationale && (
+                    <p className="rounded-lg border border-sky-100 bg-sky-50 px-3 py-2 text-sky-950">
+                      {week.coachRationale}
+                    </p>
+                  )}
+                  {(keyAdaptations.length > 0 || watchouts.length > 0) && (
+                    <div className="grid gap-2 sm:grid-cols-2">
+                      {keyAdaptations.length > 0 && (
+                        <div className="rounded-lg border border-slate-100 bg-slate-50 px-3 py-2">
+                          <p className="mb-1 font-semibold uppercase tracking-wide text-slate-500">Adaptations</p>
+                          <ul className="space-y-1">
+                            {keyAdaptations.map((item) => <li key={item}>{item}</li>)}
+                          </ul>
+                        </div>
+                      )}
+                      {watchouts.length > 0 && (
+                        <div className="rounded-lg border border-amber-100 bg-amber-50 px-3 py-2 text-amber-900">
+                          <p className="mb-1 font-semibold uppercase tracking-wide text-amber-700">Watchouts</p>
+                          <ul className="space-y-1">
+                            {watchouts.map((item) => <li key={item}>{item}</li>)}
+                          </ul>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
               <WeekOverview week={week} />
             </div>
           )}
@@ -1040,7 +1192,10 @@ function WeekCard({
             day={day}
             isHighlighted={highlightedDayId ? day.id === highlightedDayId : index === initialDayIndex}
             adjustmentSummary={adjustedByDay.get(day.dayNum) ?? null}
-            onSelect={setHighlightedDayId}
+            onSelect={(dayId) => {
+              setHighlightedDayId(dayId);
+              onActiveDayChange?.(dayId);
+            }}
             readOnly={readOnly}
           />
         ))}
@@ -1078,6 +1233,10 @@ export default function PlanViewer({
   initialUiState,
   weeks,
   planGuidance,
+  coachOverview,
+  athleteContextSummary,
+  progressionStrategy,
+  recoveryStrategy,
   totalWeeks = weeks.length,
   generation,
   adjustmentMetadata,
@@ -1085,12 +1244,17 @@ export default function PlanViewer({
   initialDayIndex = 0,
   activeWeekIndex,
   onActiveWeekChange,
+  onActiveDayChange,
   readOnly = false,
 }: {
   planId: string;
   initialUiState: PlanUiState;
   weeks: Week[];
   planGuidance?: PlanGuidance | null;
+  coachOverview?: string | null;
+  athleteContextSummary?: string | null;
+  progressionStrategy?: string | null;
+  recoveryStrategy?: string | null;
   totalWeeks?: number;
   generation?: GenerationProgress;
   adjustmentMetadata?: AdjustmentMetadata | null;
@@ -1098,6 +1262,7 @@ export default function PlanViewer({
   initialDayIndex?: number;
   activeWeekIndex?: number;
   onActiveWeekChange?: (index: number) => void;
+  onActiveDayChange?: (dayId: string | null) => void;
   readOnly?: boolean;
 }) {
   const [internalActiveWeek, setInternalActiveWeek] = useState(initialWeekIndex);
@@ -1135,6 +1300,10 @@ export default function PlanViewer({
       <PlanGuidancePanel
         planId={planId}
         planGuidance={planGuidance}
+        coachOverview={coachOverview}
+        athleteContextSummary={athleteContextSummary}
+        progressionStrategy={progressionStrategy}
+        recoveryStrategy={recoveryStrategy}
         initialOpen={initialUiState.coachGuidanceOpen ?? true}
       />
       <div ref={weekScrollRef} className="mb-6 flex gap-2 overflow-x-auto pb-2" style={{ scrollbarWidth: "thin" }}>
@@ -1194,6 +1363,7 @@ export default function PlanViewer({
           initialUiState={initialUiState}
           initialDayIndex={resolvedActiveWeek === initialWeekIndex ? initialDayIndex : -1}
           adjustmentMetadata={adjustmentMetadata}
+          onActiveDayChange={onActiveDayChange}
           readOnly={readOnly}
         />
       ) : (

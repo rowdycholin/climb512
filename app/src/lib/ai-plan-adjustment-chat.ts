@@ -7,7 +7,7 @@ import {
   type AdjustmentChatState,
 } from "./plan-adjustment-chat";
 
-const MODEL = process.env.ANTHROPIC_MODEL ?? "anthropic/claude-haiku-4-5";
+const MODEL = process.env.ANTHROPIC_ADJUSTMENT_MODEL ?? process.env.ANTHROPIC_MODEL ?? "openai/gpt-5.5";
 const MAX_TOKENS = parseInt(
   process.env.ANTHROPIC_ADJUSTMENT_MAX_TOKENS ?? process.env.ANTHROPIC_MAX_TOKENS ?? "12000",
   10,
@@ -15,6 +15,13 @@ const MAX_TOKENS = parseInt(
 const BASE_URL = (process.env.ANTHROPIC_BASE_URL ?? "https://openrouter.ai/api").replace(/\/$/, "");
 const API_KEY = process.env.ANTHROPIC_API_KEY ?? "";
 const USE_LOCAL_SIMULATOR = /^https?:\/\/(simulator|localhost|127\.0\.0\.1)(:\d+)?$/i.test(BASE_URL);
+const PROVIDER_LABEL = (() => {
+  try {
+    return new URL(BASE_URL).host;
+  } catch {
+    return "configured-provider";
+  }
+})();
 
 export class AiAdjustmentJsonError extends Error {
   constructor(message = "The AI returned an incomplete adjustment response. Try a narrower change, or send the request again.") {
@@ -53,36 +60,56 @@ function extractJsonObject(text: string) {
   }
 }
 
-async function callChatCompletion(messages: Array<{ role: "system" | "user"; content: string }>) {
-  const res = await fetch(`${BASE_URL}/v1/chat/completions`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "Authorization": `Bearer ${API_KEY}`,
-    },
-    body: JSON.stringify({
-      model: MODEL,
-      max_tokens: MAX_TOKENS,
-      response_format: { type: "json_object" },
-      messages,
-    }),
-  });
+function sanitizeProviderText(value: string) {
+  return value
+    .replace(/Bearer\s+[A-Za-z0-9._~+/=-]+/gi, "Bearer [redacted]")
+    .replace(/\b(?:sk|sk-or|sk-proj)-[A-Za-z0-9._-]+/g, "[redacted-key]")
+    .slice(0, 500);
+}
 
-  if (!res.ok) {
-    const body = await res.text();
-    throw new Error(`AI adjustment API error ${res.status}: ${body.slice(0, 300)}`);
+async function callChatCompletion(messages: Array<{ role: "system" | "user"; content: string }>, surface = "adjustment") {
+  const started = Date.now();
+  try {
+    const res = await fetch(`${BASE_URL}/v1/chat/completions`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${API_KEY}`,
+      },
+      body: JSON.stringify({
+        model: MODEL,
+        max_tokens: MAX_TOKENS,
+        response_format: { type: "json_object" },
+        messages,
+      }),
+    });
+
+    if (!res.ok) {
+      const body = sanitizeProviderText(await res.text());
+      throw new Error(`AI adjustment API error ${res.status}: ${body.slice(0, 300)}`);
+    }
+
+    const data = await res.json() as {
+      choices?: { message?: { content?: string }; finish_reason?: string }[];
+      error?: { message?: string };
+    };
+
+    if (data.error) throw new Error(`AI adjustment error: ${sanitizeProviderText(data.error.message ?? "unknown provider error")}`);
+
+    const content = data.choices?.[0]?.message?.content?.trim();
+    const finishReason = data.choices?.[0]?.finish_reason ?? "unknown";
+    if (!content) throw new Error(`No AI adjustment response content (finish_reason=${finishReason})`);
+
+    console.log(
+      `[ai-adjustment] provider success surface=${surface} provider=${PROVIDER_LABEL} model=${MODEL} finishReason=${finishReason} durationMs=${Date.now() - started}`,
+    );
+    return content;
+  } catch (error) {
+    console.warn(
+      `[ai-adjustment] provider failure surface=${surface} provider=${PROVIDER_LABEL} model=${MODEL} durationMs=${Date.now() - started}: ${sanitizeProviderText((error as Error).message)}`,
+    );
+    throw error;
   }
-
-  const data = await res.json() as {
-    choices?: { message?: { content?: string } }[];
-    error?: { message?: string };
-  };
-
-  if (data.error) throw new Error(`AI adjustment error: ${data.error.message}`);
-
-  const content = data.choices?.[0]?.message?.content?.trim();
-  if (!content) throw new Error("No AI adjustment response content");
-  return content;
 }
 
 async function repairAdjustmentJson(rawContent: string): Promise<AdjustmentChatModelResponse> {
@@ -96,7 +123,7 @@ async function repairAdjustmentJson(rawContent: string): Promise<AdjustmentChatM
       role: "user",
       content: `Repair this malformed JSON into one valid AdjustmentChatModelResponse JSON object. Prefer the compact "intent" response shape. Preserve the user's adjustment intent as much as possible. If the response is too incomplete to repair, return a follow_up response asking the user to narrow the requested adjustment.\n\nMALFORMED_JSON:\n${rawContent.slice(0, 24000)}`,
     },
-  ]);
+  ], "adjustment-json-repair");
 
   return adjustmentChatModelResponseSchema.parse(extractJsonObject(repairContent));
 }

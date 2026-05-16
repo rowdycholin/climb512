@@ -6,9 +6,9 @@ import {
   type IntakeResponse,
   type PartialIntakeDraft,
 } from "./intake";
-import { planRequestSchema } from "./plan-request";
+import { planRequestSchema, sanitizePlanStructureNotes } from "./plan-request";
 
-const DEFAULT_MODEL = "anthropic/claude-haiku-4-5";
+const DEFAULT_MODEL = "openai/gpt-5.5";
 const DEFAULT_BASE_URL = "https://openrouter.ai/api";
 const DEFAULT_GUARDRAILS_BASE_URL = "http://guardrails:8000";
 const LOCAL_SIMULATOR_BASE_URL_PATTERN = /^https?:\/\/(simulator|localhost|127\.0\.0\.1)(:\d+)?$/i;
@@ -39,6 +39,7 @@ export interface PlanIntakeAiInput {
   userMessage: string;
   messages: IntakeMessage[];
   coachName?: string;
+  athleteAge?: number;
   clientToday?: string;
   clientTimeZone?: string;
 }
@@ -301,9 +302,58 @@ function latestAssistantMessage(messages: IntakeMessage[]) {
 function appendPlanStructureNote(draft: PartialIntakeDraft, note: string) {
   const trimmed = note.trim();
   if (!trimmed) return;
+  if (!sanitizePlanStructureNotes(trimmed)) return;
   const existing = draft.planStructureNotes ?? "";
   if (existing.toLowerCase().includes(trimmed.toLowerCase())) return;
-  draft.planStructureNotes = [existing, trimmed].filter(Boolean).join(" | ");
+  draft.planStructureNotes = sanitizePlanStructureNotes([existing, trimmed].filter(Boolean).join(" | "));
+}
+
+const DAY_TOKEN_PATTERN = "(?:mon(?:day)?|m|tue(?:s(?:day)?)?|tues|wed(?:nesday)?|w|thu(?:rs(?:day)?)?|thur(?:s)?|th|fri(?:day)?|f|sat(?:urday)?|sun(?:day)?)";
+const DAY_LIST_PATTERN = `(?:${DAY_TOKEN_PATTERN})(?:\\s*(?:,|/|&|and)\\s*(?:${DAY_TOKEN_PATTERN}))*`;
+
+function normalizeDayToken(value: string): string | undefined {
+  const token = value.trim().toLowerCase();
+  if (token === "m" || token.startsWith("mon")) return "Monday";
+  if (token.startsWith("tue")) return "Tuesday";
+  if (token === "w" || token.startsWith("wed")) return "Wednesday";
+  if (token === "th" || token.startsWith("thu") || token.startsWith("thur")) return "Thursday";
+  if (token === "f" || token.startsWith("fri")) return "Friday";
+  if (token.startsWith("sat")) return "Saturday";
+  if (token.startsWith("sun")) return "Sunday";
+  return undefined;
+}
+
+function daysFromList(value: string) {
+  const days: string[] = [];
+  for (const match of Array.from(value.matchAll(new RegExp(DAY_TOKEN_PATTERN, "gi")))) {
+    const day = normalizeDayToken(match[0]);
+    if (day) days.push(day);
+  }
+  return days;
+}
+
+function extractNamedDaySchedule(answer: string) {
+  const workoutDays = new Set<string>();
+  const restDays = new Set<string>();
+  const clausePattern = new RegExp(`(${DAY_LIST_PATTERN})\\s+(?:are|is|=|:)\\s+(.*?)(?=\\s+and\\s+${DAY_LIST_PATTERN}\\s+(?:are|is|=|:)\\b|[.;]|$)`, "gi");
+
+  for (const match of Array.from(answer.matchAll(clausePattern))) {
+    const days = daysFromList(match[1] ?? "");
+    const activity = (match[2] ?? "").toLowerCase();
+    const isRest = /\b(?:rest|rests|off|fully off|recovery|easy day|easier)\b/.test(activity);
+    const isWorkout = !isRest && /\b(?:climb|climbing|cardio|strength|train|training|workout|run|running|ride|cycling|lift|lifting|gym|session)\b/.test(activity);
+
+    for (const day of days) {
+      if (isRest) restDays.add(day);
+      else if (isWorkout) workoutDays.add(day);
+    }
+  }
+
+  return {
+    workoutDays,
+    restDays,
+    hasNamedDaySchedule: workoutDays.size > 0 || restDays.size > 0,
+  };
 }
 
 function allUserText(messages: IntakeMessage[], latestUserMessage: string) {
@@ -386,6 +436,12 @@ function applySportAndGoalAnswerHints(draft: PartialIntakeDraft, answer: string 
     draft.disciplines = Array.from(disciplines);
   }
 
+  if (recoveredSport === "climbing" && /\b(?:lead|top\s*rope|toprope|sport\s*climb(?:ing)?|redpoint|route|5\.(?:[0-9]|1[0-5])(?:[abcd])?)\b/i.test(cleaned)) {
+    const disciplines = new Set([...(draft.disciplines ?? [])].filter((discipline) => !/^bouldering$/i.test(discipline)));
+    disciplines.add("sport");
+    draft.disciplines = Array.from(disciplines);
+  }
+
   if (hasSupportedSport(cleaned) && hasTrainingGoalLanguage(cleaned)) {
     if (!draft.goalDescription) {
       draft.goalDescription = cleaned;
@@ -437,6 +493,12 @@ function applyConversationRecoveryHints(draft: PartialIntakeDraft, input: PlanIn
     draft.disciplines = Array.from(disciplines);
   }
 
+  if (/\b(?:lead|top\s*rope|toprope|sport\s*climb(?:ing)?|redpoint|route|5\.(?:[0-9]|1[0-5])(?:[abcd])?)\b/i.test(conversation)) {
+    const disciplines = new Set([...(draft.disciplines ?? [])].filter((discipline) => !/^bouldering$/i.test(discipline)));
+    disciplines.add("sport");
+    draft.disciplines = Array.from(disciplines);
+  }
+
   if (!draft.goalDescription && goalAnswer) {
     draft.goalDescription = goalAnswer;
   }
@@ -459,6 +521,20 @@ function applyConversationRecoveryHints(draft: PartialIntakeDraft, input: PlanIn
   if (!draft.daysPerWeek) {
     const days = conversation.match(/\b([1-7])\s*(?:day|days)(?:\s*(?:per|\/)\s*week)?\b/i);
     if (days) draft.daysPerWeek = parseInt(days[1], 10);
+  }
+
+  const recoveredSchedule = extractNamedDaySchedule(conversation);
+  if (recoveredSchedule.hasNamedDaySchedule) {
+    appendPlanStructureNote(draft, latest);
+    if (!draft.daysPerWeek && recoveredSchedule.workoutDays.size > 0) {
+      draft.daysPerWeek = recoveredSchedule.workoutDays.size;
+    }
+    if (recoveredSchedule.workoutDays.size > 0) {
+      draft.preferredWorkoutDaysAsked = true;
+    }
+    if (recoveredSchedule.restDays.size > 0) {
+      draft.preferredRestDaysAsked = true;
+    }
   }
 
   if (!draft.targetDate && /\b(?:when is|target date|what date|date for|do you have a target date)\b/i.test(previousPrompt)) {
@@ -524,6 +600,20 @@ function withDirectAnswerHints(input: PlanIntakeAiInput): PlanIntakeAiInput {
   if (!draft.daysPerWeek && /days?\s+per\s+week|per\s+week|weekly/i.test(previousPrompt)) {
     const days = answer.match(/\b([1-7])\b/);
     if (days) draft.daysPerWeek = parseInt(days[1], 10);
+  }
+
+  const namedSchedule = extractNamedDaySchedule(answer);
+  if (namedSchedule.hasNamedDaySchedule) {
+    appendPlanStructureNote(draft, answer);
+    if (!draft.daysPerWeek && namedSchedule.workoutDays.size > 0) {
+      draft.daysPerWeek = namedSchedule.workoutDays.size;
+    }
+    if (namedSchedule.workoutDays.size > 0) {
+      draft.preferredWorkoutDaysAsked = true;
+    }
+    if (namedSchedule.restDays.size > 0) {
+      draft.preferredRestDaysAsked = true;
+    }
   }
 
   if (!draft.startDate && /when would you like to start|start/i.test(previousPrompt)) {
@@ -600,6 +690,16 @@ export function looksLikeTruncatedAssistantMessage(message: string) {
   return !hasQuestionCue && /\b(?:before|need to|trying to|want to|going to|able to|have to|understand)\b/i.test(lastSentence);
 }
 
+export function hasActionableIntakeQuestion(message: string) {
+  const trimmed = firstQuestionOnly(message).trim();
+  if (!trimmed.endsWith("?")) return false;
+
+  const question = trimmed.includes(".")
+    ? trimmed.split(/[.!]\s+/).at(-1) ?? trimmed
+    : trimmed;
+  return /(?:^|[.?!]\s+|[,;]\s+)(?:what|when|where|which|who|how|do|does|did|are|is|can|could|would|will|have|has|should|any|tell me)\b/i.test(question);
+}
+
 function toIntakeResponse(response: PlanIntakeAiResponse): IntakeResponse {
   const requiredFieldsComplete = requiredFieldStatus(response.planRequestDraft).length === 0;
 
@@ -658,6 +758,12 @@ function cleanStringArray(value: unknown) {
 
 function cleanString(value: unknown) {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function cleanBoundedString(value: unknown, maxLength: number) {
+  const text = cleanString(value);
+  if (!text) return undefined;
+  return text.length > maxLength ? text.slice(0, maxLength).trim() : text;
 }
 
 function isScheduleOnlyAnswer(value: string) {
@@ -876,7 +982,13 @@ function normalizeAiDraft(rawDraft: unknown, clientToday?: string) {
     startDate: cleanDate(draft.startDate, clientToday),
     equipment: cleanStringArray(draft.equipment),
     trainingFocus: cleanStringArray(draft.trainingFocus),
-    planStructureNotes: cleanString(draft.planStructureNotes),
+    planStructureNotes: cleanBoundedString(draft.planStructureNotes, 2000),
+    athleteNarrative: cleanBoundedString(draft.athleteNarrative, 2000),
+    trainingHistory: cleanBoundedString(draft.trainingHistory, 1000),
+    recentTrainingLoad: cleanBoundedString(draft.recentTrainingLoad, 1000),
+    sessionLengthPreference: cleanBoundedString(draft.sessionLengthPreference, 500),
+    recoveryCapacity: cleanBoundedString(draft.recoveryCapacity, 1000),
+    motivationContext: cleanBoundedString(draft.motivationContext, 1000),
     preferredWorkoutDaysAsked: cleanBoolean(draft.preferredWorkoutDaysAsked),
     preferredRestDaysAsked: cleanBoolean(draft.preferredRestDaysAsked),
     finalIntakeReviewAsked: cleanBoolean(draft.finalIntakeReviewAsked),
@@ -909,6 +1021,12 @@ function mergeDrafts(previous: PartialIntakeDraft, next: PartialIntakeDraft): Pa
         }
       : previous.strengthTraining,
     planStructureNotes: next.planStructureNotes ?? previous.planStructureNotes,
+    athleteNarrative: next.athleteNarrative ?? previous.athleteNarrative,
+    trainingHistory: next.trainingHistory ?? previous.trainingHistory,
+    recentTrainingLoad: next.recentTrainingLoad ?? previous.recentTrainingLoad,
+    sessionLengthPreference: next.sessionLengthPreference ?? previous.sessionLengthPreference,
+    recoveryCapacity: next.recoveryCapacity ?? previous.recoveryCapacity,
+    motivationContext: next.motivationContext ?? previous.motivationContext,
     preferredWorkoutDaysAsked: next.preferredWorkoutDaysAsked ?? previous.preferredWorkoutDaysAsked,
     preferredRestDaysAsked: next.preferredRestDaysAsked ?? previous.preferredRestDaysAsked,
     finalIntakeReviewAsked: next.finalIntakeReviewAsked ?? previous.finalIntakeReviewAsked,
@@ -1105,6 +1223,10 @@ export function nextNonDuplicateQuestion(response: PlanIntakeAiResponse) {
     return nextQuestionForDraft(draft);
   }
 
+  if (!hasActionableIntakeQuestion(message)) {
+    return nextQuestionForDraft(draft);
+  }
+
   if (
     message === PREFERRED_WORKOUT_DAYS_QUESTION ||
     message === PREFERRED_REST_DAYS_QUESTION ||
@@ -1187,6 +1309,9 @@ ${input.clientTimeZone ? `\nCLIENT_TIME_ZONE:\n${input.clientTimeZone}` : ""}
 COACH_NAME:
 ${coachName}
 
+ATHLETE_AGE:
+${typeof input.athleteAge === "number" ? input.athleteAge : "not provided"}
+
 CURRENT_PLAN_REQUEST_DRAFT_JSON:
 ${JSON.stringify(input.draft)}
 
@@ -1223,12 +1348,16 @@ COACHING INSTRUCTIONS:
 - A good message has this shape: one or two short coaching sentences, then one clear next question.
 - Ask only one question total. Acknowledge the previous answer in a friendly way, then ask one clear question about one topic.
 - Extract every useful training-plan detail from the user's latest message and conversation.
+- When ATHLETE_AGE is provided, use it as background context for recovery/load questions, but do not ask the user to repeat their age.
 - Preserve existing draft fields unless the user changes them.
 - If CURRENT_PLAN_REQUEST_DRAFT_JSON already has sport, goalDescription, schedule, level, startDate, equipment, constraints, or strengthTraining, do not ask for that same field again unless the user explicitly says they want to change it.
 - If the user gives a combined first answer with a supported sport and training focus, such as "energy systems training for climbing", set sport to the supported sport, preserve the full answer as goalDescription, add the specific focus to trainingFocus when possible, and do not ask the generic goal question again.
 - If the user gives a nuanced goal that differs from the initial discipline, reconcile it instead of resetting the interview. For example, bouldering as training for a big wall climb should stay sport "climbing" and preserve the big wall goal/details in goalDescription and planStructureNotes.
 - If the latest goal clearly belongs to a different supported activity family than the selected sport, pause and ask whether to switch the plan to that activity or keep the selected sport as support. Do not continue collecting block length, schedule, equipment, or level until that is clarified.
 - Preserve specific day-by-day requests, preferred session order, workout details, and "do X on Monday" style instructions in planStructureNotes.
+- Preserve useful user narrative in optional fields when available: athleteNarrative, trainingHistory, recentTrainingLoad, sessionLengthPreference, recoveryCapacity, and motivationContext.
+- Use athleteNarrative for broad context that does not fit a single structured field.
+- Use trainingHistory for past sport/training experience, recentTrainingLoad for current weekly volume or consistency, sessionLengthPreference for available time per session, recoveryCapacity for sleep/fatigue/stress/recovery limits, and motivationContext for why the goal matters.
 - If planStructureNotes already exists, append or update it with new relevant preferences instead of replacing useful details.
 - If the user's named-day preferences appear to conflict with daysPerWeek, acknowledge the conflict and ask one clarifying question about priority before continuing.
 - Never silently increase daysPerWeek to fit named-day preferences; preserve both facts and ask the user how to reconcile them.
@@ -1273,7 +1402,7 @@ REQUIRED PlanRequest fields before ready:
 sport, goalType, goalDescription, blockLengthWeeks, daysPerWeek, startDate, currentLevel, equipment, constraints, strengthTraining.
 
 JSON SHAPE:
-{"status":"needs_more_info","message":"<short coach response ending with one clear question>","planRequestDraft":{"planStructureNotes":"<optional day-by-day or structural preferences>", "...":"..."}}`;
+{"status":"needs_more_info","message":"<short coach response ending with one clear question>","planRequestDraft":{"planStructureNotes":"<optional day-by-day or structural preferences>","athleteNarrative":"<optional useful context>","trainingHistory":"<optional history>","recentTrainingLoad":"<optional recent load>","sessionLengthPreference":"<optional session length preference>","recoveryCapacity":"<optional recovery context>","motivationContext":"<optional why this goal matters>","...":"..."}}`;
 }
 
 function extractJsonObject(text: string) {

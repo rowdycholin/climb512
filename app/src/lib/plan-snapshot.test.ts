@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { buildPlanGuidance, buildPlanSnapshot, buildPlanView, hasMeaningfulWorkoutLog } from "./plan-snapshot";
+import { buildPlanGuidance, buildPlanSnapshot, buildPlanView, hasMeaningfulWorkoutLog, parsePlanSnapshot, toStoredJson } from "./plan-snapshot";
 import type { WeekData } from "./plan-types";
 
 const richWeek: WeekData = {
@@ -7,6 +7,9 @@ const richWeek: WeekData = {
   theme: "Base Skill",
   summary: "Build repeatable movement quality before harder work.",
   progressionNote: "This week creates a baseline for later intensity.",
+  coachRationale: "This starts with movement quality because the athlete needs capacity before harder loading.",
+  keyAdaptations: ["movement efficiency", "base capacity"],
+  watchouts: ["finger soreness", "rushing warm-ups"],
   days: [
     {
       dayNum: 1,
@@ -14,6 +17,8 @@ const richWeek: WeekData = {
       focus: "Climbing: Volume/Technique",
       isRest: false,
       coachNotes: "Keep this smooth and leave margin for the rest of the week.",
+      readinessGuidance: "If fingers feel stiff, extend the warm-up and keep grades easier.",
+      fallbackOption: "Replace board climbing with easy terrain if skin or fingers feel poor.",
       sessions: [
         {
           name: "Warm-up",
@@ -21,6 +26,8 @@ const richWeek: WeekData = {
           duration: 10,
           objective: "Arrive warm without creating fatigue.",
           intensity: "RPE 3-4",
+          coachingFocus: "Smooth movement before adding difficulty.",
+          modificationGuidance: "Add easy traversing if still cold.",
           exercises: [
             {
               name: "Easy Boulder Problems",
@@ -28,6 +35,8 @@ const richWeek: WeekData = {
               reps: "5-8 problems",
               grade: "V0-V2",
               restBetweenReps: "30-60 sec",
+              cues: ["quiet feet", "soft grip"],
+              purpose: "Warm fingers and rehearse precise movement.",
               notes: "Move quietly",
             },
           ],
@@ -48,6 +57,8 @@ const richWeek: WeekData = {
               holdType: "open hand",
               prescriptionDetails: "Use consistent holds before tiring.",
               modifications: "Shorten hangs if fingers feel tweaky.",
+              cues: ["open hand", "stop before form fades"],
+              purpose: "Build repeatable pulling capacity without max intensity.",
               notes: "Stay precise",
             },
           ],
@@ -85,10 +96,15 @@ describe("plan snapshot canonical rich shape", () => {
       key: "week-1",
       summary: "Build repeatable movement quality before harder work.",
       progressionNote: "This week creates a baseline for later intensity.",
+      coachRationale: "This starts with movement quality because the athlete needs capacity before harder loading.",
+      keyAdaptations: ["movement efficiency", "base capacity"],
+      watchouts: ["finger soreness", "rushing warm-ups"],
     });
     expect(snapshot.weeks[0].days[0]).toMatchObject({
       key: "w1-d1",
       coachNotes: "Keep this smooth and leave margin for the rest of the week.",
+      readinessGuidance: "If fingers feel stiff, extend the warm-up and keep grades easier.",
+      fallbackOption: "Replace board climbing with easy terrain if skin or fingers feel poor.",
     });
     expect(snapshot.weeks[0].days[0].sessions.map((session) => session.name)).toEqual([
       "Warm-up",
@@ -100,6 +116,14 @@ describe("plan snapshot canonical rich shape", () => {
       objective: "Accumulate quality climbing volume.",
       intensity: "75-85%",
     });
+    expect(snapshot.weeks[0].days[0].sessions[0]).toMatchObject({
+      coachingFocus: "Smooth movement before adding difficulty.",
+      modificationGuidance: "Add easy traversing if still cold.",
+    });
+    expect(snapshot.weeks[0].days[0].sessions[0].exercises[0]).toMatchObject({
+      cues: ["quiet feet", "soft grip"],
+      purpose: "Warm fingers and rehearse precise movement.",
+    });
     expect(snapshot.weeks[0].days[0].sessions[1].exercises[0]).toMatchObject({
       key: "w1-d1-s2-e1-tb2-board-technique-hangs",
       work: "20-40 sec",
@@ -107,6 +131,8 @@ describe("plan snapshot canonical rich shape", () => {
       holdType: "open hand",
       prescriptionDetails: "Use consistent holds before tiring.",
       modifications: "Shorten hangs if fingers feel tweaky.",
+      cues: ["open hand", "stop before form fades"],
+      purpose: "Build repeatable pulling capacity without max intensity.",
     });
   });
 
@@ -128,6 +154,9 @@ describe("plan snapshot canonical rich shape", () => {
     ]);
 
     const exercise = view.weeks[0].days[0].sessions[1].exercises[0];
+    expect(view.weeks[0].coachRationale).toContain("movement quality");
+    expect(view.weeks[0].days[0].readinessGuidance).toContain("fingers feel stiff");
+    expect(view.weeks[0].days[0].sessions[1].exercises[0].purpose).toContain("pulling capacity");
     expect(exercise.work).toBe("20-40 sec");
     expect(exercise.restBetweenSets).toBe("2-3 min");
     expect(exercise.logs).toHaveLength(1);
@@ -188,5 +217,55 @@ describe("plan snapshot canonical rich shape", () => {
       theme: "Base Skill",
       trainingDays: "1",
     });
+  });
+
+  test("preserves optional plan-level rich prose through stored JSON parsing and plan view", () => {
+    const snapshot = {
+      ...buildPlanSnapshot([richWeek]),
+      coachOverview: "This plan builds capacity before adding harder climbing.",
+      athleteContextSummary: "Experienced climber returning to structured training.",
+      progressionStrategy: "Increase specificity after the first base week.",
+      recoveryStrategy: "Keep two true rest days and back off if fingers are irritated.",
+    };
+
+    const parsed = parsePlanSnapshot(toStoredJson(snapshot));
+    const view = buildPlanView(parsed, []);
+
+    expect(parsed.coachOverview).toContain("builds capacity");
+    expect(parsed.athleteContextSummary).toContain("Experienced climber");
+    expect(view.progressionStrategy).toContain("specificity");
+    expect(view.recoveryStrategy).toContain("true rest days");
+  });
+
+  test("keeps old snapshots without rich prose readable", () => {
+    const oldSnapshot = {
+      weeks: [
+        {
+          key: "week-1",
+          weekNum: 1,
+          theme: "Base",
+          days: [
+            {
+              key: "w1-d1",
+              dayNum: 1,
+              dayName: "Monday",
+              focus: "Rest",
+              isRest: true,
+              sessions: [],
+            },
+          ],
+        },
+      ],
+    };
+
+    const parsed = parsePlanSnapshot(oldSnapshot);
+    const view = buildPlanView(parsed, []);
+
+    expect(view.planGuidance).toBeNull();
+    expect(view.coachOverview).toBeNull();
+    expect(view.weeks[0].summary).toBeUndefined();
+    expect(view.weeks[0].coachRationale).toBeUndefined();
+    expect(view.weeks[0].days[0].readinessGuidance).toBeUndefined();
+    expect(view.weeks[0].days[0].sessions).toEqual([]);
   });
 });

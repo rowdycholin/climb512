@@ -325,6 +325,20 @@ function enrichExercise(exercise, input) {
   if (!next.modifications) {
     next.modifications = "Reduce volume or intensity if form breaks.";
   }
+  if (!next.purpose) {
+    next.purpose = `${exercise.name} supports ${input.goalDescription} by building a repeatable training quality for this phase.`;
+  }
+  if (!next.cues) {
+    if (name.includes("route") || name.includes("arc") || name.includes("project")) {
+      next.cues = ["Breathe before hard sections", "Use feet first"];
+    } else if (name.includes("run") || name.includes("tempo") || name.includes("stride")) {
+      next.cues = ["Relax shoulders", "Keep effort smooth"];
+    } else if (name.includes("squat") || name.includes("press") || name.includes("row") || name.includes("pull")) {
+      next.cues = ["Brace first", "Move with control"];
+    } else {
+      next.cues = ["Stay smooth", "Stop before form fades"];
+    }
+  }
 
   return next;
 }
@@ -362,6 +376,8 @@ function buildTrainingDay(template, dayNum, input, rng) {
     focus: template.focus,
     isRest: false,
     coachNotes: `${template.focus} supports ${input.goalDescription}; keep quality higher than fatigue.`,
+    readinessGuidance: "If readiness is low, cut one set from the main session and keep technique crisp.",
+    fallbackOption: "Use easier terrain or lighter loads if fatigue, pain, or form breakdown appears.",
     sessions: [
       {
         name: "Warm-up",
@@ -369,6 +385,8 @@ function buildTrainingDay(template, dayNum, input, rng) {
         duration: 10,
         objective: "Start warm without creating fatigue.",
         intensity: band.low,
+        coachingFocus: "Raise temperature gradually and check movement quality before harder work.",
+        modificationGuidance: "Extend the warm-up if the first easy efforts feel stiff.",
         exercises: [warmupExercise(input)]
       },
       {
@@ -377,6 +395,8 @@ function buildTrainingDay(template, dayNum, input, rng) {
         duration: mainDuration,
         objective: template.description,
         intensity: exercises.some((exercise) => /8|9|10/.test(String(exercise.intensity))) ? band.hard : band.main,
+        coachingFocus: `Prioritize ${template.focus.toLowerCase()} while keeping the session recoverable.`,
+        modificationGuidance: "Drop the final round or lower intensity if quality declines.",
         exercises
       },
       {
@@ -384,6 +404,8 @@ function buildTrainingDay(template, dayNum, input, rng) {
         description: "Downshift and leave the session recovered.",
         duration: 8,
         cooldown: "Easy mobility and breathing before leaving the gym.",
+        coachingFocus: "Finish calm enough to recover for the next planned session.",
+        modificationGuidance: "Keep this easy; skip extra work if the main session ran long.",
         exercises: [cooldownExercise(input)]
       }
     ]
@@ -428,6 +450,16 @@ function generateWeekFromPrompt(prompt, options = {}) {
     progressionNote: input.weekNum === 1
       ? "Establish a repeatable baseline before progressing volume or intensity."
       : "Progress from prior weeks while preserving recovery and movement quality.",
+    coachRationale: `This simulator week matches ${input.daysPerWeek} training days to ${input.goalDescription}, using the listed equipment only where it fits the requested structure.`,
+    keyAdaptations: [
+      "Movement quality under manageable fatigue",
+      "Sport-specific capacity",
+      input.strengthTraining?.include ? "Supportive strength durability" : "Recovery consistency",
+    ],
+    watchouts: [
+      "Do not chase extra volume on rest days",
+      "Reduce intensity if pain or form breakdown appears",
+    ],
     days
   };
 }
