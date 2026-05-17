@@ -550,7 +550,7 @@ export default function PlanEditor({
 
             <div className="flex flex-wrap gap-2">
               <Button type="button" onClick={handleSave} disabled={pending}>
-                {pending ? "Saving..." : hasLogs ? "Save additions" : "Save week"}
+                {pending ? "Saving..." : hasLogs ? "Save additions" : "Save day"}
               </Button>
               <Button type="button" variant="outline" onClick={discardChanges} disabled={pending}>
                 Discard

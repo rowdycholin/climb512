@@ -13,7 +13,7 @@ docker compose up --build -d
 Development Docker with bind-mounted app source:
 
 ```bash
-bash scripts/start-dev.sh --build
+bash scripts/start.sh --build
 ```
 
 Then open `http://localhost:8080`.
@@ -68,8 +68,8 @@ docker compose down -v
 ```
 
 ```bash
-bash scripts/start-dev.sh --build
-bash scripts/stop-dev.sh
+bash scripts/start-dev.sh --build. (with simulator)
+bash scripts/stop-dev.sh           (with simulator)
 ```
 
 ```bash

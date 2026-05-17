@@ -1,0 +1,559 @@
+---
+# Namespace
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: climb512
+
+---
+# ConfigMap for environment variables
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: climb512-config
+  namespace: climb512
+data:
+  PORT: "8787"
+  AI_SIMULATOR_SEED: "demo-seed"
+  AI_SIMULATOR_SCENARIO: "baseline"
+  AI_SIMULATOR_LATENCY_MS: "0"
+  AI_SIMULATOR_ERROR_MODE: "none"
+  AI_SIMULATOR_ERROR_WEEK: ""
+  AI_SIMULATOR_ERROR_ONCE: "0"
+  NEMO_CONFIG_ID: "intake"
+  NEMO_PORT: "8000"
+  ANTHROPIC_BASE_URL: "http://simulator:8787"
+  ANTHROPIC_MODEL: "simulator"
+  ANTHROPIC_MAX_TOKENS: "5000"
+  ANTHROPIC_ADJUSTMENT_MAX_TOKENS: "12000"
+  AI_INTAKE_MODE: "simulator"
+  AI_GUARDRAILS_MODE: "intake"
+  AI_GUARDRAILS_BASE_URL: "http://guardrails:8000"
+  POSTGRES_DB: "climbapp"
+  POSTGRES_USER: "climber"
+  ENABLE_TEST_ROUTES: "1"
+  PLAN_WORKER_POLL_INTERVAL_MS: "5000"
+  PLAN_WORKER_LOCK_TIMEOUT_MS: "600000"
+  PLAN_WORKER_STEP_DELAY_MS: "1500"
+
+---
+# Secret for sensitive data
+apiVersion: v1
+kind: Secret
+metadata:
+  name: climb512-secrets
+  namespace: climb512
+type: Opaque
+stringData:
+  POSTGRES_PASSWORD: "climber512"
+  DATABASE_URL: "postgresql://climber:climber512@postgres:5432/climbapp"
+  SESSION_SECRET: "super-secret-session-key-change-in-production-32chars!!"
+  ANTHROPIC_API_KEY: "simulator-local-key"
+
+---
+# PersistentVolumeClaim for PostgreSQL
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: postgres-pvc
+  namespace: climb512
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+
+---
+# PostgreSQL Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres
+  namespace: climb512
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgres
+  template:
+    metadata:
+      labels:
+        app: postgres
+    spec:
+      containers:
+      - name: postgres
+        image: postgres:16-alpine
+        ports:
+        - containerPort: 5432
+        env:
+        - name: POSTGRES_DB
+          valueFrom:
+            configMapKeyRef:
+              name: climb512-config
+              key: POSTGRES_DB
+        - name: POSTGRES_USER
+          valueFrom:
+            configMapKeyRef:
+              name: climb512-config
+              key: POSTGRES_USER
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: climb512-secrets
+              key: POSTGRES_PASSWORD
+        volumeMounts:
+        - name: postgres-storage
+          mountPath: /var/lib/postgresql/data
+        livenessProbe:
+          exec:
+            command:
+            - /bin/sh
+            - -c
+            - pg_isready -U climber
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          exec:
+            command:
+            - /bin/sh
+            - -c
+            - pg_isready -U climber
+          initialDelaySeconds: 5
+          periodSeconds: 5
+      volumes:
+      - name: postgres-storage
+        persistentVolumeClaim:
+          claimName: postgres-pvc
+
+---
+# PostgreSQL Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: climb512
+spec:
+  selector:
+    app: postgres
+  ports:
+  - port: 5432
+    targetPort: 5432
+  type: ClusterIP
+
+---
+# Migration Job
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: migrate
+  namespace: climb512
+spec:
+  backoffLimit: 3
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+      - name: migrate
+        image: rowdycholin512/climb512:plan-worker
+        imagePullPolicy: IfNotPresent
+        command:
+        - node
+        - -e
+        - |
+          const fs = require("fs");
+          const path = require("path");
+          const { Client } = require("pg");
+
+          const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+          const client = new Client({ connectionString: process.env.DATABASE_URL });
+
+          async function connectWithRetry() {
+            for (let attempt = 1; attempt <= 60; attempt += 1) {
+              try {
+                await client.connect();
+                return;
+              } catch (error) {
+                if (attempt === 60) throw error;
+                await sleep(1000);
+              }
+            }
+          }
+
+          async function main() {
+            await connectWithRetry();
+            await client.query('CREATE TABLE IF NOT EXISTS "_app_migrations" (name TEXT PRIMARY KEY, applied_at TIMESTAMPTZ(3) NOT NULL DEFAULT CURRENT_TIMESTAMP)');
+
+            const tracked = await client.query('SELECT COUNT(*)::int AS count FROM "_app_migrations"');
+            const baseline = await client.query("SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'TrainingProfile') AS exists");
+            if (tracked.rows[0].count === 0 && baseline.rows[0].exists) {
+              await client.query('INSERT INTO "_app_migrations" (name) VALUES ($1) ON CONFLICT (name) DO NOTHING', ["20240101000000_init"]);
+              await client.query('INSERT INTO "_app_migrations" (name) VALUES ($1) ON CONFLICT (name) DO NOTHING', ["20240201000000_add_users"]);
+            }
+
+            const migrationsDir = path.join(process.cwd(), "prisma", "migrations");
+            const migrations = fs.readdirSync(migrationsDir, { withFileTypes: true })
+              .filter((entry) => entry.isDirectory())
+              .map((entry) => entry.name)
+              .sort();
+
+            for (const name of migrations) {
+              const applied = await client.query('SELECT 1 FROM "_app_migrations" WHERE name = $1 LIMIT 1', [name]);
+              if (applied.rowCount) continue;
+
+              const sql = fs.readFileSync(path.join(migrationsDir, name, "migration.sql"), "utf8");
+              console.log(`Applying migration ${name}`);
+              await client.query(sql);
+              await client.query('INSERT INTO "_app_migrations" (name) VALUES ($1)', [name]);
+            }
+          }
+
+          main()
+            .catch((error) => {
+              console.error(error);
+              process.exitCode = 1;
+            })
+            .finally(async () => {
+              await client.end().catch(() => {});
+            });
+        env:
+        - name: DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: climb512-secrets
+              key: DATABASE_URL
+
+---
+# Simulator Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: simulator
+  namespace: climb512
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: simulator
+  template:
+    metadata:
+      labels:
+        app: simulator
+    spec:
+      containers:
+      - name: simulator
+        image: rowdycholin512/climb512:simulator
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 8787
+        env:
+        - name: PORT
+          valueFrom:
+            configMapKeyRef:
+              name: climb512-config
+              key: PORT
+        - name: AI_SIMULATOR_SEED
+          valueFrom:
+            configMapKeyRef:
+              name: climb512-config
+              key: AI_SIMULATOR_SEED
+        - name: AI_SIMULATOR_SCENARIO
+          valueFrom:
+            configMapKeyRef:
+              name: climb512-config
+              key: AI_SIMULATOR_SCENARIO
+        - name: AI_SIMULATOR_LATENCY_MS
+          valueFrom:
+            configMapKeyRef:
+              name: climb512-config
+              key: AI_SIMULATOR_LATENCY_MS
+        - name: AI_SIMULATOR_ERROR_MODE
+          valueFrom:
+            configMapKeyRef:
+              name: climb512-config
+              key: AI_SIMULATOR_ERROR_MODE
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8787
+          initialDelaySeconds: 10
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8787
+          initialDelaySeconds: 5
+          periodSeconds: 5
+
+---
+# Simulator Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: simulator
+  namespace: climb512
+spec:
+  selector:
+    app: simulator
+  ports:
+  - port: 8787
+    targetPort: 8787
+  type: ClusterIP
+
+---
+# Guardrails Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: guardrails
+  namespace: climb512
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: guardrails
+  template:
+    metadata:
+      labels:
+        app: guardrails
+    spec:
+      containers:
+      - name: guardrails
+        image: rowdycholin512/climb512:guardrails
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 8000
+        env:
+        - name: NEMO_CONFIG_ID
+          valueFrom:
+            configMapKeyRef:
+              name: climb512-config
+              key: NEMO_CONFIG_ID
+        - name: NEMO_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: climb512-config
+              key: NEMO_PORT
+        - name: ANTHROPIC_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: climb512-secrets
+              key: ANTHROPIC_API_KEY
+        - name: ANTHROPIC_BASE_URL
+          valueFrom:
+            configMapKeyRef:
+              name: climb512-config
+              key: ANTHROPIC_BASE_URL
+        - name: ANTHROPIC_MODEL
+          valueFrom:
+            configMapKeyRef:
+              name: climb512-config
+              key: ANTHROPIC_MODEL
+        readinessProbe:
+          tcpSocket:
+            port: 8000
+          initialDelaySeconds: 20
+          periodSeconds: 10
+        livenessProbe:
+          tcpSocket:
+            port: 8000
+          initialDelaySeconds: 60
+          periodSeconds: 20
+
+---
+# Guardrails Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: guardrails
+  namespace: climb512
+spec:
+  selector:
+    app: guardrails
+  ports:
+  - port: 8000
+    targetPort: 8000
+  type: ClusterIP
+
+---
+# Web Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web
+  namespace: climb512
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: web
+  template:
+    metadata:
+      labels:
+        app: web
+    spec:
+      initContainers:
+      - name: wait-for-postgres
+        image: postgres:16-alpine
+        command: ['sh', '-c', 'until pg_isready -h postgres -U climber -d climbapp; do sleep 1; done']
+      containers:
+      - name: web
+        image: rowdycholin512/climb512:web
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 8080
+        env:
+        - name: DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: climb512-secrets
+              key: DATABASE_URL
+        - name: SESSION_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: climb512-secrets
+              key: SESSION_SECRET
+        - name: ENABLE_TEST_ROUTES
+          valueFrom:
+            configMapKeyRef:
+              name: climb512-config
+              key: ENABLE_TEST_ROUTES
+        - name: ANTHROPIC_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: climb512-secrets
+              key: ANTHROPIC_API_KEY
+        - name: ANTHROPIC_BASE_URL
+          valueFrom:
+            configMapKeyRef:
+              name: climb512-config
+              key: ANTHROPIC_BASE_URL
+        - name: ANTHROPIC_MODEL
+          valueFrom:
+            configMapKeyRef:
+              name: climb512-config
+              key: ANTHROPIC_MODEL
+        - name: ANTHROPIC_MAX_TOKENS
+          valueFrom:
+            configMapKeyRef:
+              name: climb512-config
+              key: ANTHROPIC_MAX_TOKENS
+        - name: ANTHROPIC_ADJUSTMENT_MAX_TOKENS
+          valueFrom:
+            configMapKeyRef:
+              name: climb512-config
+              key: ANTHROPIC_ADJUSTMENT_MAX_TOKENS
+        - name: AI_INTAKE_MODE
+          valueFrom:
+            configMapKeyRef:
+              name: climb512-config
+              key: AI_INTAKE_MODE
+        - name: AI_GUARDRAILS_MODE
+          valueFrom:
+            configMapKeyRef:
+              name: climb512-config
+              key: AI_GUARDRAILS_MODE
+        - name: AI_GUARDRAILS_BASE_URL
+          valueFrom:
+            configMapKeyRef:
+              name: climb512-config
+              key: AI_GUARDRAILS_BASE_URL
+        livenessProbe:
+          httpGet:
+            path: /
+            port: 8080
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /
+            port: 8080
+          initialDelaySeconds: 10
+          periodSeconds: 5
+
+---
+# Web Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: web
+  namespace: climb512
+spec:
+  selector:
+    app: web
+  ports:
+  - port: 8080
+    targetPort: 8080
+  type: LoadBalancer
+
+---
+# Plan Worker Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: plan-worker
+  namespace: climb512
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: plan-worker
+  template:
+    metadata:
+      labels:
+        app: plan-worker
+    spec:
+      initContainers:
+      - name: wait-for-postgres
+        image: postgres:16-alpine
+        command: ['sh', '-c', 'until pg_isready -h postgres -U climber -d climbapp; do sleep 1; done']
+      containers:
+      - name: plan-worker
+        image: rowdycholin512/climb512:plan-worker
+        imagePullPolicy: IfNotPresent
+        env:
+        - name: DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: climb512-secrets
+              key: DATABASE_URL
+        - name: PLAN_WORKER_POLL_INTERVAL_MS
+          valueFrom:
+            configMapKeyRef:
+              name: climb512-config
+              key: PLAN_WORKER_POLL_INTERVAL_MS
+        - name: PLAN_WORKER_LOCK_TIMEOUT_MS
+          valueFrom:
+            configMapKeyRef:
+              name: climb512-config
+              key: PLAN_WORKER_LOCK_TIMEOUT_MS
+        - name: PLAN_WORKER_STEP_DELAY_MS
+          valueFrom:
+            configMapKeyRef:
+              name: climb512-config
+              key: PLAN_WORKER_STEP_DELAY_MS
+        - name: ANTHROPIC_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: climb512-secrets
+              key: ANTHROPIC_API_KEY
+        - name: ANTHROPIC_BASE_URL
+          valueFrom:
+            configMapKeyRef:
+              name: climb512-config
+              key: ANTHROPIC_BASE_URL
+        - name: ANTHROPIC_MODEL
+          valueFrom:
+            configMapKeyRef:
+              name: climb512-config
+              key: ANTHROPIC_MODEL
+        - name: ANTHROPIC_MAX_TOKENS
+          valueFrom:
+            configMapKeyRef:
+              name: climb512-config
+              key: ANTHROPIC_MAX_TOKENS
+        - name: ANTHROPIC_ADJUSTMENT_MAX_TOKENS
+          valueFrom:
+            configMapKeyRef:
+              name: climb512-config
+              key: ANTHROPIC_ADJUSTMENT_MAX_TOKENS

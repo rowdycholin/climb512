@@ -1,10 +1,107 @@
 # Timings
 
-Latest full timing benchmark sampled: 2026-05-11
+Latest full timing benchmark sampled: 2026-05-17
 
 Current operational note: the active NeMo simulator stack uses `web -> guardrails -> simulator` with deterministic input/output rails and `ANTHROPIC_MODEL=simulator`. A local `validate:nemo-intake` smoke run on the current stack confirmed routing through `nemo-guardrails`; one scripted cycling readiness expectation did not reach `ready` in that harness, so use the fixed Playwright timing spec for apples-to-apples timing numbers.
 
 This document compares the current simulator-backed guided-intake route with the NeMo-gated simulator route.
+
+## Current Timing Refresh
+
+Sampled on 2026-05-17 after rebuilding the Docker Compose stack. Both simulator runs used:
+
+```bash
+node node_modules/playwright/cli.js test tests/intake-route-timing.spec.ts
+```
+
+### NeMo On To Simulator, 2026-05-17
+
+Configuration:
+
+```text
+ANTHROPIC_BASE_URL=http://simulator:8787
+AI_INTAKE_MODE=simulator
+AI_GUARDRAILS_MODE=intake
+AI_GUARDRAILS_BASE_URL=http://guardrails:8000
+ANTHROPIC_MODEL=simulator
+```
+
+Route:
+
+```text
+browser -> web -> guardrails -> simulator
+```
+
+Focused timing result:
+
+| Check | Result |
+|---|---|
+| intake timing spec | passed 4 / 4, 8.1s total |
+
+Scenario wall-clock timings:
+
+| Scenario | Duration |
+|---|---:|
+| climbing | 2.2s |
+| cycling | 1.7s |
+| running | 1.6s |
+| strength and conditioning | 1.6s |
+
+Guided-intake timing from `web` logs:
+
+| Source | OK | Count | Min | Median | Average | Max |
+|---|---:|---:|---:|---:|---:|---:|
+| nemo-guardrails | true | 37 | 13ms | 16ms | 21.5ms | 215ms |
+
+Simulator-side intake generation timing for the same run:
+
+| Count | Min | Median | Average | Max |
+|---:|---:|---:|---:|---:|
+| 37 | 0ms | 0ms | 0.2ms | 2ms |
+
+### NeMo Off To Simulator, 2026-05-17
+
+Configuration:
+
+```text
+ANTHROPIC_BASE_URL=http://simulator:8787
+AI_INTAKE_MODE=simulator
+AI_GUARDRAILS_MODE=off
+ANTHROPIC_MODEL=simulator
+```
+
+Route:
+
+```text
+browser -> web -> simulator
+```
+
+Focused timing result:
+
+| Check | Result |
+|---|---|
+| intake timing spec | passed 4 / 4, 7.8s total |
+
+Scenario wall-clock timings:
+
+| Scenario | Duration |
+|---|---:|
+| climbing | 1.9s |
+| cycling | 1.7s |
+| running | 1.6s |
+| strength and conditioning | 1.6s |
+
+Guided-intake timing from `web` logs:
+
+| Source | OK | Count | Min | Median | Average | Max |
+|---|---:|---:|---:|---:|---:|---:|
+| simulator | true | 37 | 1ms | 2ms | 2.5ms | 5ms |
+
+Simulator-side intake generation timing for the same run:
+
+| Count | Min | Median | Average | Max |
+|---:|---:|---:|---:|---:|
+| 37 | 0ms | 0ms | 0.2ms | 1ms |
 
 ## Timing Collection Note
 
