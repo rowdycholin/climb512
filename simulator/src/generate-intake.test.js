@@ -46,6 +46,18 @@ test("extracts a running 10K goal from an intake prompt", () => {
   assert.equal(response.planRequestDraft.blockLengthWeeks, 4);
 });
 
+test("classifies the whole phrase before choosing the sport", () => {
+  const response = generateIntakeResponseFromPrompt(prompt({
+    draft: { disciplines: [], equipment: [], trainingFocus: [] },
+    latest:
+      "I want a workout plan at Planet Fitness focused on strength training and carrying a baby. I walk over 10k steps a day.",
+  }));
+
+  assert.equal(response.status, "needs_more_info");
+  assert.equal(response.planRequestDraft.sport, "strength training");
+  assert.equal(response.planRequestDraft.goalDescription.includes("strength training"), true);
+});
+
 test("does not treat a sport-only answer as current level", () => {
   const response = generateIntakeResponseFromPrompt(prompt({
     draft: { disciplines: [], equipment: [], trainingFocus: [] },
@@ -56,7 +68,7 @@ test("does not treat a sport-only answer as current level", () => {
   assert.equal(response.status, "needs_more_info");
   assert.equal(response.planRequestDraft.sport, "running");
   assert.equal(response.planRequestDraft.currentLevel, undefined);
-  assert.match(response.message, /running goal|race or distance/i);
+  assert.match(response.message, /specific race|distance|pace|volume target/i);
 });
 
 test("treats trad climbing as a climbing discipline instead of a goal", () => {
@@ -71,7 +83,7 @@ test("treats trad climbing as a climbing discipline instead of a goal", () => {
   assert.deepEqual(response.planRequestDraft.disciplines, ["trad"]);
   assert.equal(response.planRequestDraft.goalDescription, undefined);
   assert.equal(response.planRequestDraft.currentLevel, undefined);
-  assert.match(response.message, /climbing goal/i);
+  assert.match(response.message, /specific goal|project|trip|grade|skill|area/i);
 });
 
 test("asks current level for a trad plan after the earlier basics are known", () => {
@@ -93,7 +105,7 @@ test("asks current level for a trad plan after the earlier basics are known", ()
 
   assert.equal(response.status, "needs_more_info");
   assert.equal(response.planRequestDraft.currentLevel, undefined);
-  assert.match(response.message, /current training level/i);
+  assert.match(response.message, /current climbing level/i);
 });
 
 test("asks for clarification when the goal conflicts with the selected sport", () => {

@@ -13,7 +13,7 @@ describe("intake progression", () => {
     });
 
     expect(response.draft.intakeTemplateId).toBe("climbing_strength");
-    expect(response.assistantMessage).toBe("Climbing it is. What climbing goal should this plan move you toward: a route or boulder, a trip or competition, a grade, a skill, or general climbing fitness?");
+    expect(response.assistantMessage).toBe("Climbing it is. Is there a specific goal, project, trip, grade, skill, or area you want this plan to train?");
   });
 
   test("normalizes route-grade climbing goals to sport climbing instead of default bouldering", () => {
@@ -63,7 +63,7 @@ describe("intake progression", () => {
     });
 
     expect(response.draft.intakeTemplateId).toBe("running");
-    expect(response.assistantMessage).toBe("Running it is. What running goal should this plan build toward: a race or distance, faster times, more weekly mileage, consistency, or general fitness?");
+    expect(response.assistantMessage).toBe("Running it is. Is there a specific race, distance, pace, volume target, or area you want this plan to train?");
   });
 
   test("uses the strength template after a strength sport answer", () => {
@@ -73,7 +73,19 @@ describe("intake progression", () => {
     });
 
     expect(response.draft.intakeTemplateId).toBe("strength_training");
-    expect(response.assistantMessage).toBe("Strength and conditioning it is. What goal should this plan build toward: strength, muscle, conditioning, movement quality, testing numbers, or sport support?");
+    expect(response.draft.strengthTraining?.include).toBe(true);
+    expect(response.assistantMessage).toBe("Strength training it is. Is there a specific goal, lift, movement pattern, muscle group, or area you want this plan to train?");
+  });
+
+  test("classifies the whole phrase before choosing the sport", () => {
+    const response = continueIntakeDraft({
+      draft: createInitialIntakeDraft(),
+      userMessage:
+        "I want a workout plan at Planet Fitness focused on strength training and carrying a baby. I walk over 10k steps a day.",
+    });
+
+    expect(response.draft.sport).toBe("strength training");
+    expect(response.draft.intakeTemplateId).toBe("strength_training");
   });
 
   test("falls back to generic progression for unknown sports", () => {
@@ -83,7 +95,7 @@ describe("intake progression", () => {
     });
 
     expect(response.draft.intakeTemplateId).toBe("generic_training");
-    expect(response.assistantMessage).toBe("Good, let's give the plan a clear goal. Are you training for an event, building general fitness, improving a skill, or working toward a specific target?");
+    expect(response.assistantMessage).toBe("Good, let's give the plan a clear direction. Is there a specific goal, event, skill, or area you want this plan to train?");
   });
 
   test("progresses through required running fields without calling external services", () => {

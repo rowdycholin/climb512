@@ -128,12 +128,42 @@ function isScheduleOnlyAnswer(text: string) {
   return /^(?:i\s+can\s+)?(?:train|run|ride|lift|climb)?\s*(?:[1-7]|one|two|three|four|five|six|seven)\s*(?:x|times?|days?|sessions?)(?:\s*(?:per|a|\/)\s*week| weekly)?$/.test(normalized);
 }
 
+function countMatches(text: string, patterns: RegExp[]) {
+  return patterns.reduce((total, pattern) => total + (pattern.test(text) ? 1 : 0), 0);
+}
+
 function normalizeSport(text: string) {
-  if (/\bclimb(?:ing)?\b/i.test(text)) return "climbing";
-  if (/\brun(?:ning)?\b/i.test(text)) return "running";
-  if (/\b(?:cycl(?:e|ing|ist)|bike|biking|ride)\b/i.test(text)) return "cycling";
-  if (/\bweight|strength|lifting|gym\b/i.test(text)) return "strength training";
-  return text.trim().toLowerCase();
+  const value = text.trim();
+  const scores = {
+    climbing: countMatches(value, [
+      /\bclimb(?:ing)?\b/i,
+      /\bboulder(?:ing)?\b/i,
+      /\b(?:route|crag|big\s*wall|multi[-\s]?pitch|redpoint|send)\b/i,
+      /\b(?:V(?:[0-9]|1[0-7])|5\.(?:[0-9]|1[0-5])(?:[abcd])?|WI[2-7][+-]?)\b/i,
+    ]),
+    running: countMatches(value, [
+      /\b(?:run(?:ning)?|runner|jog)\b/i,
+      /\b(?:race|marathon|half marathon|trail race|road race|5k|10k(?!\s*steps))\b/i,
+      /\b\d+(?:\.\d+)?\s*(?:mile|miles|km|kilometers?)(?!\s*(?:walk|steps))\b/i,
+    ]),
+    cycling: countMatches(value, [
+      /\b(?:cycl(?:e|ing|ist)|bike|biking|ride|riding)\b/i,
+      /\b(?:century|gran fondo|criterium|road riding|mountain biking)\b/i,
+    ]),
+    strength: countMatches(value, [
+      /\b(?:strength(?:\s+and\s+conditioning|\s+training)?|conditioning|weight training|weightlifting|weight lifting|lifting)\b/i,
+      /\b(?:functional strength|workout plan|work out plan|gym|planet fitness|barbell|dumbbell)\b/i,
+      /\b(?:deadlift|squat|bench|press|pull-?up|carry|carrying|holding|hypertrophy|bullet proof body)\b/i,
+    ]),
+  };
+  const ranked = [
+    ["climbing", scores.climbing],
+    ["strength training", scores.strength],
+    ["running", scores.running],
+    ["cycling", scores.cycling],
+  ] as const;
+  const [sport, score] = ranked.reduce((best, candidate) => candidate[1] > best[1] ? candidate : best);
+  return score > 0 ? sport : value.toLowerCase();
 }
 
 function activeTemplate(draft: PartialIntakeDraft) {
@@ -190,6 +220,13 @@ function applyGenericExtraction(draft: PartialIntakeDraft, text: string) {
 function applyStepAnswer(draft: PartialIntakeDraft, step: IntakeStep, text: string, clientToday?: string) {
   if (step === "sport") {
     draft.sport = normalizeSport(text);
+    if (draft.sport === "strength training") {
+      draft.strengthTraining = {
+        include: true,
+        focusAreas: unique([...(draft.strengthTraining?.focusAreas ?? []), "strength"]),
+        experienceLevel: draft.strengthTraining?.experienceLevel,
+      };
+    }
     return;
   }
 
@@ -260,8 +297,27 @@ function applyStepAnswer(draft: PartialIntakeDraft, step: IntakeStep, text: stri
   }
 }
 
+function isSportOnlyText(value: string) {
+  return /^(?:climbing|running|cycling|strength(?:\s+and\s+conditioning|\s+training)?|strength\/conditioning|weight training)$/i.test(value.trim());
+}
+
+function hasMeaningfulGoal(draft: PartialIntakeDraft) {
+  const goal = draft.goalDescription?.trim();
+  if (!goal) return false;
+  if (isSportOnlyText(goal)) return false;
+  if (draft.sport && goal.toLowerCase() === draft.sport.trim().toLowerCase()) return false;
+  return true;
+}
+
+export function isPlanIntakeReady(draft: PartialIntakeDraft) {
+  return planRequestSchema.safeParse(draft).success
+    && hasMeaningfulGoal(draft)
+    && draft.preferredWorkoutDaysAsked === true
+    && draft.finalIntakeReviewAsked === true;
+}
+
 function isReady(draft: PartialIntakeDraft) {
-  return planRequestSchema.safeParse(draft).success;
+  return isPlanIntakeReady(draft);
 }
 
 export function createInitialIntakeDraft(): PartialIntakeDraft {

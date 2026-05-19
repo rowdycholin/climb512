@@ -15,7 +15,7 @@ test("guided intake refuses unsafe unrelated prompts and keeps intake usable", a
   await page.getByLabel("Plan intake message").fill("Climbing");
   await page.getByRole("button", { name: "Send intake message" }).click();
 
-  await expect(page.getByText("What climbing goal do you want to train for?")).toBeVisible();
+  await expect(page.getByText(/specific goal, project, trip, grade, skill, or area/i)).toBeVisible();
 });
 
 test("guided intake falls back after invalid AI output and keeps the draft usable", async ({ page }) => {
@@ -24,7 +24,7 @@ test("guided intake falls back after invalid AI output and keeps the draft usabl
 
   await page.getByLabel("Plan intake message").fill("Climbing");
   await page.getByRole("button", { name: "Send intake message" }).click();
-  await expect(page.getByText("What climbing goal do you want to train for?")).toBeVisible();
+  await expect(page.getByText(/specific goal, project, trip, grade, skill, or area/i)).toBeVisible();
 
   await page.getByLabel("Plan intake message").fill("__test_invalid_ai_output__");
   await page.getByRole("button", { name: "Send intake message" }).click();
@@ -44,7 +44,7 @@ test("guided intake builds a hidden structured draft and generates a plan", asyn
 
   await page.getByLabel("Plan intake message").fill("Climbing");
   await page.getByRole("button", { name: "Send intake message" }).click();
-  await expect(page.getByText(/What climbing goal do you want to train for/i)).toBeVisible();
+  await expect(page.getByText(/specific goal, project, trip, grade, skill, or area/i)).toBeVisible();
   await expect(page.getByLabel("Plan intake message")).toBeFocused();
 
   await page.getByLabel("Plan intake message").fill("Yes, I want to climb the Nose on El Cap so I need endurance and long days.");
@@ -65,7 +65,7 @@ test("guided intake builds a hidden structured draft and generates a plan", asyn
 
   await page.getByLabel("Plan intake message").fill("As soon as possible.");
   await page.getByRole("button", { name: "Send intake message" }).click();
-  await expect(page.getByText(/current comfortable climbing level/i)).toBeVisible();
+  await expect(page.getByText(/current climbing level/i)).toBeVisible();
 
   await page.getByLabel("Plan intake message").fill("I am comfortable on 5.10 trad.");
   await page.getByRole("button", { name: "Send intake message" }).click();
@@ -95,7 +95,7 @@ test("guided intake uses the running template", async ({ page }) => {
 
   await page.getByLabel("Plan intake message").fill("Running");
   await page.getByRole("button", { name: "Send intake message" }).click();
-  await expect(page.getByText(/What running goal do you want to train for/i)).toBeVisible();
+  await expect(page.getByText(/specific race, distance, pace, volume target, or area/i)).toBeVisible();
 
   await page.getByLabel("Plan intake message").fill("I want to build endurance.");
   await page.getByRole("button", { name: "Send intake message" }).click();
@@ -107,7 +107,7 @@ test("guided intake uses the running template", async ({ page }) => {
 
   await page.getByLabel("Plan intake message").fill("treadmill, dumbbells");
   await page.getByRole("button", { name: "Send intake message" }).click();
-  await expect(page.getByText(/strength training included with the running plan/i)).toBeVisible();
+  await expect(page.getByText(/strength and conditioning included/i)).toBeVisible();
 
   await page.getByLabel("Plan intake message").fill("No.");
   await page.getByRole("button", { name: "Send intake message" }).click();
@@ -115,7 +115,7 @@ test("guided intake uses the running template", async ({ page }) => {
 
   await page.getByLabel("Plan intake message").fill("As soon as possible.");
   await page.getByRole("button", { name: "Send intake message" }).click();
-  await expect(page.getByText(/current weekly running volume/i)).toBeVisible();
+  await expect(page.getByText(/current running level or weekly mileage/i)).toBeVisible();
 });
 
 test("guided intake uses the strength training template", async ({ page }) => {

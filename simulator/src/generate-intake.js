@@ -56,12 +56,43 @@ function appendNote(draft, note) {
   draft.planStructureNotes = [existing, cleaned].filter(Boolean).join(" | ");
 }
 
+function countMatches(text, patterns) {
+  return patterns.reduce((total, pattern) => total + (pattern.test(text) ? 1 : 0), 0);
+}
+
+function activitySignalScores(text) {
+  return {
+    climbing: countMatches(text, [
+      /\b(?:climb(?:ing)?|boulder(?:ing)?|trad|traditional|sport\s*climb(?:ing)?|lead\s*climb(?:ing)?|top\s*rope|toprope|route|crag|send|redpoint)\b/i,
+      /\b(?:V(?:[0-9]|1[0-7])|5\.(?:[0-9]|1[0-5])(?:[abcd])?|WI[2-7][+-]?)\b/i,
+    ]),
+    running: countMatches(text, [
+      /\b(?:run(?:ning)?|runner|jog)\b/i,
+      /\b(?:race|marathon|half marathon|trail race|road race|5k|10k(?!\s*steps))\b/i,
+      /\b\d+(?:\.\d+)?\s*(?:mile|miles|km|kilometers?)(?!\s*(?:walk|steps))\b/i,
+    ]),
+    cycling: countMatches(text, [
+      /\b(?:cycl(?:e|ing|ist)|bike|biking|ride|riding|road riding|mountain biking)\b/i,
+      /\b(?:century|gran fondo|criterium)\b/i,
+    ]),
+    strength: countMatches(text, [
+      /\b(?:strength(?:\s+and\s+conditioning|\/conditioning|\s+training)?|conditioning|weight training|weightlifting|weight lifting|lifting|barbell)\b/i,
+      /\b(?:functional strength|workout plan|work out plan|gym|planet fitness|dumbbell)\b/i,
+      /\b(?:squat|deadlift|bench|press|pull-?up|carry|carrying|holding|hypertrophy|bullet proof body)\b/i,
+    ]),
+  };
+}
+
 function normalizeSport(text) {
-  if (/\b(?:climb(?:ing)?|boulder(?:ing)?|trad|traditional|sport\s*climb(?:ing)?|lead\s*climb(?:ing)?|top\s*rope|toprope)\b/i.test(text)) return "climbing";
-  if (/\b(?:run(?:ning)?|runner|5k|10k|marathon|half marathon)\b/i.test(text)) return "running";
-  if (/\b(?:cycl(?:e|ing|ist)|bike|biking|road riding|mountain biking)\b/i.test(text)) return "cycling";
-  if (/\b(?:strength(?:\/conditioning)?|conditioning|weight training|weightlifting|weight lifting|lifting|barbell)\b/i.test(text)) return "strength training";
-  return text.trim().toLowerCase();
+  const scores = activitySignalScores(text);
+  const ranked = [
+    ["climbing", scores.climbing],
+    ["strength training", scores.strength],
+    ["running", scores.running],
+    ["cycling", scores.cycling],
+  ];
+  const [sport, score] = ranked.reduce((best, candidate) => candidate[1] > best[1] ? candidate : best);
+  return score > 0 ? sport : text.trim().toLowerCase();
 }
 
 function inferClimbingDisciplines(text) {
@@ -74,19 +105,8 @@ function inferClimbingDisciplines(text) {
 }
 
 function inferActivityFamily(text) {
-  if (/\b(?:climb(?:ing)?|boulder(?:ing)?|route|crag|big\s*wall|multi[-\s]?pitch|ascent|send|redpoint|V(?:[0-9]|1[0-7])|5\.(?:[0-9]|1[0-5])(?:[abcd])?|WI[2-7][+-]?)\b/i.test(text)) {
-    return "climbing";
-  }
-  if (/\b(?:run(?:ning)?|runner|5k|10k|marathon|half marathon|mile|miles|jog|trail race|road race)\b/i.test(text)) {
-    return "running";
-  }
-  if (/\b(?:cycl(?:e|ing|ist)|bike|biking|ride|riding|century|gran fondo|criterium|road riding|mountain biking)\b/i.test(text)) {
-    return "cycling";
-  }
-  if (/\b(?:strength(?: and conditioning|\/conditioning)?|conditioning|weight training|weightlifting|weight lifting|lifting|barbell|squat|deadlift|bench press|press|pull-up|hypertrophy)\b/i.test(text)) {
-    return "strength training";
-  }
-  return undefined;
+  const sport = normalizeSport(text);
+  return ["climbing", "running", "cycling", "strength training"].includes(sport) ? sport : undefined;
 }
 
 function isSportOnlyAnswer(text) {
@@ -225,7 +245,8 @@ function applyLatestAnswer(draft, latest, previousAssistant, today, recent) {
 
   if (resolveSportGoalClarification(draft, answer, recent, previousAssistant)) return;
 
-  if (draft.sport && isSportGoalConflict(draft, answer)) {
+  const answeringEquipmentPrompt = /\b(?:equipment|tools|setup|available|access to)\b/i.test(previousAssistant);
+  if (draft.sport && !answeringEquipmentPrompt && isSportGoalConflict(draft, answer)) {
     return;
   }
 
@@ -365,23 +386,30 @@ function nextQuestion(draft) {
   if (draft.blockLengthClarification) return draft.blockLengthClarification;
   const missing = missingFields(draft);
   const next = missing[0];
-  if (next === "sport") return "Let's point the plan at the right thing first. Are we training for climbing, running, cycling, or strength and conditioning?";
+  if (next === "sport") return "Let's point the plan at the right thing first. What sport or training focus should this plan support?";
   if (next === "goalDescription") {
     const family = inferActivityFamily(draft.sport);
-    if (family === "climbing") return "Climbing it is. What climbing goal should this plan move you toward: a route or boulder, a trip or competition, a grade, a skill, or general climbing fitness?";
-    if (family === "running") return "Running it is. What running goal should this plan build toward: a race or distance, faster times, more weekly mileage, consistency, or general fitness?";
-    if (family === "cycling") return "Cycling it is. What cycling goal should this plan support: a ride or race, longer distance, more power, consistency, or general fitness?";
-    if (family === "strength training") return "Strength and conditioning it is. What goal should this plan build toward: strength, muscle, conditioning, movement quality, testing numbers, or sport support?";
-    return "Good, let's give the plan a clear goal. Are you training for an event, building general fitness, improving a skill, or working toward a specific target?";
+    if (family === "climbing") return "Climbing it is. Is there a specific goal, project, trip, grade, skill, or area you want this plan to train?";
+    if (family === "running") return "Running it is. Is there a specific race, distance, pace, volume target, or area you want this plan to train?";
+    if (family === "cycling") return "Cycling it is. Is there a specific ride, race, power target, distance, or area you want this plan to train?";
+    if (family === "strength training") return "Strength training it is. Is there a specific goal, lift, movement pattern, muscle group, or area you want this plan to train?";
+    return "Good, let's give the plan a clear direction. Is there a specific goal, event, skill, or area you want this plan to train?";
   }
   if (next === "goalType") return "That gives me the target. Is it tied to a specific event or date, or is this an ongoing training goal?";
-  if (next === "blockLengthWeeks") return eventDetailsQuestion(draft) ?? "Let's choose a useful runway. How many weeks should this block run?";
-  if (next === "daysPerWeek") return "Good, now let's make it fit real life. How many days per week can you train and still recover well?";
-  if (next === "startDate") return "Let's anchor the first week. When would you like to start?";
-  if (next === "currentLevel") return "To set the right starting point, what is your current training level?";
-  if (next === "equipment") return "Now I can match the work to your setup. What equipment do you have available?";
-  if (next === "constraints") return "Before I load this up, I want to keep it safe. Any injuries, pain, or movements I should account for?";
-  if (next === "strengthTraining") return "Do you want strength and conditioning included, or should this stay focused on the main sport?";
+  if (next === "blockLengthWeeks") return eventDetailsQuestion(draft) ?? "That gives me the training direction. How many weeks should this block run?";
+  if (next === "daysPerWeek") return "That target is clear enough to start shaping the week. How many days per week can you train and still recover well?";
+  if (next === "startDate") return "Good, I can anchor the block around that. When would you like to start?";
+  if (next === "currentLevel") {
+    const family = inferActivityFamily(draft.sport ?? draft.goalDescription ?? "");
+    if (family === "climbing") return "That gives me a useful climbing target. What is your current climbing level?";
+    if (family === "running") return "That gives me a useful running target. What is your current running level or weekly mileage?";
+    if (family === "cycling") return "That gives me a useful cycling target. What is your current cycling level or weekly riding time?";
+    if (family === "strength training") return "That gives me a useful strength target. What is your current strength training experience?";
+    return "That gives me a useful target. What is your current training level for this sport or activity?";
+  }
+  if (next === "equipment") return "Good, I can match the work to your setup. What equipment do you have available?";
+  if (next === "constraints") return "That gives me the training picture. Any injuries, pain, or movements I should account for?";
+  if (next === "strengthTraining") return "Got it, I can keep the main sport central. Do you want strength and conditioning included, or should this stay focused on the main sport?";
   if (!draft.preferredWorkoutDaysAsked) return PREFERRED_WORKOUT_DAYS_QUESTION;
   if (!draft.preferredRestDaysAsked) return PREFERRED_REST_DAYS_QUESTION;
   if (!draft.finalIntakeReviewAsked) return FINAL_INTAKE_REVIEW_QUESTION;
@@ -405,7 +433,8 @@ function generateIntakeResponseFromPrompt(prompt) {
   draft.preferredRestDaysAsked = draft.preferredRestDaysAsked ?? parseYesNoSection(prompt, "PREFERRED_REST_DAYS_ASKED");
   draft.finalIntakeReviewAsked = draft.finalIntakeReviewAsked ?? parseYesNoSection(prompt, "FINAL_INTAKE_REVIEW_ASKED");
 
-  if (draft.sport && isSportGoalConflict(draft, latest)) {
+  const answeringEquipmentPrompt = /\b(?:equipment|tools|setup|available|access to)\b/i.test(previousAssistant);
+  if (draft.sport && !answeringEquipmentPrompt && isSportGoalConflict(draft, latest)) {
     draft.sportGoalConflict = sportGoalConflictQuestion(inferActivityFamily(draft.sport), inferActivityFamily(latest));
   }
 

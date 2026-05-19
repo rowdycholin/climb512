@@ -38,6 +38,7 @@ import {
 } from "@/lib/ai-plan-adjuster";
 import {
   intakeDraftToPlanRequest,
+  isPlanIntakeReady,
   parseIntakeDraftJson,
   partialIntakeDraftSchema,
   type IntakeMessage,
@@ -1558,6 +1559,9 @@ export async function createPlanFromIntake(formData: FormData) {
     select: { age: true },
   });
   if (!user) redirect("/login");
+
+  const intakeDraft = partialIntakeDraftSchema.parse(JSON.parse(rawDraft));
+  if (!isPlanIntakeReady(intakeDraft)) redirect("/intake");
 
   const draft = parseIntakeDraftJson(rawDraft);
   const request = intakeDraftToPlanRequest(draft);

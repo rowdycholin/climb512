@@ -6,6 +6,8 @@ import type { AdjustmentIntent } from "./plan-adjustment-chat";
 const WEEK_MODEL = process.env.ANTHROPIC_WEEK_MODEL ?? process.env.ANTHROPIC_MODEL ?? "openai/gpt-5.5";
 const STRATEGY_MODEL = process.env.ANTHROPIC_STRATEGY_MODEL ?? process.env.ANTHROPIC_MODEL ?? WEEK_MODEL;
 const MAX_TOKENS = parseInt(process.env.ANTHROPIC_MAX_TOKENS ?? "5000", 10);
+const REQUEST_TIMEOUT_MS = parseInt(process.env.ANTHROPIC_PLAN_TIMEOUT_MS ?? "240000", 10);
+const API_RETRY_ATTEMPTS = parseInt(process.env.ANTHROPIC_API_RETRY_ATTEMPTS ?? "3", 10);
 
 // Base URL: OpenRouter = "https://openrouter.ai/api", direct Anthropic = "https://api.anthropic.com"
 // We always hit the OpenAI-compatible /v1/chat/completions endpoint.
@@ -19,6 +21,9 @@ const PROVIDER_LABEL = (() => {
     return "configured-provider";
   }
 })();
+const IS_OPENROUTER = PROVIDER_LABEL === "openrouter.ai";
+const SERVICE_TIER = process.env.ANTHROPIC_SERVICE_TIER ?? (IS_OPENROUTER ? "priority" : "");
+const PROVIDER_ROUTING = IS_OPENROUTER ? { sort: "throughput" } : null;
 
 const DAY_NAMES = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
 const CALENDAR_DAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
@@ -424,6 +429,24 @@ interface ApiResult {
   finishReason: string;
 }
 
+function wait(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function retryDelayForProviderError(message: string, attempt: number) {
+  if (!/\b(?:rate limit|429|temporarily unavailable|overloaded|timeout|timed out)\b/i.test(message)) {
+    return null;
+  }
+
+  const retryMatch = message.match(/try again in\s+(\d+)\s*(ms|milliseconds?|s|sec|secs|seconds?)/i);
+  const providerDelay = retryMatch
+    ? parseInt(retryMatch[1], 10) * (/^s/i.test(retryMatch[2]) ? 1000 : 1)
+    : null;
+  const fallbackDelay = Math.min(8000, 1500 * 2 ** Math.max(0, attempt - 1));
+  const delay = Math.max(providerDelay && Number.isFinite(providerDelay) ? providerDelay : 0, fallbackDelay);
+  return Number.isFinite(delay) && delay > 0 ? delay : fallbackDelay;
+}
+
 function sanitizeProviderText(value: string) {
   return value
     .replace(/Bearer\s+[A-Za-z0-9._~+/=-]+/gi, "Bearer [redacted]")
@@ -646,8 +669,6 @@ export function validateGeneratedWeek(week: WeekData, expectedWeekNum: number, e
     for (const session of day.sessions) {
       if (!session.name.trim()) errors.push(`day ${expectedDayNum} session name is required`);
       if (!Number.isFinite(session.duration) || session.duration <= 0) errors.push(`day ${expectedDayNum} session duration must be positive`);
-      if (session.exercises.length < 1) errors.push(`day ${expectedDayNum} session needs exercises`);
-      if (session.exercises.length > 5) errors.push(`day ${expectedDayNum} session has too many exercises`);
 
       for (const exercise of session.exercises) {
         if (!exercise.name.trim()) errors.push(`day ${expectedDayNum} exercise name is required`);
@@ -734,7 +755,8 @@ RULES:
 - ${dayNameRules(expectedDayNames)}
 - Rest days: isRest=true, sessions=[], focus="Rest"
 - Training days may have multiple sessions when useful. Warm-up, Main Session, and Cooldown are examples, not a hard limit or required structure.
-- Main Session should contain 2-4 exercises; Warm-up/Cooldown should contain 1-2 exercises.
+- Prefer 2-3 exercises for warm-up and cooldown sessions.
+- Prefer 4-8 exercises for main, strength, conditioning, climbing, run, ride, skill, circuit, or other primary work sessions, but use fewer when a focused session is better.
 - Choose exercises appropriate to the sport, goal, available equipment, and constraints
 - Available equipment is not a checklist; do not use tools just because they are listed.
 - Respect athlete requested structure, named-day preferences, and requested workouts unless they conflict with safety, recovery, or the requested training-day count
@@ -842,6 +864,8 @@ RULES:
 - ${dayNameRules(expectedDayNames)}
 - Rest days: isRest=true, sessions=[], focus="Rest"
 - Training days may have multiple sessions when useful. Warm-up, Main Session, and Cooldown are examples, not a hard limit or required structure.
+- Prefer 2-3 exercises for warm-up and cooldown sessions.
+- Prefer 4-8 exercises for main, strength, conditioning, climbing, run, ride, skill, circuit, or other primary work sessions, but use fewer when a focused session is better.
 - Choose exercises appropriate to the sport, goal, available equipment, and constraints
 - Available equipment is not a checklist; do not use tools just because they are listed.
 - If the athlete requested specific day roles, preserve those roles exactly unless safety requires a change.
@@ -863,64 +887,93 @@ async function callApiWithPrompt(
   const model = options.model ?? WEEK_MODEL;
   const surface = options.surface ?? "week";
   const started = Date.now();
+  const timeoutMs = Number.isFinite(REQUEST_TIMEOUT_MS) && REQUEST_TIMEOUT_MS > 0 ? REQUEST_TIMEOUT_MS : 240000;
+  const maxApiAttempts = Number.isFinite(API_RETRY_ATTEMPTS) && API_RETRY_ATTEMPTS > 0 ? API_RETRY_ATTEMPTS : 3;
 
-  try {
-    const res = await fetch(url, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${API_KEY}`,
-        ...(SEND_SIMULATOR_USER_HEADER && username ? { "X-Climb-User": username } : {}),
-      },
-      body: JSON.stringify({
-        model,
-        max_tokens: MAX_TOKENS,
-        response_format: { type: "json_object" },
-        messages: [
-          {
-            role: "system",
-            content: PLAN_GENERATION_SYSTEM_PROMPT,
-          },
-          {
-            role: "user",
-            content: prompt,
-          },
-        ],
-      }),
-    });
+  for (let apiAttempt = 1; apiAttempt <= maxApiAttempts; apiAttempt++) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
-    if (!res.ok) {
-      const body = sanitizeProviderText(await res.text());
-      throw new Error(`AI API error ${res.status} on ${generationStepLabel(surface, weekNum)}: ${body.slice(0, 300)}`);
+    try {
+      const res = await fetch(url, {
+        method: "POST",
+        signal: controller.signal,
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${API_KEY}`,
+          ...(SEND_SIMULATOR_USER_HEADER && username ? { "X-Climb-User": username } : {}),
+        },
+        body: JSON.stringify({
+          model,
+          max_tokens: MAX_TOKENS,
+          response_format: { type: "json_object" },
+          ...(SERVICE_TIER ? { service_tier: SERVICE_TIER } : {}),
+          ...(PROVIDER_ROUTING ? { provider: PROVIDER_ROUTING } : {}),
+          messages: [
+            {
+              role: "system",
+              content: PLAN_GENERATION_SYSTEM_PROMPT,
+            },
+            {
+              role: "user",
+              content: prompt,
+            },
+          ],
+        }),
+      });
+
+      if (!res.ok) {
+        const body = sanitizeProviderText(await res.text());
+        throw new Error(`AI API error ${res.status} on ${generationStepLabel(surface, weekNum)}: ${body.slice(0, 300)}`);
+      }
+
+      const data = await res.json() as {
+        choices?: { message?: { content?: string }; finish_reason?: string }[];
+        error?: { message?: string };
+      };
+
+      if (data.error) {
+        throw new Error(`AI error on ${generationStepLabel(surface, weekNum)}: ${sanitizeProviderText(data.error.message ?? "unknown provider error")}`);
+      }
+
+      const text = data.choices?.[0]?.message?.content?.trim() ?? "";
+      const finishReason = data.choices?.[0]?.finish_reason ?? "unknown";
+
+      if (!text) {
+        throw new Error(`No response from AI for ${generationStepLabel(surface, weekNum)} (finish_reason=${finishReason})`);
+      }
+
+      console.log(
+        `[ai-plan] provider success surface=${surface} provider=${PROVIDER_LABEL} model=${model} week=${weekNum || "n/a"} finishReason=${finishReason} durationMs=${Date.now() - started}`,
+      );
+
+      return { text, finishReason };
+    } catch (error) {
+      const message = error instanceof Error && error.name === "AbortError"
+        ? `AI API timeout after ${timeoutMs}ms on ${generationStepLabel(surface, weekNum)}`
+        : (error as Error).message;
+      const retryDelay = apiAttempt < maxApiAttempts ? retryDelayForProviderError(message, apiAttempt) : null;
+      if (retryDelay) {
+        console.warn(
+          `[ai-plan] provider retry surface=${surface} provider=${PROVIDER_LABEL} model=${model} week=${weekNum || "n/a"} apiAttempt=${apiAttempt}/${maxApiAttempts} delayMs=${retryDelay} durationMs=${Date.now() - started}: ${sanitizeProviderText(message)}`,
+        );
+        await wait(retryDelay);
+        continue;
+      }
+
+      console.warn(
+        `[ai-plan] provider failure surface=${surface} provider=${PROVIDER_LABEL} model=${model} week=${weekNum || "n/a"} apiAttempt=${apiAttempt}/${maxApiAttempts} durationMs=${Date.now() - started}: ${sanitizeProviderText(message)}`,
+      );
+      if (error instanceof Error && error.name === "AbortError") {
+        throw new Error(message);
+      }
+      throw error;
+    } finally {
+      clearTimeout(timeout);
     }
-
-    const data = await res.json() as {
-      choices?: { message?: { content?: string }; finish_reason?: string }[];
-      error?: { message?: string };
-    };
-
-    if (data.error) {
-      throw new Error(`AI error on ${generationStepLabel(surface, weekNum)}: ${sanitizeProviderText(data.error.message ?? "unknown provider error")}`);
-    }
-
-    const text = data.choices?.[0]?.message?.content?.trim() ?? "";
-    const finishReason = data.choices?.[0]?.finish_reason ?? "unknown";
-
-    if (!text) {
-      throw new Error(`No response from AI for ${generationStepLabel(surface, weekNum)} (finish_reason=${finishReason})`);
-    }
-
-    console.log(
-      `[ai-plan] provider success surface=${surface} provider=${PROVIDER_LABEL} model=${model} week=${weekNum || "n/a"} finishReason=${finishReason} durationMs=${Date.now() - started}`,
-    );
-
-    return { text, finishReason };
-  } catch (error) {
-    console.warn(
-      `[ai-plan] provider failure surface=${surface} provider=${PROVIDER_LABEL} model=${model} week=${weekNum || "n/a"} durationMs=${Date.now() - started}: ${sanitizeProviderText((error as Error).message)}`,
-    );
-    throw error;
   }
+
+  throw new Error(`AI API failed on ${generationStepLabel(surface, weekNum)} after ${maxApiAttempts} provider attempts`);
 }
 
 async function generateWeekFromPrompt(
@@ -930,11 +983,12 @@ async function generateWeekFromPrompt(
   expectedDayNames = DAY_NAMES,
 ): Promise<WeekData> {
   const errors: string[] = [];
+  let promptForAttempt = prompt;
 
   for (let attempt = 1; attempt <= 2; attempt++) {
     let apiResult: ApiResult;
     try {
-      apiResult = await callApiWithPrompt(prompt, weekNum, username, { model: WEEK_MODEL, surface: "week" });
+      apiResult = await callApiWithPrompt(promptForAttempt, weekNum, username, { model: WEEK_MODEL, surface: "week" });
     } catch (e) {
       errors.push(`attempt ${attempt}: ${(e as Error).message}`);
       continue;
@@ -968,13 +1022,16 @@ async function generateWeekFromPrompt(
       try {
         return validateGeneratedWeek(normalizeGeneratedWeek(raw, weekNum, expectedDayNames), weekNum, expectedDayNames);
       } catch (validationError) {
-        errors.push(`attempt ${attempt}: validation failed: ${(validationError as Error).message}`);
-        console.warn(`[ai-plan] Week ${weekNum} attempt ${attempt} failed validation — retrying. ${(validationError as Error).message.slice(0, 300)}`);
+        const message = (validationError as Error).message;
+        errors.push(`attempt ${attempt}: validation failed: ${message}`);
+        promptForAttempt = `${prompt}\n\nPREVIOUS_ATTEMPT_FAILED_VALIDATION:\n${message}\n\nREPAIR_INSTRUCTIONS:\nRegenerate the entire week as valid JSON. Fix every listed validation error. Return only the corrected compact JSON object.`;
+        console.warn(`[ai-plan] Week ${weekNum} attempt ${attempt} failed validation — retrying with validation feedback. ${message.slice(0, 300)}`);
         continue;
       }
     }
 
     errors.push(`attempt ${attempt}: unparseable (finish_reason=${apiResult.finishReason}). Raw head: ${cleaned.slice(0, 200)}`);
+    promptForAttempt = `${prompt}\n\nPREVIOUS_ATTEMPT_FAILED_PARSE:\nThe prior response was not valid JSON or was truncated. Return one complete JSON object matching the requested schema. Return no markdown or prose.`;
     console.warn(`[ai-plan] Week ${weekNum} attempt ${attempt} failed to parse — retrying. finish_reason=${apiResult.finishReason}`);
   }
 

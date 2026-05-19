@@ -5,6 +5,7 @@ import {
   buildCoachIntakePrompt,
   continuePlanIntakeWithAiContract,
   firstQuestionOnly,
+  FINAL_INTAKE_REVIEW_QUESTION,
   getPlanIntakeTransportConfig,
   hasActionableIntakeQuestion,
   INTAKE_READY_MESSAGE,
@@ -13,6 +14,7 @@ import {
   looksLikeTruncatedAssistantMessage,
   nextNonDuplicateQuestion,
   PLAN_INTAKE_SYSTEM_PROMPT,
+  PREFERRED_WORKOUT_DAYS_QUESTION,
   validatePlanIntakeAiResponse,
 } from "./plan-intake-ai";
 
@@ -91,7 +93,7 @@ describe("plan intake AI contract", () => {
       },
     }));
 
-    expect(response).toBe("Let's choose a useful runway. How many weeks should this block run?");
+    expect(response).toBe("That gives me the training direction. How many weeks should this block run?");
     expect(hasActionableIntakeQuestion("5.11a is a solid target—that's real climbing?")).toBe(false);
     expect(hasActionableIntakeQuestion(response)).toBe(true);
   });
@@ -461,7 +463,7 @@ describe("plan intake AI contract", () => {
         {
           role: "assistant",
           content:
-            "Hi, I'm Alex, your personal training coach. For now I can build plans for climbing, running, cycling, and strength/conditioning training. Which one would you like to train for?",
+            "Hi, I'm Alex, your personal training coach. Tell me what you want to train for; climbing, strength training, and strength and conditioning plans are especially well supported.",
         },
       ],
     });
@@ -473,6 +475,27 @@ describe("plan intake AI contract", () => {
     expect(response.assistantMessage).not.toMatch(/what goal do you want/i);
   });
 
+  test("preserves specific workout requests as plan structure instead of treating them as off-script", async () => {
+    const response = await continuePlanIntakeWithAiContract({
+      draft: {
+        ...createInitialIntakeDraft(),
+        sport: "climbing",
+        goalType: "ongoing",
+      },
+      userMessage: "I specifically want one limit bouldering day, one hangboard repeaters day, and a strength day with weighted pull-ups.",
+      messages: [
+        {
+          role: "assistant",
+          content: "What kind of training do you want this block to include?",
+        },
+      ],
+    });
+
+    expect(response.draft.goalDescription).toContain("limit bouldering");
+    expect(response.draft.planStructureNotes).toContain("hangboard repeaters");
+    expect(response.assistantMessage).not.toMatch(/what sport/i);
+  });
+
   test("asks about strength training instead of looping on generic constraints when strength is missing", () => {
     const { strengthTraining: _strengthTraining, ...draftWithoutStrength } = completeDraft;
     const response = validatePlanIntakeAiResponse({
@@ -481,7 +504,7 @@ describe("plan intake AI contract", () => {
       planRequestDraft: draftWithoutStrength,
     });
 
-    expect(response.message).toBe("Do you want strength and conditioning included, or should this stay focused on the main sport?");
+    expect(response.message).toBe("Got it, I can keep the main sport central. Do you want strength and conditioning included, or should this stay focused on the main sport?");
   });
 
   test("infers strength training for primary weight lifting plans", () => {
@@ -503,6 +526,27 @@ describe("plan intake AI contract", () => {
     expect(response.message).not.toMatch(/Do you want strength training included/i);
   });
 
+  test("corrects running classification when the whole phrase is strength primary", () => {
+    const response = validatePlanIntakeAiResponse({
+      status: "needs_more_info",
+      message: "What is your current level?",
+      planRequestDraft: {
+        sport: "running",
+        goalType: "ongoing",
+        goalDescription:
+          "I want a workout plan for the next 3 months to build a bullet proof body. I want to focus on strength training at Planet Fitness and walk over 10k steps a day.",
+        trainingFocus: ["strength"],
+        strengthTraining: {
+          include: true,
+          focusAreas: ["functional strength for carrying and holding a baby"],
+        },
+      },
+    });
+
+    expect(response.planRequestDraft.sport).toBe("strength training");
+    expect(response.planRequestDraft.trainingFocus).toContain("strength");
+  });
+
   test("ready intake responses point users to the magic wand button", async () => {
     const response = await continuePlanIntakeWithAiContract({
       draft: completeDraft,
@@ -514,7 +558,7 @@ describe("plan intake AI contract", () => {
     expect(response.assistantMessage).toBe(INTAKE_READY_MESSAGE);
   });
 
-  test("asks the final open-ended review question before becoming ready", async () => {
+  test("asks the final open-ended review before becoming ready", async () => {
     const response = await continuePlanIntakeWithAiContract({
       draft: { ...completeDraft, finalIntakeReviewAsked: undefined },
       userMessage: "Looks good",
@@ -522,10 +566,8 @@ describe("plan intake AI contract", () => {
     });
 
     expect(response.ready).toBe(false);
-    expect(response.assistantMessage).toBe(
-      "I have the main pieces for the plan. Anything else I should account for before I build it?",
-    );
     expect(response.draft.finalIntakeReviewAsked).toBe(true);
+    expect(response.assistantMessage).toBe(FINAL_INTAKE_REVIEW_QUESTION);
   });
 
   test("asks preferred workout days before the final review", async () => {
@@ -541,11 +583,11 @@ describe("plan intake AI contract", () => {
     });
 
     expect(response.ready).toBe(false);
-    expect(response.assistantMessage).toBe("That gives me the weekly rhythm. Are there days you prefer for training?");
     expect(response.draft.preferredWorkoutDaysAsked).toBe(true);
+    expect(response.assistantMessage).toBe(PREFERRED_WORKOUT_DAYS_QUESTION);
   });
 
-  test("asks scheduling preferences immediately after days per week is known", async () => {
+  test("asks scheduling preferences after days per week is known", async () => {
     const response = await continuePlanIntakeWithAiContract({
       draft: {
         ...completeDraft,
@@ -561,8 +603,7 @@ describe("plan intake AI contract", () => {
     expect(response.ready).toBe(false);
     expect(response.draft.daysPerWeek).toBe(5);
     expect(response.draft.preferredWorkoutDaysAsked).toBe(true);
-    expect(response.draft.finalIntakeReviewAsked).toBe(false);
-    expect(response.assistantMessage).toBe("That gives me the weekly rhythm. Are there days you prefer for training?");
+    expect(response.assistantMessage).toBe(PREFERRED_WORKOUT_DAYS_QUESTION);
   });
 
   test("treats combined named-day schedule answers as workout and rest preferences", async () => {
@@ -585,7 +626,7 @@ describe("plan intake AI contract", () => {
     expect(response.draft.preferredWorkoutDaysAsked).toBe(true);
     expect(response.draft.preferredRestDaysAsked).toBe(true);
     expect(response.draft.planStructureNotes).toContain("M, W, F are for climbing");
-    expect(response.assistantMessage).toBe("I have the main pieces for the plan. Anything else I should account for before I build it?");
+    expect(response.assistantMessage).toBe(FINAL_INTAKE_REVIEW_QUESTION);
   });
 
   test("overrides premature final review with scheduling preference checkpoints", () => {
@@ -618,7 +659,7 @@ describe("plan intake AI contract", () => {
     expect(response.planRequestDraft.finalIntakeReviewAsked).toBe(true);
   });
 
-  test("records preferred workout days and then asks preferred rest days", async () => {
+  test("records preferred workout days without forcing preferred rest days", async () => {
     const response = await continuePlanIntakeWithAiContract({
       draft: {
         ...completeDraft,
@@ -631,7 +672,7 @@ describe("plan intake AI contract", () => {
     });
 
     expect(response.ready).toBe(false);
-    expect(response.assistantMessage).toBe("Good to know. Any days you prefer to keep easier or fully off?");
+    expect(response.assistantMessage).toBe(FINAL_INTAKE_REVIEW_QUESTION);
     expect(response.draft.planStructureNotes).toContain("Preferred workout days: Monday, Wednesday, and Saturday are best.");
   });
 
@@ -794,7 +835,7 @@ describe("plan intake AI contract", () => {
       },
     });
 
-    expect(message).toContain("anchor the first week");
+    expect(message).toContain("anchor the block");
     expect(message).toContain("When would you like to start?");
   });
 
@@ -808,7 +849,7 @@ describe("plan intake AI contract", () => {
       },
     });
 
-    expect(message).toBe("Climbing it is. What climbing goal should this plan move you toward: a route or boulder, a trip or competition, a grade, a skill, or general climbing fitness?");
+    expect(message).toBe("Climbing it is. Is there a specific goal, project, trip, grade, skill, or area you want this plan to train?");
   });
 
   test("blocks general-assistant requests before they reach the intake simulator", () => {
@@ -845,7 +886,7 @@ describe("plan intake AI contract", () => {
     expect(prompt).toContain("ATHLETE_AGE:");
     expect(prompt).toContain("47");
     expect(prompt).toContain("Treat MISSING_REQUIRED_FIELDS as background state, not as a script");
-    expect(prompt).toContain("readiness checkpoints, not a separate fixed interview script");
+    expect(prompt).toContain("optional coaching refinements, not required checkpoints");
     expect(prompt).toContain("Infer reasonable structured values from natural answers");
     expect(prompt).toContain("Do not sound like a form");
     expect(prompt).toContain("one or two short coaching sentences");
@@ -935,22 +976,22 @@ describe("plan intake AI contract", () => {
     {
       sport: "climbing",
       goalDescription: "Send a V7 boulder",
-      expected: "To pitch the sessions correctly, what is your current climbing level?",
+      expected: "That gives me a useful climbing target. What is your current climbing level?",
     },
     {
       sport: "running",
       goalDescription: "Run a 10K",
-      expected: "To set the right load, what is your current running level or weekly mileage?",
+      expected: "That gives me a useful running target. What is your current running level or weekly mileage?",
     },
     {
       sport: "cycling",
       goalDescription: "Ride a century",
-      expected: "To set the right volume, what is your current cycling level or weekly riding time?",
+      expected: "That gives me a useful cycling target. What is your current cycling level or weekly riding time?",
     },
     {
       sport: "strength and conditioning",
       goalDescription: "Build full-body strength",
-      expected: "To load this appropriately, what is your current strength and conditioning experience?",
+      expected: "That gives me a useful strength target. What is your current strength training experience?",
     },
   ])("uses activity-aware level questions for $sport", ({ sport, goalDescription, expected }) => {
     const response = nextNonDuplicateQuestion({
@@ -972,7 +1013,7 @@ describe("plan intake AI contract", () => {
   test("asks for clarification when a goal conflicts with the selected sport", () => {
     const message = nextNonDuplicateQuestion({
       status: "needs_more_info",
-      message: "Let's choose a useful runway. How many weeks should this block run?",
+      message: "That gives me the training direction. How many weeks should this block run?",
       planRequestDraft: {
         sport: "running",
         goalDescription: "Climb a big wall route",
@@ -994,7 +1035,7 @@ describe("plan intake AI contract", () => {
         goalType: "ongoing",
       },
       userMessage: "12",
-      messages: [{ role: "assistant", content: "Let's choose a useful runway. How many weeks should this block run?" }],
+      messages: [{ role: "assistant", content: "That gives me the training direction. How many weeks should this block run?" }],
       clientToday: "2026-05-04",
     });
 
@@ -1209,7 +1250,7 @@ describe("plan intake AI contract", () => {
           message: {
             content: JSON.stringify({
               status: "needs_more_info",
-              message: "Right now I can build plans for climbing, running, cycling, and strength/conditioning training. Which one would you like to train for?",
+              message: "Climbing, strength training, and strength and conditioning are especially well supported. You can also describe another sport or training focus. What would you like to train for?",
               planRequestDraft: {},
             }),
           },
@@ -1237,9 +1278,9 @@ describe("plan intake AI contract", () => {
     expect(fetchMock).toHaveBeenCalledOnce();
     expect(response.ready).toBe(false);
     expect(response.draft.sport).toBeUndefined();
-    expect(response.assistantMessage).toContain("climbing");
-    expect(response.assistantMessage).toContain("cycling");
-    expect(response.assistantMessage).toContain("strength/conditioning");
+    expect(response.assistantMessage).toMatch(/climbing/i);
+    expect(response.assistantMessage).toMatch(/strength training/i);
+    expect(response.assistantMessage).toMatch(/another sport/i);
   });
 
   test("defines narrow plan-generation prompts for live model calls", () => {

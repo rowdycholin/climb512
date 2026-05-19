@@ -5,16 +5,16 @@ import { MessageCircle, Send, WandSparkles } from "lucide-react";
 import { continuePlanIntake, createPlanFromIntake } from "@/app/actions";
 import {
   createInitialIntakeDraft,
+  isPlanIntakeReady,
   type IntakeMessage,
   type PartialIntakeDraft,
 } from "@/lib/intake";
-import { planRequestSchema } from "@/lib/plan-request";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { SectionPanel } from "@/components/ui/app-shell";
 
 function hasRequiredDraftFields(draft: PartialIntakeDraft) {
-  return planRequestSchema.safeParse(draft).success && Boolean(draft.finalIntakeReviewAsked);
+  return isPlanIntakeReady(draft);
 }
 
 function PendingAssistantBubble({ longWait }: { longWait: boolean }) {
@@ -46,6 +46,7 @@ function draftFacts(draft: PartialIntakeDraft) {
     draft.targetLevel ? `Target: ${draft.targetLevel}` : null,
     draft.startDate ? `Start: ${draft.startDate}` : null,
     draft.equipment?.length ? `Equipment: ${draft.equipment.join(", ")}` : null,
+    draft.planStructureNotes ? `Notes: ${draft.planStructureNotes}` : null,
   ].filter((fact): fact is string => Boolean(fact));
 }
 
@@ -55,7 +56,7 @@ function isScheduleOnlyText(value: string) {
 }
 
 function isSportOnlyText(value: string) {
-  return /^(?:climbing|running|cycling|strength(?:\s+and\s+conditioning|\s+training)?|strength\/conditioning)$/i.test(value.trim());
+  return /^(?:climbing|running|cycling|strength(?:\s+and\s+conditioning|\s+training)?|strength\/conditioning|weight training)$/i.test(value.trim());
 }
 
 function localIsoDate() {
@@ -78,7 +79,7 @@ export default function PlanIntakeChat({ coachName }: PlanIntakeChatProps) {
   const [messages, setMessages] = useState<IntakeMessage[]>([
     {
       role: "assistant",
-      content: `Hi, I'm ${coachName}, your personal training coach. I’ll use what you tell me to build a plan that fits your goals, schedule, experience, equipment, and recovery needs. For now I can build plans for climbing, running, cycling, and strength and conditioning training. Which one would you like to train for?`,
+      content: `Hi, I'm ${coachName}, your personal training coach. I’ll use what you tell me to build a plan that fits your goals, schedule, experience, equipment, and recovery needs. Tell me what you want to train for; climbing, strength training, and strength and conditioning plans are especially well supported.`,
     },
   ]);
   const [entry, setEntry] = useState("");

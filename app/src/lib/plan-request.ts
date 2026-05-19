@@ -48,6 +48,35 @@ export type GoalType = z.infer<typeof goalTypeSchema>;
 export type PlanRequest = z.infer<typeof planRequestSchema>;
 export type PartialPlanRequest = z.infer<typeof partialPlanRequestSchema>;
 
+function countMatches(text: string, patterns: RegExp[]) {
+  return patterns.reduce((total, pattern) => total + (pattern.test(text) ? 1 : 0), 0);
+}
+
+function hasStrengthPrimarySignal(request: PlanRequest) {
+  const text = [
+    request.sport,
+    request.goalDescription,
+    request.planStructureNotes,
+    request.athleteNarrative,
+    request.motivationContext,
+    ...request.trainingFocus,
+    ...request.equipment,
+    ...request.strengthTraining.focusAreas,
+  ].filter(Boolean).join(" ");
+
+  const runningScore = countMatches(text, [
+    /\b(?:run(?:ning)?|runner|jog)\b/i,
+    /\b(?:race|marathon|half marathon|trail race|road race|5k|10k(?!\s*steps))\b/i,
+    /\b\d+(?:\.\d+)?\s*(?:mile|miles|km|kilometers?)(?!\s*(?:walk|steps))\b/i,
+  ]);
+  const strengthScore = countMatches(text, [
+    /\b(?:strength training|strength and conditioning|weight training|weightlifting|weight lifting|lifting|conditioning)\b/i,
+    /\b(?:functional strength|workout plan|work out plan|gym|planet fitness|barbell|dumbbell)\b/i,
+    /\b(?:deadlift|squat|bench|press|pull-?up|carry|carrying|holding|hypertrophy|bullet proof body)\b/i,
+  ]);
+  return request.strengthTraining.include && strengthScore > runningScore;
+}
+
 function isConversationFillerNote(note: string) {
   return /^(?:right|correct|yes|yep|yeah|ok(?:ay)?|looks good|no[,.\s]*(?:that )?(?:covers it|that's it|i think that's it)|no[,.\s]*i think that's it|i already told you\b|as i said\b|like i said\b|you already have\b)/i.test(note.trim());
 }
@@ -96,6 +125,14 @@ export function normalizePlanRequest(request: PlanRequest): PlanRequest {
     ...request,
     planStructureNotes: cleanedNotes,
   };
+
+  if (baseRequest.sport === "running" && hasStrengthPrimarySignal(baseRequest)) {
+    return {
+      ...baseRequest,
+      sport: "strength training",
+      trainingFocus: Array.from(new Set([...baseRequest.trainingFocus, "strength"])),
+    };
+  }
 
   if (!/\bclimb/i.test(baseRequest.sport)) return baseRequest;
   if (!hasRouteClimbingSignal(baseRequest)) return baseRequest;

@@ -54,6 +54,9 @@ const validWeek: WeekData = {
           duration: 60,
           exercises: [
             { name: "Limit problems", sets: "5", reps: "2", rest: "3 min", notes: "Stop before elbow pain" },
+            { name: "Project attempts", sets: "4", reps: "1", rest: "4 min", notes: "Quality only" },
+            { name: "Movement review", duration: "8 min", notes: "Find one cue" },
+            { name: "Easy mileage", duration: "10 min", notes: "Flush forearms" },
           ],
         },
       ],
@@ -71,6 +74,9 @@ const validWeek: WeekData = {
           duration: 45,
           exercises: [
             { name: "Weighted pull-ups", sets: "4", reps: "4", rest: "2 min", notes: "Smooth reps only" },
+            { name: "Ring rows", sets: "3", reps: "8", notes: "Control tempo" },
+            { name: "Dead bugs", sets: "3", reps: "8", notes: "Brace quietly" },
+            { name: "Band external rotations", sets: "2", reps: "12", notes: "Easy shoulders" },
           ],
         },
       ],
@@ -88,6 +94,9 @@ const validWeek: WeekData = {
           duration: 50,
           exercises: [
             { name: "Silent feet", duration: "15 min", notes: "Move precisely" },
+            { name: "Hover hands", duration: "10 min", notes: "Commit feet" },
+            { name: "Downclimb practice", duration: "10 min", notes: "Stay smooth" },
+            { name: "Easy mileage", duration: "10 min", notes: "Low pump" },
           ],
         },
       ],
@@ -111,7 +120,7 @@ describe("ai plan generator sequential core", () => {
         trainingDays: 3,
         restDays: 4,
         totalSessions: 3,
-        totalExercises: 3,
+        totalExercises: 12,
         totalDurationMinutes: 155,
         trainingDayPattern: [
           "Monday: Limit bouldering",
@@ -125,7 +134,18 @@ describe("ai plan generator sequential core", () => {
         focusAreas: ["Limit bouldering", "Rest", "Strength", "Technique"],
         sessionTypes: ["Limit boulders", "Pull strength", "Movement drills"],
         intensityTargets: [],
-        keyExercises: ["Limit problems", "Weighted pull-ups", "Silent feet"],
+        keyExercises: [
+          "Limit problems",
+          "Project attempts",
+          "Movement review",
+          "Easy mileage",
+          "Weighted pull-ups",
+          "Ring rows",
+          "Dead bugs",
+          "Band external rotations",
+          "Silent feet",
+          "Hover hands",
+        ],
         keyAdaptations: [],
         watchouts: [],
       },
@@ -268,6 +288,30 @@ describe("ai plan generator sequential core", () => {
     expect(validateGeneratedWeek(validWeek, 1)).toBe(validWeek);
   });
 
+  test("allows focused sessions with fewer than the preferred exercise count", () => {
+    const focusedWeek: WeekData = {
+      ...validWeek,
+      days: validWeek.days.map((day) => day.dayNum === 1
+        ? {
+            ...day,
+            sessions: [
+              {
+                name: "Main Session",
+                description: "Focused limit bouldering.",
+                duration: 45,
+                exercises: [
+                  { name: "Limit bouldering", sets: "6", reps: "1 attempt", notes: "Full rest" },
+                  { name: "Weighted pull-ups", sets: "3", reps: "3", notes: "Heavy and crisp" },
+                ],
+              },
+            ],
+          }
+        : day),
+    };
+
+    expect(validateGeneratedWeek(focusedWeek, 1)).toBe(focusedWeek);
+  });
+
   test("rejects route grades used as bouldering grades and hangs on board walls", () => {
     const badWeek: WeekData = {
       ...validWeek,
@@ -292,6 +336,8 @@ describe("ai plan generator sequential core", () => {
                     work: "5 sec hold",
                     notes: "Half crimp only",
                   },
+                  { name: "Easy mileage", duration: "10 min", notes: "Recover" },
+                  { name: "Movement review", duration: "8 min", notes: "Learn" },
                 ],
               },
             ],
@@ -319,6 +365,9 @@ describe("ai plan generator sequential core", () => {
                     grade: "moderate",
                     purpose: "Support 5.11a lead fitness without treating 5.11a as a boulder grade.",
                   },
+                  { name: "Easy route laps", sets: "3", reps: "2", notes: "Stay smooth" },
+                  { name: "Rest practice", duration: "8 min", notes: "Shake out" },
+                  { name: "Footwork review", duration: "10 min", notes: "Quiet feet" },
                 ],
               },
             ],
@@ -362,6 +411,9 @@ describe("ai plan generator sequential core", () => {
                   cues: ["Quiet feet", "Soft grip", "Quiet feet"],
                   modifications: "Use easier climbs if accuracy drops.",
                 },
+                { name: "Hover hands", duration: "10 min", notes: "Trust feet" },
+                { name: "Downclimb practice", duration: "10 min", notes: "Stay smooth" },
+                { name: "Easy mileage", duration: "10 min", notes: "Low pump" },
               ],
             },
           ],
@@ -406,6 +458,9 @@ describe("ai plan generator sequential core", () => {
                   notes: "Smooth reps",
                   purpose: "Diagnosed elbow issue treatment plan.",
                 },
+                { name: "Split squats", sets: "3", reps: "8", notes: "Controlled" },
+                { name: "Dead bugs", sets: "3", reps: "8", notes: "Brace" },
+                { name: "Band pull-aparts", sets: "2", reps: "12", notes: "Easy" },
               ],
             },
           ],
@@ -435,14 +490,20 @@ describe("ai plan generator sequential core", () => {
                 name: "Warm-up",
                 description: "Prepare for climbing.",
                 duration: 10,
-                exercises: [{ name: "Easy traversing", duration: "5 min", notes: "Stay easy" }],
+                exercises: [
+                  { name: "Easy traversing", duration: "5 min", notes: "Stay easy" },
+                  { name: "Shoulder activation", duration: "3 min", notes: "Wake up" },
+                ],
               },
               ...day.sessions,
               {
                 name: "Cooldown",
                 description: "Downshift after climbing.",
                 duration: 8,
-                exercises: [{ name: "Shoulder mobility", duration: "5 min", notes: "Relax" }],
+                exercises: [
+                  { name: "Shoulder mobility", duration: "5 min", notes: "Relax" },
+                  { name: "Forearm flush", duration: "3 min", notes: "Easy" },
+                ],
               },
             ],
           }
@@ -464,19 +525,32 @@ describe("ai plan generator sequential core", () => {
                 name: "Skill Block",
                 description: "Practice specific movement.",
                 duration: 20,
-                exercises: [{ name: "Technique practice", duration: "15 min", notes: "Stay precise" }],
+                exercises: [
+                  { name: "Technique practice", duration: "15 min", notes: "Stay precise" },
+                  { name: "Footwork drill", duration: "10 min", notes: "Quiet" },
+                  { name: "Flagging drill", duration: "8 min", notes: "Balanced" },
+                  { name: "Movement review", duration: "5 min", notes: "Learn" },
+                ],
               },
               {
                 name: "Cooldown",
                 description: "Downshift after training.",
                 duration: 8,
-                exercises: [{ name: "Easy mobility", duration: "5 min", notes: "Relax" }],
+                exercises: [
+                  { name: "Easy mobility", duration: "5 min", notes: "Relax" },
+                  { name: "Breathing reset", duration: "3 min", notes: "Downshift" },
+                ],
               },
               {
                 name: "Notes",
                 description: "Record key observations.",
                 duration: 5,
-                exercises: [{ name: "Session notes", duration: "5 min", notes: "Capture learnings" }],
+                exercises: [
+                  { name: "Session notes", duration: "5 min", notes: "Capture learnings" },
+                  { name: "Readiness rating", duration: "2 min", notes: "Score energy" },
+                  { name: "Next cue", duration: "2 min", notes: "Pick one" },
+                  { name: "Recovery note", duration: "2 min", notes: "Plan sleep" },
+                ],
               },
             ],
           }

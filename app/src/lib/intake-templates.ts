@@ -20,12 +20,12 @@ export interface IntakeTemplate {
 const sharedQuestions: IntakeQuestion[] = [
   {
     step: "sport",
-    prompt: "Let's point the plan at the right thing first. Are we training for climbing, running, cycling, or strength and conditioning?",
+    prompt: "Let's point the plan at the right thing first. What sport or training focus should this plan support?",
     isComplete: (draft) => Boolean(draft.sport),
   },
   {
     step: "goal",
-    prompt: "Good, let's give the plan a clear goal. Are you training for an event, building general fitness, improving a skill, or working toward a specific target?",
+    prompt: "Good, let's give the plan a clear direction. Is there a specific goal, event, skill, or area you want this plan to train?",
     isComplete: (draft) => Boolean(draft.goalDescription),
   },
   {
@@ -35,37 +35,37 @@ const sharedQuestions: IntakeQuestion[] = [
   },
   {
     step: "blockLength",
-    prompt: "Let's choose a useful runway. How many weeks should this block run?",
+    prompt: "That gives me the training direction. How many weeks should this block run?",
     isComplete: (draft) => Boolean(draft.blockLengthWeeks),
   },
   {
     step: "equipment",
-    prompt: "Now I can match the work to your setup. What equipment do you have available?",
+    prompt: "Good, I can match the work to your setup. What equipment do you have available?",
     isComplete: (draft) => (draft.equipment?.length ?? 0) > 0,
   },
   {
     step: "strength",
-    prompt: "Do you want strength and conditioning included, or should this stay focused on the main sport?",
+    prompt: "Got it, I can keep the main sport central. Do you want strength and conditioning included, or should this stay focused on the main sport?",
     isComplete: (draft) => draft.strengthTraining?.include !== undefined,
   },
   {
     step: "start",
-    prompt: "Let's anchor the first week. When would you like to start?",
+    prompt: "Good, I can anchor the block around that. When would you like to start?",
     isComplete: (draft) => Boolean(draft.startDate),
   },
   {
     step: "level",
-    prompt: "To set the right starting point, what is your current training level?",
+    prompt: "That gives me a useful target. What is your current experience level for this sport or activity?",
     isComplete: (draft) => Boolean(draft.currentLevel),
   },
   {
     step: "schedule",
-    prompt: "Good, now let's make it fit real life. How many days per week can you train and still recover well?",
+    prompt: "That target is clear enough to start shaping the week. How many days per week can you train and still recover well?",
     isComplete: (draft) => Boolean(draft.daysPerWeek),
   },
   {
     step: "injuries",
-    prompt: "Before I load this up, I want to keep it safe. Any injuries, pain, or movements I should account for?",
+    prompt: "That gives me the training picture. Any injuries, pain, or movements I should account for?",
     isComplete: (draft) => Boolean(draft.constraints),
   },
   {
@@ -79,21 +79,21 @@ const climbingStrengthQuestions: IntakeQuestion[] = sharedQuestions.map((questio
   if (question.step === "goal") {
     return {
       ...question,
-      prompt: "Climbing it is. What climbing goal should this plan move you toward: a route or boulder, a trip or competition, a grade, a skill, or general climbing fitness?",
+      prompt: "Climbing it is. Is there a specific goal, project, trip, grade, skill, or area you want this plan to train?",
     };
   }
 
   if (question.step === "strength") {
     return {
       ...question,
-      prompt: "Do you want strength and conditioning included, or should this stay focused on climbing?",
+      prompt: "Got it, I can keep climbing central. Do you want strength and conditioning included, or should this stay focused on climbing?",
     };
   }
 
   if (question.step === "level") {
     return {
       ...question,
-      prompt: "To pitch the sessions correctly, what is your current climbing level?",
+      prompt: "That gives me a useful climbing target. What is your current climbing level?",
     };
   }
 
@@ -131,7 +131,7 @@ const runningQuestions: IntakeQuestion[] = sharedQuestions.map((question) => {
   if (question.step === "goal") {
     return {
       ...question,
-      prompt: "Running it is. What running goal should this plan build toward: a race or distance, faster times, more weekly mileage, consistency, or general fitness?",
+      prompt: "Running it is. Is there a specific race, distance, pace, volume target, or area you want this plan to train?",
     };
   }
 
@@ -145,35 +145,35 @@ const runningQuestions: IntakeQuestion[] = sharedQuestions.map((question) => {
   if (question.step === "equipment") {
     return {
       ...question,
-      prompt: "Now I can match the plan to your setup. What running equipment or training tools do you have?",
+      prompt: "Good, I can match the running work to your setup. What running equipment or training tools do you have?",
     };
   }
 
   if (question.step === "strength") {
     return {
       ...question,
-      prompt: "Do you want strength and conditioning included, or should this stay focused on running?",
+      prompt: "Got it, I can keep running central. Do you want strength and conditioning included, or should this stay focused on running?",
     };
   }
 
   if (question.step === "level") {
     return {
       ...question,
-      prompt: "To set the right load, what is your current running level or weekly mileage?",
+      prompt: "That gives me a useful running target. What is your current running level or weekly mileage?",
     };
   }
 
   if (question.step === "schedule") {
     return {
       ...question,
-      prompt: "Good, now let's make it fit real life. How many days per week can you run or train and still recover well?",
+      prompt: "That target is clear enough to start shaping the week. How many days per week can you run or train and still recover well?",
     };
   }
 
   if (question.step === "injuries") {
     return {
       ...question,
-      prompt: "Before I load this up, I want to keep it safe. Any running injuries, pain, or movements I should account for?",
+      prompt: "That gives me the running picture. Any running injuries, pain, or movements I should account for?",
     };
   }
 
@@ -184,7 +184,7 @@ const cyclingQuestions: IntakeQuestion[] = sharedQuestions.map((question) => {
   if (question.step === "goal") {
     return {
       ...question,
-      prompt: "Cycling it is. What cycling goal should this plan support: a ride or race, longer distance, more power, consistency, or general fitness?",
+      prompt: "Cycling it is. Is there a specific ride, race, power target, distance, or area you want this plan to train?",
     };
   }
 
@@ -198,35 +198,35 @@ const cyclingQuestions: IntakeQuestion[] = sharedQuestions.map((question) => {
   if (question.step === "equipment") {
     return {
       ...question,
-      prompt: "Now I can match the plan to your setup. What bike, trainer, gym, or other tools do you have?",
+      prompt: "Good, I can match the cycling work to your setup. What bike, trainer, gym, or other tools do you have?",
     };
   }
 
   if (question.step === "strength") {
     return {
       ...question,
-      prompt: "Do you want strength and conditioning included, or should this stay focused on cycling?",
+      prompt: "Got it, I can keep cycling central. Do you want strength and conditioning included, or should this stay focused on cycling?",
     };
   }
 
   if (question.step === "level") {
     return {
       ...question,
-      prompt: "To set the right volume, what is your current cycling level or weekly riding time?",
+      prompt: "That gives me a useful cycling target. What is your current cycling level or weekly riding time?",
     };
   }
 
   if (question.step === "schedule") {
     return {
       ...question,
-      prompt: "Good, now let's make it fit real life. How many days per week can you ride or train and still recover well?",
+      prompt: "That target is clear enough to start shaping the week. How many days per week can you ride or train and still recover well?",
     };
   }
 
   if (question.step === "injuries") {
     return {
       ...question,
-      prompt: "Before I load this up, I want to keep it safe. Any cycling injuries, pain, or movements I should account for?",
+      prompt: "That gives me the cycling picture. Any cycling injuries, pain, or movements I should account for?",
     };
   }
 
@@ -237,7 +237,7 @@ const strengthTrainingQuestions: IntakeQuestion[] = sharedQuestions.map((questio
   if (question.step === "goal") {
     return {
       ...question,
-      prompt: "Strength and conditioning it is. What goal should this plan build toward: strength, muscle, conditioning, movement quality, testing numbers, or sport support?",
+      prompt: "Strength training it is. Is there a specific goal, lift, movement pattern, muscle group, or area you want this plan to train?",
     };
   }
 
@@ -251,35 +251,35 @@ const strengthTrainingQuestions: IntakeQuestion[] = sharedQuestions.map((questio
   if (question.step === "equipment") {
     return {
       ...question,
-      prompt: "Now I can match the work to your setup. What strength and conditioning equipment do you have access to?",
+      prompt: "Good, I can match the strength work to your setup. What strength training equipment do you have access to?",
     };
   }
 
   if (question.step === "strength") {
     return {
       ...question,
-      prompt: "Should this be a dedicated strength and conditioning plan, or should strength just support another activity?",
+      prompt: "Should this be a dedicated strength training plan, or should strength just support another activity?",
     };
   }
 
   if (question.step === "level") {
     return {
       ...question,
-      prompt: "To load this appropriately, what is your current strength and conditioning experience?",
+      prompt: "That gives me a useful strength target. What is your current strength training experience?",
     };
   }
 
   if (question.step === "schedule") {
     return {
       ...question,
-      prompt: "Good, now let's make it fit real life. How many days per week can you train and still recover well?",
+      prompt: "That target is clear enough to start shaping the week. How many days per week can you train and still recover well?",
     };
   }
 
   if (question.step === "injuries") {
     return {
       ...question,
-      prompt: "Before I load this up, I want to keep it safe. Any injuries, pain, or movements I should account for?",
+      prompt: "That gives me the strength training picture. Any injuries, pain, or movements I should account for?",
     };
   }
 
