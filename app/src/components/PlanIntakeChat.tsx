@@ -95,6 +95,7 @@ export default function PlanIntakeChat({ coachName }: PlanIntakeChatProps) {
   const [isPending, startTransition] = useTransition();
 
   const fieldsComplete = hasRequiredDraftFields(draft);
+  const readyToGenerate = canGeneratePlan && fieldsComplete;
   const serializedDraft = useMemo(() => JSON.stringify(draft), [draft]);
   const knownFacts = useMemo(() => draftFacts(draft), [draft]);
   const sendDisabled = !entry.trim() || isWaiting || isPending;
@@ -163,7 +164,7 @@ export default function PlanIntakeChat({ coachName }: PlanIntakeChatProps) {
           return;
         }
         setDraft(response.draft);
-        setCanGeneratePlan(response.ready);
+        setCanGeneratePlan(response.ready && isPlanIntakeReady(response.draft));
         setMessages([...request.messages, { role: "assistant", content: response.assistantMessage }]);
         scrollToLatestAndFocus();
       } catch (caught) {
@@ -264,7 +265,7 @@ export default function PlanIntakeChat({ coachName }: PlanIntakeChatProps) {
         <form action={createPlanFromIntake} className="mt-4 flex items-center justify-end gap-3">
           <input type="hidden" name="draft" value={serializedDraft} />
           <p className="text-right text-xs text-slate-500">
-            {canGeneratePlan
+            {readyToGenerate
               ? "Ready. Click the magic wand to generate your plan."
               : fieldsComplete
                 ? "Almost ready. Finish the last chat checkpoint to unlock plan creation."
@@ -273,9 +274,9 @@ export default function PlanIntakeChat({ coachName }: PlanIntakeChatProps) {
           <Button
             type="submit"
             size="icon-lg"
-            disabled={!canGeneratePlan}
-            aria-label={canGeneratePlan ? "Generate training plan" : "Generate training plan locked"}
-            title={canGeneratePlan ? "Generate training plan" : "Finish the chat first"}
+            disabled={!readyToGenerate}
+            aria-label={readyToGenerate ? "Generate training plan" : "Generate training plan locked"}
+            title={readyToGenerate ? "Generate training plan" : "Finish the chat first"}
           >
             <WandSparkles className="h-4 w-4" />
           </Button>

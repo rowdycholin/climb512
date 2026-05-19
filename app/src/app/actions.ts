@@ -37,8 +37,8 @@ import {
   validateAdjustmentProposal,
 } from "@/lib/ai-plan-adjuster";
 import {
+  getPlanIntakeReadinessIssues,
   intakeDraftToPlanRequest,
-  isPlanIntakeReady,
   parseIntakeDraftJson,
   partialIntakeDraftSchema,
   type IntakeMessage,
@@ -1561,7 +1561,13 @@ export async function createPlanFromIntake(formData: FormData) {
   if (!user) redirect("/login");
 
   const intakeDraft = partialIntakeDraftSchema.parse(JSON.parse(rawDraft));
-  if (!isPlanIntakeReady(intakeDraft)) redirect("/intake");
+  const readinessIssues = getPlanIntakeReadinessIssues(intakeDraft);
+  if (readinessIssues.length > 0) {
+    console.warn(
+      `[web] blocked guided-intake plan creation user=${session.userId} reason=not-ready issues=${JSON.stringify(readinessIssues)}`,
+    );
+    redirect("/intake");
+  }
 
   const draft = parseIntakeDraftJson(rawDraft);
   const request = intakeDraftToPlanRequest(draft);

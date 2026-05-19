@@ -402,7 +402,7 @@ function hasTrainingGoalLanguage(answer: string) {
 
 function hasSpecificTrainingRequest(answer: string) {
   return /\b(?:i\s+(?:want|need|would like)|include|add|focus on|work on|build around|program|make sure|specific(?:ally)?|session|workout|day|block|training)\b/i.test(answer)
-    && /\b(?:limit boulder|boulder(?:ing)?|board|moonboard|kilter|hangboard|finger|campus|max strength|hypertrophy|power|power endurance|endurance|aerobic|anaerobic|intervals?|tempo|conditioning|mobility|core|posterior chain|pull(?:ing)?|push(?:ing)?|squat|deadlift|bench|press|pull-?ups?|circuit|repeaters?|4x4s?|arc|zone\s*2|work capacity)\b/i.test(answer);
+    && /\b(?:limit boulder|boulder(?:ing)?|board|moonboard|kilter|hangboard|finger|campus|max strength|hypertrophy|power|power endurance|endurance|aerobic|anaerobic|cardio|intervals?|tempo|conditioning|mobility|core|posterior chain|pull(?:ing)?|push(?:ing)?|squat|deadlift|bench|press|pull-?ups?|circuit|repeaters?|4x4s?|arc|zone\s*2|work capacity)\b/i.test(answer);
 }
 
 function countMatches(text: string, patterns: RegExp[]) {
@@ -460,6 +460,61 @@ function sportGoalConflict(currentSport: string | undefined, goalText: string | 
 
 function sportGoalConflictQuestion(currentSport: string, goalSport: string) {
   return `That sounds like a ${goalSport} goal, but we started with ${currentSport}. Should I switch the plan to ${goalSport}, or keep ${currentSport} as support for that goal?`;
+}
+
+function asksForStrengthDetails(message: string) {
+  return /\bwhat kind of strength training\b/i.test(message)
+    || /\b(?:general strength|pull-ups|pulling power|legs\/core|legs and core)\b/i.test(message);
+}
+
+function asksForStrengthInclusion(message: string) {
+  return /\bdo you want strength and conditioning included\b/i.test(message)
+    || /\bshould this stay focused on (?:the main sport|climbing|running|cycling)\b/i.test(message);
+}
+
+function wantsMainSportCentral(answer: string) {
+  return /\b(?:keep|stay|focused|focus)\b.*\b(?:main sport|climb(?:ing)?|running|cycling|primary sport)\b/i.test(answer)
+    || /\b(?:main sport|climb(?:ing)?|running|cycling)\b.*\b(?:central|primary|focus|focused)\b/i.test(answer);
+}
+
+function strengthAndConditioningFocusAreas(answer: string, previousPrompt = "") {
+  const text = `${previousPrompt}\n${answer}`;
+  const areas = new Set<string>();
+
+  if (/\ball of (?:the )?above\b/i.test(answer) && asksForStrengthDetails(previousPrompt)) {
+    areas.add("general strength");
+    areas.add("pulling power");
+    areas.add("legs");
+    areas.add("core");
+  }
+
+  if (/\bgeneral strength\b/i.test(text)) areas.add("general strength");
+  if (/\b(?:pull(?:ing)?(?: power| strength)?|pull-?ups?)\b/i.test(text)) areas.add("pulling power");
+  if (/\b(?:legs?|lower body)\b/i.test(text)) areas.add("legs");
+  if (/\bcore\b/i.test(text)) areas.add("core");
+  if (/\b(?:cardio|conditioning|aerobic|zone\s*2|intervals?)\b/i.test(text)) areas.add("conditioning");
+
+  return Array.from(areas);
+}
+
+function applyStrengthAndConditioningPreference(draft: PartialIntakeDraft, answer: string, previousPrompt = "") {
+  const focusAreas = new Set([...(draft.strengthTraining?.focusAreas ?? [])]);
+  for (const area of strengthAndConditioningFocusAreas(answer, previousPrompt)) {
+    focusAreas.add(area);
+  }
+
+  draft.strengthTraining = {
+    ...draft.strengthTraining,
+    include: true,
+    focusAreas: Array.from(focusAreas),
+  };
+
+  const focus = new Set([...(draft.trainingFocus ?? []), "strength"]);
+  if (/\b(?:cardio|conditioning|aerobic|zone\s*2|intervals?)\b/i.test(answer)) {
+    focus.add("conditioning");
+  }
+  draft.trainingFocus = Array.from(focus);
+  appendPlanStructureNote(draft, answer);
 }
 
 function parseSportGoalConflictQuestion(message: string) {
@@ -621,8 +676,13 @@ function applyConversationRecoveryHints(draft: PartialIntakeDraft, input: PlanIn
     draft.constraints = { injuries: [], limitations: [], avoidExercises: [] };
   }
 
-  if (/\bstrength\b/i.test(previousPrompt) && /\b(?:yes|no|none|nope|skip|avoid|dedicated|include|strength|weights?|lifting|resistance|gym)\b/i.test(latest)) {
-    const includeStrength = !/\b(?:no|none|nope|skip|avoid)\b/i.test(latest);
+  if (asksForStrengthDetails(previousPrompt) && /\b(?:all of (?:the )?above|cardio|conditioning|general strength|pull(?:ing)?|pull-?ups?|legs?|core|strength|weights?|lifting|resistance|gym)\b/i.test(latest)) {
+    applyStrengthAndConditioningPreference(draft, latest, previousPrompt);
+  } else if (asksForStrengthInclusion(previousPrompt) && wantsMainSportCentral(latest) && draft.strengthTraining?.include === true) {
+    appendPlanStructureNote(draft, `${latest}. Keep the main sport central while including the requested strength or conditioning support.`);
+  } else if (/\bstrength\b/i.test(previousPrompt) && /\b(?:yes|no|none|nope|skip|avoid|dedicated|include|strength|weights?|lifting|resistance|gym|main sport|focused)\b/i.test(latest)) {
+    const focusesOnlyOnMainSport = wantsMainSportCentral(latest) && !/\b(?:include|add|with|plus|strength|conditioning|cardio|weights?|lifting|resistance|gym)\b/i.test(latest);
+    const includeStrength = !/\b(?:no|none|nope|skip|avoid)\b/i.test(latest) && !focusesOnlyOnMainSport;
     const focusAreas = new Set([...(draft.strengthTraining?.focusAreas ?? [])]);
     if (includeStrength) focusAreas.add(latest);
     draft.strengthTraining = {
@@ -630,9 +690,11 @@ function applyConversationRecoveryHints(draft: PartialIntakeDraft, input: PlanIn
       include: includeStrength,
       focusAreas: Array.from(focusAreas),
     };
-    const focus = new Set([...(draft.trainingFocus ?? [])]);
-    focus.add("strength");
-    draft.trainingFocus = Array.from(focus);
+    if (includeStrength) {
+      const focus = new Set([...(draft.trainingFocus ?? [])]);
+      focus.add("strength");
+      draft.trainingFocus = Array.from(focus);
+    }
   }
 
   if (/\b(?:mon|monday|tue|tues|tuesday|wed|wednesday|thu|thurs|thursday|fri|friday|sat|saturday|sun|sunday)\b/i.test(latest)) {
@@ -1690,9 +1752,17 @@ export async function continuePlanIntakeWithAiContract(input: PlanIntakeAiInput)
     const response = shouldUseModelBackedIntake()
       ? await callModelBackedIntake(hintedInput)
       : callLocalSimulatorIntake(hintedInput);
+    const mergedDraft = mergeDrafts(hintedInput.draft, response.planRequestDraft);
+    if (
+      hintedInput.draft.strengthTraining?.include === true &&
+      asksForStrengthInclusion(previousPrompt) &&
+      wantsMainSportCentral(input.userMessage)
+    ) {
+      mergedDraft.strengthTraining = hintedInput.draft.strengthTraining;
+    }
     return toIntakeResponse({
       ...response,
-      planRequestDraft: mergeDrafts(hintedInput.draft, response.planRequestDraft),
+      planRequestDraft: mergedDraft,
     });
   } catch (error) {
     const source = shouldUseModelBackedIntake() ? getPlanIntakeTransportConfig().source : "local-intake";

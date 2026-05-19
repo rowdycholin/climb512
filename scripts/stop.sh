@@ -24,7 +24,7 @@ if [ "$CLEAN" = true ]; then
   echo "-- Stopping Climb512 and removing data volume..."
   read -rp "This will delete all stored training plans and logs. Continue? [y/N] " confirm
   if [[ "$confirm" =~ ^[Yy]$ ]]; then
-    docker compose down -v
+    docker compose --profile guardrails down -v
     echo "-- Stopped and data removed."
   else
     echo "-- Aborted."
@@ -32,6 +32,6 @@ if [ "$CLEAN" = true ]; then
   fi
 else
   echo "-- Stopping Climb512 (data preserved)..."
-  docker compose down
+  docker compose --profile guardrails down
   echo "-- Stopped."
 fi

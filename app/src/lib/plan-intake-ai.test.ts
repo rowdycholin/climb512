@@ -547,6 +547,63 @@ describe("plan intake AI contract", () => {
     expect(response.planRequestDraft.trainingFocus).toContain("strength");
   });
 
+  test("captures all-of-the-above strength details and cardio as support work", async () => {
+    process.env.AI_INTAKE_MODE = "local";
+
+    const { strengthTraining: _strengthTraining, ...draftWithoutStrength } = completeDraft;
+    const response = await continuePlanIntakeWithAiContract({
+      draft: {
+        ...draftWithoutStrength,
+        trainingFocus: [],
+        finalIntakeReviewAsked: undefined,
+      },
+      userMessage: "all of the above, and add some cardio as well",
+      messages: [
+        {
+          role: "assistant",
+          content:
+            "For this block, what kind of strength training do you want included: general strength, pull-ups/pulling power, legs/core, or something else?",
+        },
+      ],
+    });
+
+    expect(response.draft.strengthTraining?.include).toBe(true);
+    expect(response.draft.strengthTraining?.focusAreas).toEqual(
+      expect.arrayContaining(["general strength", "pulling power", "legs", "core", "conditioning"]),
+    );
+    expect(response.draft.trainingFocus).toEqual(expect.arrayContaining(["strength", "conditioning"]));
+    expect(response.draft.planStructureNotes).toContain("all of the above");
+  });
+
+  test("keeps requested support strength when user says the main sport should stay central", async () => {
+    process.env.AI_INTAKE_MODE = "local";
+
+    const response = await continuePlanIntakeWithAiContract({
+      draft: {
+        ...completeDraft,
+        strengthTraining: {
+          include: true,
+          focusAreas: ["general strength", "pulling power", "conditioning"],
+        },
+        finalIntakeReviewAsked: undefined,
+      },
+      userMessage: "lets keep focused on the main sport",
+      messages: [
+        {
+          role: "assistant",
+          content:
+            "Got it, I can keep the main sport central. Do you want strength and conditioning included, or should this stay focused on the main sport?",
+        },
+      ],
+    });
+
+    expect(response.draft.strengthTraining?.include).toBe(true);
+    expect(response.draft.strengthTraining?.focusAreas).toEqual(
+      expect.arrayContaining(["general strength", "pulling power", "conditioning"]),
+    );
+    expect(response.draft.planStructureNotes).toContain("Keep the main sport central");
+  });
+
   test("ready intake responses point users to the magic wand button", async () => {
     const response = await continuePlanIntakeWithAiContract({
       draft: completeDraft,

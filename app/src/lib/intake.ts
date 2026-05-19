@@ -310,10 +310,35 @@ function hasMeaningfulGoal(draft: PartialIntakeDraft) {
 }
 
 export function isPlanIntakeReady(draft: PartialIntakeDraft) {
-  return planRequestSchema.safeParse(draft).success
-    && hasMeaningfulGoal(draft)
-    && draft.preferredWorkoutDaysAsked === true
-    && draft.finalIntakeReviewAsked === true;
+  return getPlanIntakeReadinessIssues(draft).length === 0;
+}
+
+export function getPlanIntakeReadinessIssues(draft: PartialIntakeDraft) {
+  const issues: string[] = [];
+  const planRequest = planRequestSchema.safeParse(draft);
+
+  if (!planRequest.success) {
+    issues.push(
+      ...planRequest.error.issues.map((issue) => {
+        const path = issue.path.join(".") || "planRequest";
+        return `${path}: ${issue.message}`;
+      }),
+    );
+  }
+
+  if (!hasMeaningfulGoal(draft)) {
+    issues.push("goalDescription: missing specific goal");
+  }
+
+  if (draft.preferredWorkoutDaysAsked !== true) {
+    issues.push("preferredWorkoutDaysAsked: workout day preference was not reviewed");
+  }
+
+  if (draft.finalIntakeReviewAsked !== true) {
+    issues.push("finalIntakeReviewAsked: final review checkpoint was not completed");
+  }
+
+  return issues;
 }
 
 function isReady(draft: PartialIntakeDraft) {
